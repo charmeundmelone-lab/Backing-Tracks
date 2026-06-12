@@ -37,7 +37,7 @@
     <string name="lyrics_status">%1$d Zeilen hinterlegt</string>
     <string name="lyrics_load_file">Datei laden</string>
     <string name="lyrics_edit">Bearbeiten</string>
-    <string name="lyrics_hint">ChordPro-Format: Akkorde in eckigen Klammern im Text, z. B. [G]Hello [C]darling. Läuft am Live-Screen automatisch synchron zur Abspielposition mit — Schriftgröße per Zwei-Finger-Zoom.</string>
+    <string name="lyrics_hint">Versteht ChordPro ([G]Hello [C]darling) und das Ultimate-Guitar-Format (Akkordzeile über Textzeile) — einfach kopieren und einfügen. Läuft am Live-Screen synchron zur Abspielposition mit, Schriftgröße per Zwei-Finger-Zoom.</string>
     <string name="lyrics_too_big">Datei zu groß (max. 500 kB Text)</string>
     <string name="lyrics_expand">Text als Vollbild</string>
     <string name="lyrics_collapse">Vollbild verlassen</string>

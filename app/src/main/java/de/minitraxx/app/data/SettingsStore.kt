@@ -17,6 +17,8 @@ data class AppSettings(
     val pedalPlayKey: Int = KeyEvent.KEYCODE_PAGE_DOWN,
     /** KeyCode des Pedal-Tasters für "nächster Song". */
     val pedalNextKey: Int = KeyEvent.KEYCODE_PAGE_UP,
+    /** Schriftgröße der Live-Textanzeige in sp (per Pinch-Zoom änderbar). */
+    val lyricsFontSp: Float = 18f,
 )
 
 class SettingsStore(context: Context) {
@@ -30,6 +32,7 @@ class SettingsStore(context: Context) {
             cueGain = prefs.getFloat("cueGain", 1f),
             pedalPlayKey = prefs.getInt("pedalPlayKey", KeyEvent.KEYCODE_PAGE_DOWN),
             pedalNextKey = prefs.getInt("pedalNextKey", KeyEvent.KEYCODE_PAGE_UP),
+            lyricsFontSp = prefs.getFloat("lyricsFontSp", 18f),
         )
     )
     val settings: StateFlow<AppSettings> = _settings
@@ -43,6 +46,7 @@ class SettingsStore(context: Context) {
             putFloat("cueGain", next.cueGain)
             putInt("pedalPlayKey", next.pedalPlayKey)
             putInt("pedalNextKey", next.pedalNextKey)
+            putFloat("lyricsFontSp", next.lyricsFontSp)
         }
     }
 

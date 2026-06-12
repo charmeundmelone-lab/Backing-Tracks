@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +33,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +51,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import de.minitraxx.app.R
+import de.minitraxx.app.audio.AudioImporter
 import de.minitraxx.app.data.EndAction
 import de.minitraxx.app.data.Slots
 import de.minitraxx.app.data.SongRepository
@@ -69,6 +73,26 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
     var importingSlot by remember { mutableIntStateOf(-1) }
     var pendingSlot by remember { mutableIntStateOf(-1) }
     val genericError = stringResource(R.string.import_failed)
+
+    var showLyricsEditor by remember { mutableStateOf(false) }
+    val lyricsTooBig = stringResource(R.string.lyrics_too_big)
+    val lyricsPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { it.readText() } ?: ""
+                }
+                if (text.length > 500_000) throw AudioImporter.ImportException(lyricsTooBig)
+                songWithStems?.song?.let { repo.songDao.update(it.copy(chordPro = text)) }
+            } catch (e: Exception) {
+                snackbar.showSnackbar(e.message ?: genericError)
+            }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -138,6 +162,48 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
             )
 
             Text(
+                stringResource(R.string.section_lyrics),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (data.song.chordPro.isBlank()) {
+                            stringResource(R.string.lyrics_empty)
+                        } else {
+                            stringResource(
+                                R.string.lyrics_status,
+                                data.song.chordPro.lines().size,
+                            )
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { lyricsPicker.launch(arrayOf("*/*")) }) {
+                            Text(stringResource(R.string.lyrics_load_file))
+                        }
+                        OutlinedButton(onClick = { showLyricsEditor = true }) {
+                            Text(stringResource(R.string.lyrics_edit))
+                        }
+                        if (data.song.chordPro.isNotBlank()) {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    repo.songDao.update(data.song.copy(chordPro = ""))
+                                }
+                            }) {
+                                Icon(Icons.Filled.Delete, stringResource(R.string.delete))
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.lyrics_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Text(
                 stringResource(R.string.end_action_title),
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -197,7 +263,47 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                 onGainChange = { stem, db -> scope.launch { repo.setStemGain(stem, db) } },
             )
         }
+
+        if (showLyricsEditor) {
+            LyricsEditorDialog(
+                initial = data.song.chordPro,
+                onDismiss = { showLyricsEditor = false },
+                onSave = { text ->
+                    showLyricsEditor = false
+                    scope.launch { repo.songDao.update(data.song.copy(chordPro = text)) }
+                },
+            )
+        }
     }
+}
+
+@Composable
+private fun LyricsEditorDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var value by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.section_lyrics)) },
+        text = {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { value = it },
+                modifier = Modifier.fillMaxWidth().height(360.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(value) }) { Text(stringResource(R.string.ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }
 
 @Composable

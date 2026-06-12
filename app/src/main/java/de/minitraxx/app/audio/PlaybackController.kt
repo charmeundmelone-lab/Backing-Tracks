@@ -29,6 +29,8 @@ data class QueueSong(
     val endAction: Int,
     /** Freitext-Notiz für den Live-Screen. */
     val notes: String,
+    /** ChordPro-Text für die Live-Anzeige. */
+    val chordPro: String,
 )
 
 data class PlayerState(
@@ -83,6 +85,7 @@ class PlaybackController private constructor(private val context: Context) {
                 QueueSong(
                     it.song.id, it.song.title, it.song.artist,
                     it.song.durationFrames, it.song.endAction, it.song.notes,
+                    it.song.chordPro,
                 )
             }
             if (queue.isEmpty()) {

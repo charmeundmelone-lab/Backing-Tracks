@@ -27,6 +27,8 @@ data class SongEntity(
     val endAction: Int = EndAction.LOAD_NEXT,
     /** Freitext-Notiz, wird groß am Live-Screen angezeigt (z. B. "Capo 2"). */
     val notes: String = "",
+    /** Songtext mit Akkorden im ChordPro-Format ([C]Hello [G]world …). */
+    val chordPro: String = "",
 )
 
 /**

@@ -68,6 +68,9 @@ interface SetlistDao {
     @Query("SELECT * FROM setlists WHERE id = :id")
     fun observeById(id: Long): Flow<SetlistEntity?>
 
+    @Query("SELECT * FROM setlists WHERE id = :id")
+    suspend fun getById(id: Long): SetlistEntity?
+
     @Transaction
     @Query("SELECT * FROM setlist_items WHERE setlistId = :setlistId ORDER BY position")
     fun observeItems(setlistId: Long): Flow<List<SetlistItemWithSong>>

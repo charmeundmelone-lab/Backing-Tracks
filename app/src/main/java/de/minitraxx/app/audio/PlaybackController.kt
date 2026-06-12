@@ -30,6 +30,8 @@ data class QueueSong(
 )
 
 data class PlayerState(
+    val setlistId: Long = -1,
+    val setlistName: String = "",
     val queue: List<QueueSong> = emptyList(),
     val currentIndex: Int = -1,
     val positionFrames: Long = 0,
@@ -73,6 +75,7 @@ class PlaybackController private constructor(private val context: Context) {
     /** Startet eine Live-Session mit der Setlist; lädt den Song an [startIndex] "armed". */
     fun startSetlist(setlistId: Long, startIndex: Int = 0) {
         scope.launch {
+            val setlistName = repo.setlistDao.getById(setlistId)?.name ?: ""
             val items = repo.setlistDao.getItems(setlistId)
             val queue = items.map {
                 QueueSong(
@@ -81,10 +84,16 @@ class PlaybackController private constructor(private val context: Context) {
                 )
             }
             if (queue.isEmpty()) {
-                _state.value = PlayerState(error = "Setlist ist leer")
+                _state.value = PlayerState(
+                    setlistId = setlistId, setlistName = setlistName,
+                    error = "Setlist ist leer",
+                )
                 return@launch
             }
-            _state.value = PlayerState(queue = queue)
+            NativeEngine.pause()
+            _state.value = PlayerState(
+                setlistId = setlistId, setlistName = setlistName, queue = queue,
+            )
             loadIndex(startIndex.coerceIn(queue.indices))
         }
     }

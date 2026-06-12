@@ -52,6 +52,8 @@
     <string name="next">Weiter</string>
     <string name="play_pause">Play/Pause</string>
     <string name="lock">Sperren</string>
+    <string name="choose_song">Song wählen</string>
+    <string name="switch_setlist">Setlist wechseln</string>
     <string name="unlock_hint">Zum Entsperren lange drücken</string>
 
     <string name="setting_swap">Seiten tauschen</string>

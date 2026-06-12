@@ -14,19 +14,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.minitraxx.app.R
 import de.minitraxx.app.audio.PlaybackController
+import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.util.formatFrames
 import de.minitraxx.app.util.formatRemaining
 
@@ -55,15 +66,19 @@ import de.minitraxx.app.util.formatRemaining
  * Live-Screen: großer Restzeit-Countdown, nächster Song, Play/Pause.
  * Safe-Mode "Sperre + Langdruck": gesperrt sind alle Bedienelemente außer
  * Play/Pause; entsperrt wird per Langdruck (~1,5 s) auf das Schloss.
+ * Entsperrt öffnet ein Tipp auf den Songtitel das Setlist-Sheet:
+ * Song direkt anwählen (laden + warten) oder oben die Setlist wechseln.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val context = LocalContext.current
     val controller = remember { PlaybackController.get(context) }
+    val repo = remember { SongRepository.get(context) }
     val state by controller.state.collectAsState()
 
     var locked by rememberSaveable { mutableStateOf(true) }
+    var showSongSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(setlistId, startIndex) {
         controller.startSetlist(setlistId, startIndex)
@@ -139,11 +154,25 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
 
             Spacer(Modifier.weight(1f))
 
-            Text(
-                state.currentSong?.title ?: "",
-                style = MaterialTheme.typography.headlineMedium,
-                textAlign = TextAlign.Center,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = if (locked) Modifier
+                else Modifier.clickableItem { showSongSheet = true },
+            ) {
+                Text(
+                    state.currentSong?.title ?: "",
+                    style = MaterialTheme.typography.headlineMedium,
+                    textAlign = TextAlign.Center,
+                )
+                if (!locked) {
+                    Icon(
+                        Icons.Filled.ExpandMore,
+                        stringResource(R.string.choose_song),
+                        Modifier.padding(start = 4.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             if (!state.currentSong?.artist.isNullOrBlank()) {
                 Text(
                     state.currentSong?.artist ?: "",
@@ -248,6 +277,69 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+
+    if (showSongSheet) {
+        val setlists by repo.setlistDao.observeAll().collectAsState(initial = emptyList())
+        var listMenuOpen by remember { mutableStateOf(false) }
+        ModalBottomSheet(onDismissRequest = { showSongSheet = false }) {
+            // Setlist-Wechsler — Player wird dafür nie verlassen.
+            Box {
+                ListItem(
+                    headlineContent = { Text(state.setlistName) },
+                    supportingContent = { Text(stringResource(R.string.switch_setlist)) },
+                    leadingContent = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                    trailingContent = { Icon(Icons.Filled.ExpandMore, null) },
+                    modifier = Modifier.clickableItem { listMenuOpen = true },
+                )
+                DropdownMenu(
+                    expanded = listMenuOpen,
+                    onDismissRequest = { listMenuOpen = false },
+                ) {
+                    setlists.forEach { setlist ->
+                        DropdownMenuItem(
+                            text = { Text(setlist.name) },
+                            onClick = {
+                                listMenuOpen = false
+                                if (setlist.id != state.setlistId) {
+                                    controller.startSetlist(setlist.id, 0)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            HorizontalDivider()
+            LazyColumn {
+                itemsIndexed(state.queue) { index, song ->
+                    val isCurrent = index == state.currentIndex
+                    ListItem(
+                        headlineContent = {
+                            Text(
+                                "${index + 1}.  ${song.title}",
+                                color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                        },
+                        supportingContent = { Text(formatFrames(song.durationFrames)) },
+                        trailingContent = {
+                            if (isCurrent) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        },
+                        // Manuelle Wahl: laden + warten (kein Sofortstart).
+                        modifier = Modifier.clickableItem {
+                            controller.loadIndex(index)
+                            showSongSheet = false
+                        },
+                    )
+                }
+            }
         }
     }
 }

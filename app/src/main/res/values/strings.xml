@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MiniTraxx</string>
+
+    <string name="tab_setlists">Setlisten</string>
+    <string name="tab_library">Songs</string>
+    <string name="tab_settings">Einstellungen</string>
+
+    <string name="new_setlist">Neue Setlist</string>
+    <string name="new_song">Neuer Song</string>
+    <string name="name">Name</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="delete">Löschen</string>
+    <string name="back">Zurück</string>
+    <string name="reorder">Verschieben</string>
+
+    <string name="empty_setlists">Noch keine Setlisten. Lege mit + die erste an.</string>
+    <string name="empty_library">Noch keine Songs. Lege mit + den ersten an.</string>
+    <string name="empty_setlist">Setlist ist leer. Füge oben rechts Songs hinzu.</string>
+    <string name="confirm_delete_setlist">Setlist „%1$s“ wirklich löschen?</string>
+    <string name="confirm_delete_song">Song „%1$s“ samt allen Stems wirklich löschen?</string>
+
+    <string name="add_songs">Songs hinzufügen</string>
+    <string name="start_live">Live starten</string>
+
+    <string name="song_title">Titel</string>
+    <string name="song_artist">Künstler</string>
+    <string name="song_duration">Länge: %1$s</string>
+    <string name="section_instruments">Instrument-Spuren (Bus MAIN → links)</string>
+    <string name="section_click">Click &amp; Cues (Bus CUE → rechts)</string>
+    <string name="section_click_hint">Fertige Click/Cue-Datei aus der DAW, inkl. Einzähler und Ansagen. Läuft strikt getrennt auf der Cue-Seite.</string>
+    <string name="slot_instrument">Spur %1$d</string>
+    <string name="slot_click">Click/Cue</string>
+    <string name="slot_empty">— leer —</string>
+    <string name="pick_file">Datei wählen</string>
+    <string name="replace_file">Ersetzen</string>
+    <string name="stem_gain">Gain: %1$s dB</string>
+    <string name="import_failed">Import fehlgeschlagen</string>
+
+    <string name="song_counter">%1$d / %2$d</string>
+    <string name="next_song">Als Nächstes: %1$s</string>
+    <string name="last_song">Letzter Song der Setlist</string>
+    <string name="previous">Zurück</string>
+    <string name="next">Weiter</string>
+    <string name="play_pause">Play/Pause</string>
+    <string name="lock">Sperren</string>
+    <string name="unlock_hint">Zum Entsperren lange drücken</string>
+
+    <string name="setting_swap">Seiten tauschen</string>
+    <string name="setting_swap_hint">Standard: Tracks links, Click/Cue rechts. Tauschen, falls dein Y-Kabel andersherum belegt ist.</string>
+    <string name="setting_main_gain">Tracks-Pegel (links): %1$d %%</string>
+    <string name="setting_cue_gain">Click/Cue-Pegel (rechts): %1$d %%</string>
+    <string name="routing_explainer">Routing: Alle Instrument-Spuren werden mono summiert und liegen ausschließlich auf der linken Seite, Click/Cues ausschließlich rechts. Am USB-C-Y-Splitter gehen beide Seiten getrennt ans Pult bzw. In-Ear.</string>
+
+    <string name="notification_channel">Wiedergabe</string>
+    <string name="notification_text">Live-Wiedergabe aktiv</string>
+</resources>

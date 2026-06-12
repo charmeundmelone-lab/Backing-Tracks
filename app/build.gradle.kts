@@ -27,7 +27,22 @@ android {
         }
     }
 
+    // Fester Debug-Keystore im Repo: ohne ihn signiert jeder CI-Lauf mit
+    // einem frisch generierten Schlüssel, und Updates über eine installierte
+    // App schlagen mit Signatur-Konflikt fehl.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

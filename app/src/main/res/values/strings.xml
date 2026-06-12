@@ -22,6 +22,9 @@
     <string name="confirm_delete_song">Song „%1$s“ samt allen Stems wirklich löschen?</string>
 
     <string name="add_songs">Songs hinzufügen</string>
+    <string name="create_new_song">Neuen Song anlegen</string>
+    <string name="already_in_setlist">schon in der Setlist</string>
+    <string name="edit_song">Song bearbeiten</string>
     <string name="start_live">Live starten</string>
 
     <string name="song_title">Titel</string>

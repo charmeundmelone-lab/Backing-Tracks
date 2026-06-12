@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import de.minitraxx.app.data.EndAction
 import de.minitraxx.app.data.SettingsStore
 import de.minitraxx.app.data.Slots
 import de.minitraxx.app.data.SongRepository
@@ -24,6 +25,8 @@ data class QueueSong(
     val title: String,
     val artist: String,
     val durationFrames: Long,
+    /** Siehe [de.minitraxx.app.data.EndAction]. */
+    val endAction: Int,
 )
 
 data class PlayerState(
@@ -72,7 +75,10 @@ class PlaybackController private constructor(private val context: Context) {
         scope.launch {
             val items = repo.setlistDao.getItems(setlistId)
             val queue = items.map {
-                QueueSong(it.song.id, it.song.title, it.song.artist, it.song.durationFrames)
+                QueueSong(
+                    it.song.id, it.song.title, it.song.artist,
+                    it.song.durationFrames, it.song.endAction,
+                )
             }
             if (queue.isEmpty()) {
                 _state.value = PlayerState(error = "Setlist ist leer")
@@ -83,7 +89,7 @@ class PlaybackController private constructor(private val context: Context) {
         }
     }
 
-    fun loadIndex(index: Int) {
+    fun loadIndex(index: Int, autoplay: Boolean = false) {
         val queue = _state.value.queue
         if (index !in queue.indices) return
         scope.launch {
@@ -112,6 +118,12 @@ class PlaybackController private constructor(private val context: Context) {
                 )
             } else {
                 _state.value = _state.value.copy(isLoading = false, durationFrames = frames)
+                if (autoplay) {
+                    // Medley: nächster Song läuft sofort weiter (Fokus & Service
+                    // sind aus der laufenden Wiedergabe noch aktiv).
+                    NativeEngine.play()
+                    _state.value = _state.value.copy(isPlaying = true)
+                }
             }
         }
     }
@@ -182,13 +194,23 @@ class PlaybackController private constructor(private val context: Context) {
                 val pos = NativeEngine.positionFrames()
                 val playing = NativeEngine.isPlaying()
                 if (NativeEngine.isFinished()) {
-                    // Songende: Stopp + nächsten Song laden, wartet auf Play.
-                    if (s.currentIndex + 1 in s.queue.indices) {
-                        loadIndex(s.currentIndex + 1)
-                    } else {
-                        _state.value = s.copy(isPlaying = false, positionFrames = s.durationFrames)
-                        NativeEngine.stop()
-                        PlaybackService.stop(context)
+                    // Flag sofort löschen, damit kein zweiter Tick denselben
+                    // Songwechsel noch einmal auslöst.
+                    NativeEngine.clearFinished()
+                    val endAction = s.currentSong?.endAction ?: EndAction.LOAD_NEXT
+                    val hasNext = s.currentIndex + 1 in s.queue.indices
+                    when {
+                        // Stopp: beim aktuellen Song bleiben, zurück auf Anfang.
+                        endAction == EndAction.STOP || !hasNext -> {
+                            NativeEngine.stop()
+                            _state.value = s.copy(isPlaying = false, positionFrames = 0)
+                            PlaybackService.stop(context)
+                        }
+                        // Medley: nächster Song startet sofort.
+                        endAction == EndAction.AUTOPLAY_NEXT ->
+                            loadIndex(s.currentIndex + 1, autoplay = true)
+                        // Standard: nächster Song geladen, wartet auf Play.
+                        else -> loadIndex(s.currentIndex + 1)
                     }
                 } else if (NativeEngine.hadStreamError() && s.isPlaying) {
                     _state.value = s.copy(
@@ -204,6 +226,11 @@ class PlaybackController private constructor(private val context: Context) {
     }
 
     private fun requestFocus(): Boolean {
+        // Fokus wird pro Session genau EINMAL angefordert. Ein zweiter Request
+        // mit neuem Listener würde dem ersten ein AUDIOFOCUS_LOSS zustellen —
+        // unser eigener Handler pausierte dann sofort die frisch gestartete
+        // Wiedergabe (Play-Taste "tut nichts").
+        if (focusRequest != null) return true
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -212,18 +239,22 @@ class PlaybackController private constructor(private val context: Context) {
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener { change ->
                 when (change) {
-                    AudioManager.AUDIOFOCUS_LOSS,
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                    -> {
+                    AudioManager.AUDIOFOCUS_LOSS -> {
+                        NativeEngine.pause()
+                        _state.value = _state.value.copy(isPlaying = false)
+                        abandonFocus()
+                    }
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                         NativeEngine.pause()
                         _state.value = _state.value.copy(isPlaying = false)
                     }
                 }
             }
             .build()
-        focusRequest = request
-        return audioManager.requestAudioFocus(request) ==
+        val granted = audioManager.requestAudioFocus(request) ==
             AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        focusRequest = if (granted) request else null
+        return granted
     }
 
     private fun abandonFocus() {

@@ -5,6 +5,16 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/** Verhalten am Songende — pro Song wählbar. */
+object EndAction {
+    /** Nächsten Song laden und warten (armed). */
+    const val LOAD_NEXT = 0
+    /** Nächsten Song laden und sofort abspielen (Medley). */
+    const val AUTOPLAY_NEXT = 1
+    /** Stopp — beim aktuellen Song bleiben, kein Wechsel. */
+    const val STOP = 2
+}
+
 @Entity(tableName = "songs")
 data class SongEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -13,6 +23,8 @@ data class SongEntity(
     /** Länge des längsten Stems in Frames (48 kHz). */
     val durationFrames: Long = 0,
     val createdAt: Long = System.currentTimeMillis(),
+    /** Siehe [EndAction]. */
+    val endAction: Int = EndAction.LOAD_NEXT,
 )
 
 /**

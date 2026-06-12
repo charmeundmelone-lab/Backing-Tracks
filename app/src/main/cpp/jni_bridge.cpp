@@ -96,6 +96,11 @@ Java_de_minitraxx_app_audio_NativeEngine_nativeIsFinished(JNIEnv *, jobject) {
     return AudioEngine::instance().isFinished() ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT void JNICALL
+Java_de_minitraxx_app_audio_NativeEngine_nativeClearFinished(JNIEnv *, jobject) {
+    AudioEngine::instance().clearFinished();
+}
+
 JNIEXPORT jboolean JNICALL
 Java_de_minitraxx_app_audio_NativeEngine_nativeHadStreamError(JNIEnv *, jobject) {
     return AudioEngine::instance().hadStreamError() ? JNI_TRUE : JNI_FALSE;

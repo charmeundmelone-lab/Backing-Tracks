@@ -30,6 +30,10 @@
     <string name="song_title">Titel</string>
     <string name="song_artist">Künstler</string>
     <string name="song_duration">Länge: %1$s</string>
+    <string name="end_action_title">Nach dem Song</string>
+    <string name="end_action_load_next">Nächsten Song laden und warten</string>
+    <string name="end_action_autoplay">Nächsten Song sofort abspielen</string>
+    <string name="end_action_stop">Stopp — beim Song bleiben</string>
     <string name="section_instruments">Instrument-Spuren (Bus MAIN → links)</string>
     <string name="section_click">Click &amp; Cues (Bus CUE → rechts)</string>
     <string name="section_click_hint">Fertige Click/Cue-Datei aus der DAW, inkl. Einzähler und Ansagen. Läuft strikt getrennt auf der Cue-Seite.</string>

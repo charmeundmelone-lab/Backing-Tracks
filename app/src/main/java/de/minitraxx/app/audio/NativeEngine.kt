@@ -33,6 +33,7 @@ object NativeEngine {
     fun positionFrames(): Long = nativeGetPosition()
     fun isPlaying(): Boolean = nativeIsPlaying()
     fun isFinished(): Boolean = nativeIsFinished()
+    fun clearFinished() = nativeClearFinished()
     fun hadStreamError(): Boolean = nativeHadStreamError()
     fun setBusGains(main: Float, cue: Float) = nativeSetBusGains(main, cue)
     fun setSwapSides(swap: Boolean) = nativeSetSwapSides(swap)
@@ -48,6 +49,7 @@ object NativeEngine {
     private external fun nativeGetPosition(): Long
     private external fun nativeIsPlaying(): Boolean
     private external fun nativeIsFinished(): Boolean
+    private external fun nativeClearFinished()
     private external fun nativeHadStreamError(): Boolean
     private external fun nativeSetBusGains(main: Float, cue: Float)
     private external fun nativeSetSwapSides(swap: Boolean)

@@ -45,6 +45,7 @@ public:
     int64_t position() const { return mPosition.load(std::memory_order_relaxed); }
     bool isPlaying() const { return mPlaying.load(std::memory_order_relaxed); }
     bool isFinished() const { return mFinished.load(std::memory_order_relaxed); }
+    void clearFinished() { mFinished.store(false, std::memory_order_relaxed); }
     bool hadStreamError() const { return mStreamError.load(std::memory_order_relaxed); }
 
     void setBusGains(float mainGain, float cueGain);

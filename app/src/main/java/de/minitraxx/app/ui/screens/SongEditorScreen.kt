@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -45,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import de.minitraxx.app.R
+import de.minitraxx.app.data.EndAction
 import de.minitraxx.app.data.Slots
 import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.data.StemEntity
@@ -117,6 +119,27 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
             }
 
             Text(
+                stringResource(R.string.end_action_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    EndActionOption(
+                        label = stringResource(R.string.end_action_load_next),
+                        selected = data.song.endAction == EndAction.LOAD_NEXT,
+                    ) { scope.launch { repo.songDao.update(data.song.copy(endAction = EndAction.LOAD_NEXT)) } }
+                    EndActionOption(
+                        label = stringResource(R.string.end_action_autoplay),
+                        selected = data.song.endAction == EndAction.AUTOPLAY_NEXT,
+                    ) { scope.launch { repo.songDao.update(data.song.copy(endAction = EndAction.AUTOPLAY_NEXT)) } }
+                    EndActionOption(
+                        label = stringResource(R.string.end_action_stop),
+                        selected = data.song.endAction == EndAction.STOP,
+                    ) { scope.launch { repo.songDao.update(data.song.copy(endAction = EndAction.STOP)) } }
+                }
+            }
+
+            Text(
                 stringResource(R.string.section_instruments),
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -155,6 +178,24 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                 onGainChange = { stem, db -> scope.launch { repo.setStemGain(stem, db) } },
             )
         }
+    }
+}
+
+@Composable
+private fun EndActionOption(
+    label: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickableItem(onSelect)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

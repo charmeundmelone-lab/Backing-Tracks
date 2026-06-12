@@ -1,6 +1,7 @@
 package de.minitraxx.app.data
 
 import android.content.Context
+import android.view.KeyEvent
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +13,10 @@ data class AppSettings(
     val mainGain: Float = 1f,
     /** Master-Gain Bus CUE (linear). */
     val cueGain: Float = 1f,
+    /** KeyCode des Pedal-Tasters für Play/Pause (Bluetooth-HID). */
+    val pedalPlayKey: Int = KeyEvent.KEYCODE_PAGE_DOWN,
+    /** KeyCode des Pedal-Tasters für "nächster Song". */
+    val pedalNextKey: Int = KeyEvent.KEYCODE_PAGE_UP,
 )
 
 class SettingsStore(context: Context) {
@@ -23,6 +28,8 @@ class SettingsStore(context: Context) {
             swapSides = prefs.getBoolean("swapSides", false),
             mainGain = prefs.getFloat("mainGain", 1f),
             cueGain = prefs.getFloat("cueGain", 1f),
+            pedalPlayKey = prefs.getInt("pedalPlayKey", KeyEvent.KEYCODE_PAGE_DOWN),
+            pedalNextKey = prefs.getInt("pedalNextKey", KeyEvent.KEYCODE_PAGE_UP),
         )
     )
     val settings: StateFlow<AppSettings> = _settings
@@ -34,6 +41,8 @@ class SettingsStore(context: Context) {
             putBoolean("swapSides", next.swapSides)
             putFloat("mainGain", next.mainGain)
             putFloat("cueGain", next.cueGain)
+            putInt("pedalPlayKey", next.pedalPlayKey)
+            putInt("pedalNextKey", next.pedalNextKey)
         }
     }
 

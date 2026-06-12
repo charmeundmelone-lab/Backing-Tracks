@@ -3,6 +3,7 @@ package de.minitraxx.app
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import de.minitraxx.app.audio.PedalManager
 import de.minitraxx.app.ui.screens.HomeScreen
 import de.minitraxx.app.ui.screens.LiveScreen
 import de.minitraxx.app.ui.screens.SetlistDetailScreen
@@ -33,6 +35,18 @@ class MainActivity : ComponentActivity() {
                 AppNav()
             }
         }
+    }
+
+    // Bluetooth-Pedale melden sich als Tastatur — Tastendrücke hier abfangen,
+    // damit sie unabhängig von Fokus und Display-Sperre wirken.
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (PedalManager.get(this).onKeyDown(keyCode)) return true
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (PedalManager.get(this).consumesKey(keyCode)) return true
+        return super.onKeyUp(keyCode, event)
     }
 }
 

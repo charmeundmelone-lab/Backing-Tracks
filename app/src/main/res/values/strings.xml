@@ -64,6 +64,14 @@
     <string name="setting_cue_gain">Click/Cue-Pegel (rechts): %1$d %%</string>
     <string name="routing_explainer">Routing: Alle Instrument-Spuren werden mono summiert und liegen ausschließlich auf der linken Seite, Click/Cues ausschließlich rechts. Am USB-C-Y-Splitter gehen beide Seiten getrennt ans Pult bzw. In-Ear.</string>
 
+    <string name="pedal_section">Fußschalter (Bluetooth)</string>
+    <string name="pedal_hint">Page-Turner-Pedal in den Android-Bluetooth-Einstellungen koppeln (wie Kopfhörer). Dann hier pro Taster „Anlernen“ drücken und das Pedal einmal treten — fertig. Das Pedal funktioniert auch bei gesperrtem Live-Screen.</string>
+    <string name="pedal_play_pause">Taster: Play/Pause</string>
+    <string name="pedal_next">Taster: Nächster Song</string>
+    <string name="pedal_learn">Anlernen</string>
+    <string name="pedal_waiting">Jetzt das Pedal treten …</string>
+    <string name="pedal_current_key">Aktuelle Taste: %1$s</string>
+
     <string name="notification_channel">Wiedergabe</string>
     <string name="notification_text">Live-Wiedergabe aktiv</string>
 </resources>

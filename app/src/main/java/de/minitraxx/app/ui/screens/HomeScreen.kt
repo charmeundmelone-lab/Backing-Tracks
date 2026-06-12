@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
@@ -19,12 +21,14 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -41,11 +45,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import de.minitraxx.app.R
+import de.minitraxx.app.audio.PedalAction
+import de.minitraxx.app.audio.PedalManager
 import de.minitraxx.app.data.SetlistEntity
 import de.minitraxx.app.data.SettingsStore
 import de.minitraxx.app.data.SongEntity
@@ -224,9 +231,15 @@ private fun SettingsTab(padding: PaddingValues) {
     val context = LocalContext.current
     val store = remember { SettingsStore.get(context) }
     val settings by store.settings.collectAsState()
+    val pedal = remember { PedalManager.get(context) }
+    val learnTarget by pedal.learnTarget.collectAsState()
 
     Column(
-        Modifier.fillMaxSize().padding(padding).padding(16.dp),
+        Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(
@@ -273,6 +286,68 @@ private fun SettingsTab(padding: PaddingValues) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        HorizontalDivider()
+
+        Text(
+            stringResource(R.string.pedal_section),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            stringResource(R.string.pedal_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PedalLearnRow(
+            label = stringResource(R.string.pedal_play_pause),
+            keyName = PedalManager.keyName(settings.pedalPlayKey),
+            learning = learnTarget == PedalAction.PLAY_PAUSE,
+            onLearn = {
+                if (learnTarget == PedalAction.PLAY_PAUSE) pedal.cancelLearning()
+                else pedal.startLearning(PedalAction.PLAY_PAUSE)
+            },
+        )
+        PedalLearnRow(
+            label = stringResource(R.string.pedal_next),
+            keyName = PedalManager.keyName(settings.pedalNextKey),
+            learning = learnTarget == PedalAction.NEXT,
+            onLearn = {
+                if (learnTarget == PedalAction.NEXT) pedal.cancelLearning()
+                else pedal.startLearning(PedalAction.NEXT)
+            },
+        )
+    }
+}
+
+@Composable
+private fun PedalLearnRow(
+    label: String,
+    keyName: String,
+    learning: Boolean,
+    onLearn: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (learning) stringResource(R.string.pedal_waiting)
+                else stringResource(R.string.pedal_current_key, keyName),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (learning) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(onClick = onLearn) {
+            Text(
+                stringResource(
+                    if (learning) R.string.cancel else R.string.pedal_learn
+                )
+            )
+        }
     }
 }
 

@@ -181,6 +181,17 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                 )
             }
 
+            if (!state.currentSong?.notes.isNullOrBlank()) {
+                Text(
+                    state.currentSong?.notes ?: "",
+                    Modifier.padding(top = 8.dp),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
 
             // Großer Restzeit-Countdown — Kernanzeige für die Bühne.

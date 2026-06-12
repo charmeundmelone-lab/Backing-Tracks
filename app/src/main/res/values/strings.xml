@@ -30,6 +30,8 @@
     <string name="song_title">Titel</string>
     <string name="song_artist">Künstler</string>
     <string name="song_duration">Länge: %1$s</string>
+    <string name="song_notes">Notizen</string>
+    <string name="song_notes_hint">Wird groß am Live-Screen angezeigt, z. B. „Capo 2“ oder „Intro 8 Takte“</string>
     <string name="end_action_title">Nach dem Song</string>
     <string name="end_action_load_next">Nächsten Song laden und warten</string>
     <string name="end_action_autoplay">Nächsten Song sofort abspielen</string>

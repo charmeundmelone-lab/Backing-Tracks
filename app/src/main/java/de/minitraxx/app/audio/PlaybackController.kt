@@ -27,6 +27,8 @@ data class QueueSong(
     val durationFrames: Long,
     /** Siehe [de.minitraxx.app.data.EndAction]. */
     val endAction: Int,
+    /** Freitext-Notiz für den Live-Screen. */
+    val notes: String,
 )
 
 data class PlayerState(
@@ -80,7 +82,7 @@ class PlaybackController private constructor(private val context: Context) {
             val queue = items.map {
                 QueueSong(
                     it.song.id, it.song.title, it.song.artist,
-                    it.song.durationFrames, it.song.endAction,
+                    it.song.durationFrames, it.song.endAction, it.song.notes,
                 )
             }
             if (queue.isEmpty()) {

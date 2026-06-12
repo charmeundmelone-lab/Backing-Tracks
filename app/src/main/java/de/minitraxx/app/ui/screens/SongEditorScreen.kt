@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -32,6 +33,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -117,6 +119,23 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
+
+            // Notizen mit kurzer Verzögerung automatisch speichern.
+            var notes by remember(data.song.id) { mutableStateOf(data.song.notes) }
+            LaunchedEffect(notes) {
+                if (notes != data.song.notes) {
+                    kotlinx.coroutines.delay(600)
+                    repo.songDao.update(data.song.copy(notes = notes))
+                }
+            }
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it },
+                label = { Text(stringResource(R.string.song_notes)) },
+                supportingText = { Text(stringResource(R.string.song_notes_hint)) },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             Text(
                 stringResource(R.string.end_action_title),

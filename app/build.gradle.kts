@@ -68,6 +68,8 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // PDFBox-Android bringt Apache-Lizenz-/Notice-Dateien mit.
+            excludes += "/META-INF/{DEPENDENCIES,LICENSE,LICENSE.txt,NOTICE,NOTICE.txt}"
         }
     }
 }
@@ -89,4 +91,5 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.oboe)
     implementation(libs.reorderable)
+    implementation(libs.pdfbox.android)
 }

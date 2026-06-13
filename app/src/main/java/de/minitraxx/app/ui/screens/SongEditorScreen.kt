@@ -56,6 +56,7 @@ import de.minitraxx.app.data.EndAction
 import de.minitraxx.app.data.Slots
 import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.data.StemEntity
+import de.minitraxx.app.util.PdfChordImporter
 import de.minitraxx.app.util.formatFrames
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -75,7 +76,26 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
     val genericError = stringResource(R.string.import_failed)
 
     var showLyricsEditor by remember { mutableStateOf(false) }
+    var importingPdf by remember { mutableStateOf(false) }
     val lyricsTooBig = stringResource(R.string.lyrics_too_big)
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        importingPdf = true
+        scope.launch {
+            try {
+                val cp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    PdfChordImporter.import(context, uri)
+                }
+                songWithStems?.song?.let { repo.songDao.update(it.copy(chordPro = cp)) }
+            } catch (e: Exception) {
+                snackbar.showSnackbar(e.message ?: genericError)
+            } finally {
+                importingPdf = false
+            }
+        }
+    }
     val lyricsPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -178,12 +198,23 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                         },
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { lyricsPicker.launch(arrayOf("*/*")) }) {
-                            Text(stringResource(R.string.lyrics_load_file))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (importingPdf) {
+                            CircularProgressIndicator(Modifier.padding(4.dp))
+                            Text(stringResource(R.string.lyrics_importing))
+                        } else {
+                            OutlinedButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) {
+                                Text(stringResource(R.string.lyrics_import_pdf))
+                            }
                         }
                         OutlinedButton(onClick = { showLyricsEditor = true }) {
                             Text(stringResource(R.string.lyrics_edit))
+                        }
+                        TextButton(onClick = { lyricsPicker.launch(arrayOf("*/*")) }) {
+                            Text(stringResource(R.string.lyrics_load_file))
                         }
                         if (data.song.chordPro.isNotBlank()) {
                             IconButton(onClick = {

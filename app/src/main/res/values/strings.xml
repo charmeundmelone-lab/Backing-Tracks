@@ -37,7 +37,10 @@
     <string name="lyrics_status">%1$d Zeilen hinterlegt</string>
     <string name="lyrics_load_file">Datei laden</string>
     <string name="lyrics_edit">Bearbeiten</string>
-    <string name="lyrics_hint">Versteht ChordPro ([G]Hello [C]darling) und das Ultimate-Guitar-Format (Akkordzeile über Textzeile) — einfach kopieren und einfügen. Läuft am Live-Screen synchron zur Abspielposition mit, Schriftgröße per Zwei-Finger-Zoom.</string>
+    <string name="lyrics_import_pdf">PDF importieren</string>
+    <string name="lyrics_importing">PDF wird gelesen…</string>
+    <string name="imported_song">Importierter Song</string>
+    <string name="lyrics_hint">PDF importieren (z. B. von Ultimate Guitar) oder per Teilen an MiniTraxx schicken — die Akkorde werden koordinaten-genau übernommen und verrutschen nicht. Versteht auch ChordPro und das Kopier-Format. Am Live-Screen bricht der Text sauber um und läuft synchron mit; Schriftgröße per Zwei-Finger-Zoom.</string>
     <string name="lyrics_too_big">Datei zu groß (max. 500 kB Text)</string>
     <string name="lyrics_expand">Text als Vollbild</string>
     <string name="lyrics_collapse">Vollbild verlassen</string>

@@ -8,6 +8,8 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,7 +62,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -526,29 +527,53 @@ private fun LyricsPane(
                     fontStyle = FontStyle.Italic,
                     color = MaterialTheme.colorScheme.tertiary,
                 )
-                ChordPro.Kind.LYRIC -> {
-                    if (line.chords != null) {
-                        Text(
-                            line.chords,
-                            fontSize = fontSp.sp,
-                            lineHeight = (fontSp * 1.15f).sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            softWrap = false,
-                        )
-                    }
-                    Text(
-                        line.text,
-                        fontSize = fontSp.sp,
-                        lineHeight = (fontSp * 1.3f).sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        softWrap = false,
-                    )
-                }
+                ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Rendert eine Textzeile als umbrechende Folge von „Wörtern". Jedes Wort trägt
+ * seinen Akkord direkt über der richtigen Silbe; lange Zeilen brechen sauber um
+ * (Akkorde wandern mit), statt rechts aus dem Bild zu laufen. Genau das macht
+ * große Schrift am Mikroständer lesbar.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
+    val words = remember(line) { ChordPro.toWords(line) }
+    if (words.isEmpty()) {
+        Spacer(Modifier.height((fontSp * 0.6f).dp))
+        return
+    }
+    FlowRow(
+        Modifier.fillMaxWidth().padding(vertical = (fontSp * 0.12f).dp),
+        horizontalArrangement = Arrangement.spacedBy((fontSp * 0.3f).dp),
+    ) {
+        for (word in words) {
+            Row {
+                for (piece in word) {
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(
+                            piece.chord ?: " ",
+                            fontSize = (fontSp * 0.82f).sp,
+                            lineHeight = (fontSp * 0.92f).sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                        )
+                        Text(
+                            piece.text,
+                            fontSize = fontSp.sp,
+                            lineHeight = (fontSp * 1.1f).sp,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
     }
 }

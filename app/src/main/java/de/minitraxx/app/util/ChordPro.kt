@@ -13,6 +13,80 @@ object ChordPro {
 
     data class Line(val kind: Kind, val chords: String?, val text: String)
 
+    /** Ein Akkord-mit-Silbe-Baustein für den umbruchfähigen Renderer. */
+    data class Piece(val chord: String?, val text: String)
+
+    fun isChord(token: String): Boolean = CHORD.matches(token.removeSurrounding("[", "]"))
+
+    fun isFiller(token: String): Boolean = token in FILLER
+
+    /**
+     * Zerlegt eine LYRIC-Zeile in „Wörter", die je für sich umbrechen dürfen,
+     * ohne dass ein Akkord von seiner Silbe getrennt wird. Jedes Wort ist eine
+     * Folge von [Piece]s (Akkord über Teil-Silbe). Akkorde, die über einer Lücke
+     * stehen (z. B. Instrumentalzeilen), werden zu eigenständigen Akkord-Wörtern.
+     */
+    fun toWords(line: Line): List<List<Piece>> {
+        val text = line.text
+        val chords = line.chords
+
+        val markers = ArrayList<Pair<Int, String>>()
+        if (chords != null) {
+            var i = 0
+            while (i < chords.length) {
+                if (chords[i] != ' ') {
+                    val start = i
+                    while (i < chords.length && chords[i] != ' ') i++
+                    markers.add(start to chords.substring(start, i))
+                } else i++
+            }
+        }
+
+        data class W(val start: Int, val end: Int)
+        val textWords = ArrayList<W>()
+        run {
+            var i = 0
+            while (i < text.length) {
+                if (text[i] != ' ') {
+                    val start = i
+                    while (i < text.length && text[i] != ' ') i++
+                    textWords.add(W(start, i))
+                } else i++
+            }
+        }
+
+        val used = BooleanArray(markers.size)
+        val result = ArrayList<Pair<Int, List<Piece>>>()
+        for (w in textWords) {
+            val inWord = ArrayList<Pair<Int, String>>()
+            for ((mi, m) in markers.withIndex()) {
+                if (!used[mi] && m.first >= w.start && m.first < w.end) {
+                    inWord.add(m); used[mi] = true
+                }
+            }
+            val pieces = ArrayList<Piece>()
+            if (inWord.isEmpty()) {
+                pieces.add(Piece(null, text.substring(w.start, w.end)))
+            } else {
+                inWord.sortBy { it.first }
+                if (inWord.first().first > w.start) {
+                    pieces.add(Piece(null, text.substring(w.start, inWord.first().first)))
+                }
+                for (k in inWord.indices) {
+                    val from = inWord[k].first
+                    val to = if (k + 1 < inWord.size) inWord[k + 1].first else w.end
+                    pieces.add(Piece(inWord[k].second, text.substring(from, to)))
+                }
+            }
+            result.add(w.start to pieces)
+        }
+        for ((mi, m) in markers.withIndex()) {
+            if (!used[mi]) result.add(m.first to listOf(Piece(m.second, "")))
+        }
+        result.sortBy { it.first }
+        return result.map { it.second }
+    }
+
     /** Erkennt einen einzelnen Akkordnamen wie Em7, Dsus4, Cadd9, D/F#. */
     private val CHORD = Regex(
         "^\\(?[A-G][#b]?(?:maj|min|mi|m|M|sus|dim|aug|add|[0-9]|[#b()+°-])*" +

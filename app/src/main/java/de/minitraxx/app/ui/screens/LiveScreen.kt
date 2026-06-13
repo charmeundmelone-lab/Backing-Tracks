@@ -803,8 +803,8 @@ private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
                         Text(
                             piece.chord ?: " ",
                             fontSize = (fontSp * 0.82f).sp,
-                            lineHeight = (fontSp * 0.92f).sp,
-                            fontWeight = FontWeight.Bold,
+                            lineHeight = (fontSp * 0.68f).sp,
+                            fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
                         )

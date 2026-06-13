@@ -118,7 +118,21 @@ object PdfChordImporter {
                         appendLine(out, chordOnly(tokens))
                     }
                 }
-                else -> appendLine(out, reconstructText(line))
+                else -> {
+                    // Manche UG-PDFs liefern Akkordzeile NACH der Lyrik (umgekehrte Y-Reihenfolge).
+                    val next = lines.getOrNull(i + 1)
+                    val nextTokens = next?.let { tokenize(it) }
+                    if (next != null && nextTokens != null &&
+                        isChordTokens(nextTokens) && !isTabLine(nextTokens)
+                    ) {
+                        appendLine(out, mergeChordLyric(nextTokens, line))
+                        prevY = next.first().y
+                        i += 2
+                        continue
+                    } else {
+                        appendLine(out, reconstructText(line))
+                    }
+                }
             }
             i++
         }

@@ -126,15 +126,22 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val onSyncTap: () -> Unit = {
         if (isSyncMode && syncTaps.size < sections.size) {
             val posMs = state.positionFrames * 1000L / 48_000L
-            syncTaps = syncTaps + posMs
+            val newTaps = syncTaps + posMs
+            if (newTaps.size >= sections.size) {
+                // Letzter Tipp: sofort speichern und Modus beenden.
+                val songId = state.currentSong?.songId
+                if (songId != null) {
+                    controller.saveSyncData(songId, newTaps.joinToString(" "))
+                }
+                isSyncMode = false
+                syncTaps = emptyList()
+            } else {
+                syncTaps = newTaps
+            }
         }
     }
 
-    val onFinishSync: () -> Unit = {
-        val songId = state.currentSong?.songId
-        if (syncTaps.isNotEmpty() && songId != null) {
-            controller.saveSyncData(songId, syncTaps.joinToString(" "))
-        }
+    val onCancelSync: () -> Unit = {
         isSyncMode = false
         syncTaps = emptyList()
     }
@@ -169,27 +176,18 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     @Composable
     fun SyncTapButton() {
         if (!isSyncMode) return
-        val allDone = syncTaps.size >= sections.size
         Box(
             Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
-                .background(
-                    if (allDone) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.errorContainer,
-                    RoundedCornerShape(12.dp),
-                )
-                .then(if (!allDone) Modifier.clickable(onClick = onSyncTap) else Modifier)
+                .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+                .clickable(onClick = onSyncTap)
                 .padding(16.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                if (allDone)
-                    "Fertig — tippe ✓ zum Speichern"
-                else
-                    "TIPPE HIER  •  ${sections.getOrElse(syncTaps.size) { "" }}  •  ${syncTaps.size}/${sections.size}",
-                color = if (allDone) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onErrorContainer,
+                "TIPPE HIER  •  ${sections.getOrElse(syncTaps.size) { "" }}  •  ${syncTaps.size + 1}/${sections.size}",
+                color = MaterialTheme.colorScheme.onErrorContainer,
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
             )
@@ -211,7 +209,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                 .combinedClickable(
                     enabled = enabled,
                     onClick = {
-                        if (isSyncMode) onFinishSync()
+                        if (isSyncMode) onCancelSync()
                         else {
                             syncTaps = emptyList()
                             isSyncMode = true

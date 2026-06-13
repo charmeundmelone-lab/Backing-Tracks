@@ -1,5 +1,24 @@
 # MiniTraxx — Projektkontext für Claude
 
+## Kontext-Monitoring (WICHTIG — immer beachten)
+
+Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind
+(`totalTokensReminder: countdown`). Handle danach:
+
+- **< 40.000 Tokens übrig:** Sag dem User aktiv: "Kontext läuft voll —
+  bitte starte nach diesem Task eine neue Session. CLAUDE.md enthält alles
+  was du brauchst."
+- **< 20.000 Tokens übrig:** Sofort stoppen, nichts mehr implementieren.
+  Stattdessen: aktuellen Stand committen & pushen, dann dem User sagen er
+  soll jetzt eine neue Session starten.
+
+**Nahtloser Session-Übergang:**
+1. Alle Änderungen committen & auf `claude/kind-hawking-h4833c` pushen
+2. User sagt Claude in neuer Session: *"Lies CLAUDE.md und mach weiter."*
+3. Neue Claude-Instanz liest CLAUDE.md → hat vollen Kontext → kein Warmup nötig
+
+---
+
 ## Überblick
 
 Android-App für Musiker: spielt mehrkanalige Backing-Tracks (Stems) ab,

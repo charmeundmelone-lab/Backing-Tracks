@@ -1,3 +1,6 @@
 {
-  "model": "claude-opus-4-8"
+  "model": "claude-opus-4-8",
+  "autoCompactEnabled": true,
+  "alwaysThinkingEnabled": true,
+  "totalTokensReminder": "countdown"
 }

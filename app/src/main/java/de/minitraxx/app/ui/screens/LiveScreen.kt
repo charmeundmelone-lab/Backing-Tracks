@@ -818,14 +818,16 @@ private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
                                 softWrap = false,
                             )
                         }
-                        Text(
-                            piece.text.ifEmpty { " " },
-                            fontSize = fontSp.sp,
-                            lineHeight = (fontSp * 1.18f).sp,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
+                        if (piece.text.isNotEmpty()) {
+                            Text(
+                                piece.text,
+                                fontSize = fontSp.sp,
+                                lineHeight = (fontSp * 1.18f).sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
             }

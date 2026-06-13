@@ -80,17 +80,18 @@ object ChordPro {
             }
             result.add(w.start to pieces)
         }
-        // Gap-Akkorde (über Leerraum, z.B. Auftakt-Akkord vor eingerücktem Wort):
-        // dem direkt folgenden Wort als führender Akkord über die erste Silbe
-        // setzen — statt freischwebend. Songbuch-Konvention, deutlich lesbarer.
-        // Nur wenn dieses Wort dort noch keinen Akkord trägt; sonst freistehend.
+        // Gap-Akkorde: Akkord über Leerraum oder vor eingerücktem Wort dem
+        // nächstgelegenen Wort (nach absolutem Abstand) zuordnen — deutlich
+        // robuster als "nächstes Wort nach Position", weil es auch mit
+        // Einrückungen und unterschiedlichen Spaltenversätzen zwischen Akkord-
+        // und Textzeile umgeht.
         val standalone = ArrayList<Pair<Int, String>>()
         for ((mi, m) in markers.withIndex()) {
             if (used[mi]) continue
-            val nextWord = result.filter { it.first > m.first }.minByOrNull { it.first }
-            val firstPiece = nextWord?.second?.firstOrNull()
-            if (nextWord != null && firstPiece != null && firstPiece.chord == null) {
-                nextWord.second[0] = Piece(m.second, firstPiece.text)
+            val nearestWord = result.minByOrNull { kotlin.math.abs(it.first - m.first) }
+            val firstPiece = nearestWord?.second?.firstOrNull()
+            if (nearestWord != null && firstPiece != null && firstPiece.chord == null) {
+                nearestWord.second[0] = Piece(m.second, firstPiece.text)
                 used[mi] = true
             } else {
                 standalone.add(m)

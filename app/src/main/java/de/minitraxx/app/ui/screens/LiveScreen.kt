@@ -688,26 +688,23 @@ private fun LyricsPane(
         }
     }
 
-    // Sektionsbasiertes Scrollen: NativeEngine direkt pollen — kein Umweg
-    // über Compose-State oder Flow-Machinery.
-    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isPlaying) {
-        if (!isPlaying || syncTimestamps.isEmpty()) return@LaunchedEffect
+    // Sektionsbasiertes Scrollen: NativeEngine direkt pollen.
+    // isPlaying ist KEIN Key — ein kurzes Flackern des isPlaying-Flags
+    // würde den LaunchedEffect neu starten, lastSection auf -1 zurücksetzen
+    // und die Schleife immer wieder bei Sektion 0 festhalten.
+    // isSyncMode als Key: beim Sync-Modus-Wechsel frischer Capture.
+    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode) {
+        if (syncTimestamps.isEmpty() || isSyncMode) return@LaunchedEffect
         var lastSection = -1
         while (true) {
-            val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-            if (!isSyncMode) {
-                val target = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs - SCROLL_LEAD_MS }
-                if (target != lastSection) {
-                    lastSection = target
-                    if (target < 0) {
-                        lazyState.animateScrollToItem(0)
-                    } else {
-                        val itemIdx = sectionToItemIndex[target]
-                        if (itemIdx != null) lazyState.animateScrollToItem(itemIdx)
-                    }
-                }
-            }
             delay(150)
+            val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
+            val target = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs - SCROLL_LEAD_MS }
+            if (target != lastSection) {
+                lastSection = target
+                val itemIdx = if (target < 0) 0 else (sectionToItemIndex[target] ?: 0)
+                lazyState.scrollToItem(itemIdx)
+            }
         }
     }
 

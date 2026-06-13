@@ -227,12 +227,13 @@ object PdfChordImporter {
             if (lyric[i].x - (lyric[i - 1].x + lyric[i - 1].w) > spaceGap) wordStarts.add(i)
         }
 
-        // Jeden Akkord zum ersten Wortanfang snappen, dessen X >= chord.startX - halfChar.
-        // halfChar-Lookahead: UG-Akkorde stehen oft minimal rechts vom Silbenanfang.
+        // Jeden Akkord zum NÄCHSTEN Wortanfang snappen (minimaler Abstand zur chord.startX).
+        // minByOrNull: Akkord geht zu dem Wortanfang, der räumlich am nächsten liegt —
+        // das entspricht am ehesten dem Visuellen in der Original-PDF.
         val chordAt = mutableMapOf<Int, MutableList<String>>()
         for (chord in chords) {
-            val snapX = chord.startX - halfChar
-            val targetIdx = wordStarts.firstOrNull { lyric[it].x >= snapX } ?: lyric.size
+            val targetIdx = wordStarts.minByOrNull { kotlin.math.abs(lyric[it].x - chord.startX) }
+                ?: lyric.size
             chordAt.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
         }
 

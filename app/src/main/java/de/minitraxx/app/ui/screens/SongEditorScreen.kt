@@ -75,6 +75,7 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
     val genericError = stringResource(R.string.import_failed)
 
     var showLyricsEditor by remember { mutableStateOf(false) }
+    var showChordEditor by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
 
     // Egal über welchen Knopf: PDFs werden immer durch den Parser geschickt,
@@ -201,6 +202,11 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                         OutlinedButton(onClick = { showLyricsEditor = true }) {
                             Text(stringResource(R.string.lyrics_edit))
                         }
+                        if (data.song.chordPro.contains('[')) {
+                            OutlinedButton(onClick = { showChordEditor = true }) {
+                                Text("Akkorde ← →")
+                            }
+                        }
                         TextButton(onClick = { lyricsPicker.launch(arrayOf("*/*")) }) {
                             Text(stringResource(R.string.lyrics_load_file))
                         }
@@ -289,6 +295,16 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                 onDismiss = { showLyricsEditor = false },
                 onSave = { text ->
                     showLyricsEditor = false
+                    scope.launch { repo.songDao.update(data.song.copy(chordPro = text)) }
+                },
+            )
+        }
+        if (showChordEditor) {
+            ChordEditorDialog(
+                initialChordPro = data.song.chordPro,
+                onDismiss = { showChordEditor = false },
+                onSave = { text ->
+                    showChordEditor = false
                     scope.launch { repo.songDao.update(data.song.copy(chordPro = text)) }
                 },
             )

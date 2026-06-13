@@ -689,22 +689,33 @@ private fun LyricsPane(
         }
     }
 
-    // Sektionsbasiertes Scrollen: NativeEngine direkt pollen.
-    // isPlaying ist KEIN Key — ein kurzes Flackern des isPlaying-Flags
-    // würde den LaunchedEffect neu starten, lastSection auf -1 zurücksetzen
-    // und die Schleife immer wieder bei Sektion 0 festhalten.
-    // isSyncMode als Key: beim Sync-Modus-Wechsel frischer Capture.
-    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode) {
-        if (syncTimestamps.isEmpty() || isSyncMode) return@LaunchedEffect
-        var lastSection = -1
+    // Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
+    // Zwischen zwei Timestamps wird linear durch die Zeilen der Sektion gescrollt.
+    // durationFrames als Key: LaunchedEffect startet neu sobald Song geladen ist.
+    // isPlaying ist KEIN Key — kurzes Flackern würde lastTargetItem resetten.
+    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
+        if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
+        val durationMs = durationFrames * 1000L / 48_000L
+        var lastTargetItem = -1
         while (true) {
-            delay(150)
+            delay(100)
             val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-            val target = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs - SCROLL_LEAD_MS }
-            if (target != lastSection) {
-                lastSection = target
-                val itemIdx = if (target < 0) 0 else (sectionToItemIndex[target] ?: 0)
-                lazyState.scrollToItem(itemIdx)
+            val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
+            val targetItem = if (sec < 0) {
+                0
+            } else {
+                val secStart = syncTimestamps[sec]
+                val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
+                val firstItem = sectionToItemIndex[sec] ?: 0
+                val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
+                val t = if (secEnd > secStart)
+                    ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
+                else 0.0
+                (firstItem + (nextFirst - firstItem) * t).toInt()
+            }
+            if (targetItem != lastTargetItem) {
+                lastTargetItem = targetItem
+                lazyState.scrollToItem(targetItem)
             }
         }
     }

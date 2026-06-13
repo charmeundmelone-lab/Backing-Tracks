@@ -101,7 +101,7 @@ object PdfChordImporter {
 
             val tokens = tokenize(line)
             when {
-                isSectionHeader(tokens) -> appendLine(out, "{c: ${sectionText(tokens)}}")
+                isSectionHeader(tokens) -> appendLine(out, "{section: ${sectionText(tokens)}}")
                 isChordTokens(tokens) -> {
                     val next = lines.getOrNull(i + 1)
                     val nextTokens = next?.let { tokenize(it) }

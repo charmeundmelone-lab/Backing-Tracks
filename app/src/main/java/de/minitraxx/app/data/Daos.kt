@@ -58,6 +58,9 @@ interface SongDao {
 
     @Query("UPDATE songs SET durationFrames = :frames WHERE id = :songId")
     suspend fun updateDuration(songId: Long, frames: Long)
+
+    @Query("UPDATE songs SET syncData = :data WHERE id = :songId")
+    suspend fun updateSyncData(songId: Long, data: String)
 }
 
 @Dao

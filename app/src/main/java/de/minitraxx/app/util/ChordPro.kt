@@ -9,7 +9,7 @@ package de.minitraxx.app.util
  */
 object ChordPro {
 
-    enum class Kind { LYRIC, COMMENT, EMPTY }
+    enum class Kind { LYRIC, COMMENT, SECTION, EMPTY }
 
     data class Line(val kind: Kind, val chords: String?, val text: String)
 
@@ -139,6 +139,7 @@ object ChordPro {
                         out.add(Line(Kind.COMMENT, null, value))
                     "start_of_chorus", "soc" -> out.add(Line(Kind.COMMENT, null, "— Refrain —"))
                     "start_of_bridge", "sob" -> out.add(Line(Kind.COMMENT, null, "— Bridge —"))
+                    "section" -> out.add(Line(Kind.SECTION, null, value))
                     // title/artist/tempo/key etc. bewusst ausgeblendet
                 }
                 continue

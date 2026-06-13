@@ -1,8 +1,11 @@
 package de.minitraxx.app.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +29,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Adjust
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -45,6 +50,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,13 +58,18 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -74,16 +85,19 @@ import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.util.ChordPro
 import de.minitraxx.app.util.formatFrames
 import de.minitraxx.app.util.formatRemaining
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+
+private const val SCROLL_LEAD_MS = 600L
 
 /**
  * Live-Screen: großer Restzeit-Countdown, nächster Song, Play/Pause.
  * Safe-Mode "Sperre + Langdruck": gesperrt sind alle Bedienelemente außer
  * Play/Pause; entsperrt wird per Langdruck (~1,5 s) auf das Schloss.
  *
- * Hat der Song ChordPro-Text, läuft er positionsgekoppelt mit: Die
- * Scrollposition wird direkt aus der Abspielposition berechnet — es gibt
- * keine Scroll-Geschwindigkeit, die man einstellen müsste. Vollbild-Modus
- * und Pinch-Zoom für die Schriftgröße inklusive.
+ * Hat der Song ChordPro-Text mit {section:}-Markern und gespeicherte
+ * Tap-Once-Sync-Daten, scrollt die Anzeige sektionsgenau mit der Musik —
+ * kein Slider, keine Geschwindigkeit, nur einmal Tippen im Sync-Modus.
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -94,18 +108,56 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val store = remember { SettingsStore.get(context) }
     val state by controller.state.collectAsState()
     val settings by store.settings.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     var locked by rememberSaveable { mutableStateOf(true) }
     var showSongSheet by remember { mutableStateOf(false) }
     var lyricsFullscreen by rememberSaveable { mutableStateOf(false) }
+    var isSyncMode by remember { mutableStateOf(false) }
+    var syncTaps by remember { mutableStateOf(listOf<Long>()) }
+    var showOffsetSheet by remember { mutableStateOf(false) }
 
     val hasLyrics = !state.currentSong?.chordPro.isNullOrBlank()
+
+    val sections = remember(state.currentSong?.chordPro) {
+        ChordPro.parse(state.currentSong?.chordPro ?: "")
+            .filter { it.kind == ChordPro.Kind.SECTION }
+            .map { it.text }
+    }
+    val hasSections = sections.isNotEmpty()
+
+    val onSyncTap: () -> Unit = {
+        if (isSyncMode && syncTaps.size < sections.size) {
+            val posMs = state.positionFrames * 1000L / 48_000L
+            syncTaps = syncTaps + posMs
+        }
+    }
+
+    val onFinishSync: () -> Unit = {
+        val songId = state.currentSong?.songId
+        if (syncTaps.isNotEmpty() && songId != null) {
+            val data = syncTaps.joinToString(" ")
+            coroutineScope.launch {
+                repo.songDao.updateSyncData(songId, data)
+                controller.updateSyncData(songId, data)
+            }
+        }
+        isSyncMode = false
+        syncTaps = emptyList()
+    }
 
     LaunchedEffect(setlistId, startIndex) {
         controller.startSetlist(setlistId, startIndex)
     }
 
-    // Display darf auf der Bühne nie ausgehen.
+    // Sync-Modus bei Songwechsel beenden.
+    LaunchedEffect(state.currentSong?.songId) {
+        if (isSyncMode) {
+            isSyncMode = false
+            syncTaps = emptyList()
+        }
+    }
+
     val view = LocalView.current
     DisposableEffect(Unit) {
         view.keepScreenOn = true
@@ -115,16 +167,47 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
         }
     }
 
-    // Zurück-Geste im gesperrten Zustand schlucken.
     BackHandler(enabled = locked) {}
 
     val onFontScale: (Float) -> Unit = { zoom ->
         store.update { it.copy(lyricsFontSp = (it.lyricsFontSp * zoom).coerceIn(10f, 40f)) }
     }
 
+    @Composable
+    fun SyncButton(enabled: Boolean) {
+        if (!hasSections) return
+        val syncColor = when {
+            !enabled -> MaterialTheme.colorScheme.surfaceVariant
+            isSyncMode -> MaterialTheme.colorScheme.error
+            !state.currentSong?.syncData.isNullOrBlank() -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onBackground
+        }
+        Box(
+            Modifier
+                .size(48.dp)
+                .combinedClickable(
+                    enabled = enabled,
+                    onClick = {
+                        if (isSyncMode) onFinishSync()
+                        else {
+                            syncTaps = emptyList()
+                            isSyncMode = true
+                        }
+                    },
+                    onLongClick = { showOffsetSheet = true },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (isSyncMode) Icons.Filled.Check else Icons.Filled.Adjust,
+                "Tap-Sync",
+                tint = syncColor,
+            )
+        }
+    }
+
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (hasLyrics && lyricsFullscreen) {
-            // ===== Vollbild-Textansicht =====
             Column(Modifier.fillMaxSize().padding(16.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { lyricsFullscreen = false }, enabled = !locked) {
@@ -135,6 +218,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                             else MaterialTheme.colorScheme.onBackground,
                         )
                     }
+                    SyncButton(enabled = !locked)
                     Spacer(Modifier.weight(1f))
                     Text(
                         formatRemaining(state.positionFrames, state.durationFrames),
@@ -146,11 +230,18 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                 }
                 LyricsPane(
                     chordPro = state.currentSong?.chordPro ?: "",
+                    syncData = state.currentSong?.syncData ?: "",
+                    syncOffsetMs = settings.syncOffsetMs,
+                    isSyncMode = isSyncMode,
+                    syncTapIndex = syncTaps.size,
+                    totalSections = sections.size,
+                    nextSectionName = sections.getOrNull(syncTaps.size) ?: "",
+                    onSyncTap = onSyncTap,
                     fontSp = settings.lyricsFontSp,
                     positionFrames = state.positionFrames,
                     durationFrames = state.durationFrames,
                     isPlaying = state.isPlaying,
-                    allowGestures = !locked,
+                    allowGestures = !locked && !isSyncMode,
                     onFontScale = onFontScale,
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp),
                 )
@@ -173,7 +264,6 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                 }
             }
         } else {
-            // ===== Normale Player-Ansicht =====
             Column(
                 Modifier.fillMaxSize().padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -199,6 +289,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                                 else MaterialTheme.colorScheme.onBackground,
                             )
                         }
+                        SyncButton(enabled = !locked)
                     }
                     Spacer(Modifier.weight(1f))
                     Text(
@@ -260,7 +351,6 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                     else MaterialTheme.colorScheme.primary
 
                 if (hasLyrics) {
-                    // Text in der Mitte, Countdown kompakt darüber.
                     Text(
                         formatRemaining(state.positionFrames, state.durationFrames),
                         fontSize = 44.sp,
@@ -268,11 +358,18 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                     )
                     LyricsPane(
                         chordPro = state.currentSong?.chordPro ?: "",
+                        syncData = state.currentSong?.syncData ?: "",
+                        syncOffsetMs = settings.syncOffsetMs,
+                        isSyncMode = isSyncMode,
+                        syncTapIndex = syncTaps.size,
+                        totalSections = sections.size,
+                        nextSectionName = sections.getOrNull(syncTaps.size) ?: "",
+                        onSyncTap = onSyncTap,
                         fontSp = settings.lyricsFontSp,
                         positionFrames = state.positionFrames,
                         durationFrames = state.durationFrames,
                         isPlaying = state.isPlaying,
-                        allowGestures = !locked,
+                        allowGestures = !locked && !isSyncMode,
                         onFontScale = onFontScale,
                         modifier = Modifier
                             .weight(1f)
@@ -367,7 +464,6 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
         val setlists by repo.setlistDao.observeAll().collectAsState(initial = emptyList())
         var listMenuOpen by remember { mutableStateOf(false) }
         ModalBottomSheet(onDismissRequest = { showSongSheet = false }) {
-            // Setlist-Wechsler — Player wird dafür nie verlassen.
             Box {
                 ListItem(
                     headlineContent = { Text(state.setlistName) },
@@ -415,13 +511,36 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                                 )
                             }
                         },
-                        // Manuelle Wahl: laden + warten (kein Sofortstart).
                         modifier = Modifier.clickableItem {
                             controller.loadIndex(index)
                             showSongSheet = false
                         },
                     )
                 }
+            }
+        }
+    }
+
+    if (showOffsetSheet) {
+        ModalBottomSheet(onDismissRequest = { showOffsetSheet = false }) {
+            Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
+                Text(
+                    "Reaktionszeit-Ausgleich: ${settings.syncOffsetMs} ms",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Slider(
+                    value = settings.syncOffsetMs.toFloat(),
+                    onValueChange = { store.update { s -> s.copy(syncOffsetMs = it.roundToInt()) } },
+                    valueRange = 0f..500f,
+                    steps = 9,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                )
+                Text(
+                    "Tippst du etwas nach dem Sektionswechsel? Erhöhe den Wert. " +
+                        "Standard: 200 ms. Gilt für alle Songs.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -455,7 +574,6 @@ private fun LockButton(locked: Boolean, onLock: () -> Unit, onUnlock: () -> Unit
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlayPauseButton(isPlaying: Boolean, size: Int, onClick: () -> Unit) {
-    // Play/Pause bleibt auch im gesperrten Zustand bedienbar.
     Box(
         Modifier
             .size(size.dp)
@@ -473,13 +591,26 @@ private fun PlayPauseButton(isPlaying: Boolean, size: Int, onClick: () -> Unit) 
 }
 
 /**
- * Positionsgekoppelte Textanzeige: Scrollposition = Abspielposition.
- * Keine Geschwindigkeit einzustellen — Pause hält an, Sprünge springen mit,
- * und der Text endet exakt mit dem Song. Pausiert darf frei gescrollt werden.
+ * Textanzeige mit zwei Scroll-Modi:
+ *
+ * – Ohne Sync-Daten: lineare Positionskopplung (wie bisher).
+ * – Mit Sync-Daten: sektionsbasiertes Scrollen — scrollt 600 ms vor jedem
+ *   Sektionswechsel sanft zum nächsten Abschnitt, korrigiert um den
+ *   gespeicherten Reaktionszeit-Ausgleich.
+ *
+ * Im Sync-Modus zeigt die Pane ein Banner mit dem nächsten Abschnitt und
+ * reagiert auf Taps, ohne den normalen Scroll zu unterbrechen.
  */
 @Composable
 private fun LyricsPane(
     chordPro: String,
+    syncData: String,
+    syncOffsetMs: Int,
+    isSyncMode: Boolean,
+    syncTapIndex: Int,
+    totalSections: Int,
+    nextSectionName: String,
+    onSyncTap: () -> Unit,
     fontSp: Float,
     positionFrames: Long,
     durationFrames: Long,
@@ -491,54 +622,180 @@ private fun LyricsPane(
     val lines = remember(chordPro) { ChordPro.parse(chordPro) }
     val scroll = rememberScrollState()
 
+    val syncTimestamps = remember(syncData) {
+        syncData.trim().split(" ").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
+    }
+
+    // lineIndex → sectionIndex (nur für Kind.SECTION-Zeilen)
+    val lineToSectionIndex: Map<Int, Int> = remember(lines) {
+        var si = 0
+        buildMap {
+            lines.forEachIndexed { idx, line ->
+                if (line.kind == ChordPro.Kind.SECTION) put(idx, si++)
+            }
+        }
+    }
+
+    // Pixel-Y-Offset jeder Sektion innerhalb des scrollbaren Inhalts.
+    val sectionOffsets: SnapshotStateMap<Int, Int> = remember(chordPro) {
+        androidx.compose.runtime.mutableStateMapOf()
+    }
+
+    // Welche Sektion gerade gespielt wird (für Hervorhebung).
+    val currentPlaySection = remember(positionFrames, syncTimestamps, syncOffsetMs) {
+        if (syncTimestamps.isEmpty()) -1
+        else {
+            val posMs = positionFrames * 1000L / 48_000L
+            syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs }
+        }
+    }
+
+    // Welche Sektion als nächstes gescrollt werden soll (mit Vorlauf).
+    val scrollTargetSection = remember(positionFrames, syncTimestamps, syncOffsetMs) {
+        if (syncTimestamps.isEmpty()) -1
+        else {
+            val posMs = positionFrames * 1000L / 48_000L
+            syncTimestamps.indexOfLast { tsMs ->
+                posMs >= tsMs - syncOffsetMs - SCROLL_LEAD_MS
+            }
+        }
+    }
+
+    var lastScrolledSection by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(chordPro, syncData) { lastScrolledSection = -1 }
+
+    // Lineare Scroll-Kopplung (Fallback ohne Sync-Daten oder im Sync-Modus).
     LaunchedEffect(positionFrames, durationFrames, isPlaying) {
-        if (isPlaying && durationFrames > 0 && scroll.maxValue > 0) {
+        if (isPlaying && durationFrames > 0 && scroll.maxValue > 0 &&
+            (syncTimestamps.isEmpty() || isSyncMode)
+        ) {
             val target = ((positionFrames.toDouble() / durationFrames) * scroll.maxValue).toInt()
             scroll.scrollTo(target.coerceIn(0, scroll.maxValue))
         }
     }
 
-    Column(
-        modifier
-            .background(
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                RoundedCornerShape(12.dp),
-            )
-            .padding(horizontal = 12.dp)
-            .verticalScroll(scroll)
-            .then(
-                if (allowGestures) {
-                    Modifier.pointerInput(Unit) {
+    // Sektionsbasiertes Scrollen (600 ms Vorlauf, Reaktionszeit korrigiert).
+    LaunchedEffect(scrollTargetSection, sectionOffsets.size) {
+        if (isSyncMode || syncTimestamps.isEmpty() || scrollTargetSection < 0) return@LaunchedEffect
+        if (scrollTargetSection == lastScrolledSection) return@LaunchedEffect
+        lastScrolledSection = scrollTargetSection
+        val targetY = sectionOffsets[scrollTargetSection] ?: return@LaunchedEffect
+        scroll.animateScrollTo(
+            targetY.coerceIn(0, scroll.maxValue),
+            animationSpec = tween(SCROLL_LEAD_MS.toInt(), easing = LinearEasing),
+        )
+    }
+
+    Column(modifier) {
+        // Sync-Modus-Banner
+        if (isSyncMode) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        MaterialTheme.colorScheme.errorContainer,
+                        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "SYNC",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                )
+                Text(
+                    "  Tippe bei: $nextSectionName",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${syncTapIndex}/${totalSections}",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        Column(
+            Modifier
+                .weight(1f)
+                .background(
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                    if (isSyncMode) RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+                    else RoundedCornerShape(12.dp),
+                )
+                .padding(horizontal = 12.dp)
+                .verticalScroll(scroll)
+                .then(
+                    if (isSyncMode) Modifier.clickable(onClick = onSyncTap)
+                    else if (allowGestures) Modifier.pointerInput(Unit) {
                         detectTransformGestures { _, _, zoom, _ ->
                             if (zoom != 1f) onFontScale(zoom)
                         }
                     }
-                } else Modifier
-            ),
-    ) {
-        Spacer(Modifier.height(8.dp))
-        for (line in lines) {
-            when (line.kind) {
-                ChordPro.Kind.EMPTY -> Spacer(Modifier.height((fontSp * 0.7f).dp))
-                ChordPro.Kind.COMMENT -> Text(
-                    line.text,
-                    fontSize = fontSp.sp,
-                    lineHeight = (fontSp * 1.3f).sp,
-                    fontStyle = FontStyle.Italic,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-                ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
+                    else Modifier
+                ),
+        ) {
+            Spacer(Modifier.height(8.dp))
+            lines.forEachIndexed { lineIdx, line ->
+                when (line.kind) {
+                    ChordPro.Kind.EMPTY -> Spacer(Modifier.height((fontSp * 0.7f).dp))
+                    ChordPro.Kind.COMMENT -> Text(
+                        line.text,
+                        fontSize = fontSp.sp,
+                        lineHeight = (fontSp * 1.3f).sp,
+                        fontStyle = FontStyle.Italic,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                    ChordPro.Kind.SECTION -> {
+                        val si = lineToSectionIndex[lineIdx] ?: 0
+                        val isCurrent = !isSyncMode && si == currentPlaySection
+                        val isNextTap = isSyncMode && si == syncTapIndex
+                        val dividerAlpha = if (isCurrent || isNextTap) 0.8f else 0.3f
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .onGloballyPositioned { coords ->
+                                    sectionOffsets[si] = coords.positionInParent().y.roundToInt()
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            HorizontalDivider(
+                                Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = dividerAlpha),
+                            )
+                            Text(
+                                "  ${line.text}  ",
+                                color = MaterialTheme.colorScheme.primary.copy(
+                                    alpha = if (isCurrent || isNextTap) 1f else 0.6f,
+                                ),
+                                fontSize = (fontSp * 0.85f).sp,
+                                fontWeight = if (isCurrent || isNextTap) FontWeight.Bold
+                                else FontWeight.Normal,
+                            )
+                            HorizontalDivider(
+                                Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = dividerAlpha),
+                            )
+                        }
+                    }
+                    ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
+                }
             }
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
 /**
  * Rendert eine Textzeile als umbrechende Folge von „Wörtern". Jedes Wort trägt
  * seinen Akkord direkt über der richtigen Silbe; lange Zeilen brechen sauber um
- * (Akkorde wandern mit), statt rechts aus dem Bild zu laufen. Genau das macht
- * große Schrift am Mikroständer lesbar.
+ * (Akkorde wandern mit), statt rechts aus dem Bild zu laufen.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

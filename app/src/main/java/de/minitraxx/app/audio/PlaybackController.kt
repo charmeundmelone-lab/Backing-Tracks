@@ -31,6 +31,8 @@ data class QueueSong(
     val notes: String,
     /** ChordPro-Text für die Live-Anzeige. */
     val chordPro: String,
+    /** Tap-Once-Sync-Daten: leerzeichen-getrennte ms-Timestamps je {section:}-Marker. */
+    val syncData: String,
 )
 
 data class PlayerState(
@@ -85,7 +87,7 @@ class PlaybackController private constructor(private val context: Context) {
                 QueueSong(
                     it.song.id, it.song.title, it.song.artist,
                     it.song.durationFrames, it.song.endAction, it.song.notes,
-                    it.song.chordPro,
+                    it.song.chordPro, it.song.syncData,
                 )
             }
             if (queue.isEmpty()) {
@@ -187,6 +189,13 @@ class PlaybackController private constructor(private val context: Context) {
         if (!_state.value.hasSession) return
         NativeEngine.seek(frame)
         _state.value = _state.value.copy(positionFrames = frame)
+    }
+
+    fun updateSyncData(songId: Long, data: String) {
+        val newQueue = _state.value.queue.map {
+            if (it.songId == songId) it.copy(syncData = data) else it
+        }
+        _state.value = _state.value.copy(queue = newQueue)
     }
 
     fun stopSession() {

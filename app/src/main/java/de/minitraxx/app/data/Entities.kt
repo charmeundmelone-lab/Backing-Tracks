@@ -29,6 +29,8 @@ data class SongEntity(
     val notes: String = "",
     /** Songtext mit Akkorden im ChordPro-Format ([C]Hello [G]world …). */
     val chordPro: String = "",
+    /** Leerzeichen-getrennte Millisekunden-Timestamps, einer pro {section:}-Marker. */
+    val syncData: String = "",
 )
 
 /**

@@ -36,7 +36,7 @@ jobs:
       # APK zusätzlich auf den Branch apk-dist pushen, damit sie per git
       # abholbar ist (Artifact-Download ist nicht überall erreichbar).
       - name: Publish APK to apk-dist branch
-        if: github.ref == 'refs/heads/claude/kind-hawking-h4833c'
+        if: github.ref == 'refs/heads/claude/kind-hawking-h4833c' || github.ref == 'refs/heads/claude/current-apk-disto-y2wzvi'
         run: |
           mkdir /tmp/apkpub && cd /tmp/apkpub
           git init -b apk-dist

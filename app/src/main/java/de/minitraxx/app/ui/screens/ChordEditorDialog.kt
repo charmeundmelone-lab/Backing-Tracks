@@ -208,7 +208,6 @@ private fun EditableLyricLine(
             .fillMaxWidth()
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
-        verticalArrangement = Arrangement.Center,
     ) {
         for ((segIdx, seg) in segs.withIndex()) {
             if (seg.chord != null) {
@@ -263,11 +262,7 @@ private fun EditableLyricLine(
                 }
             }
             if (seg.text.isNotEmpty()) {
-                Text(
-                    seg.text,
-                    fontSize = 14.sp,
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                )
+                Text(seg.text, fontSize = 14.sp)
             }
         }
     }

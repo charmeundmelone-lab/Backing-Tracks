@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -637,7 +640,7 @@ private fun LyricsPane(
     modifier: Modifier = Modifier,
 ) {
     val lines = remember(chordPro) { ChordPro.parse(chordPro) }
-    val lazyState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val lazyState = rememberLazyListState()
 
     val syncTimestamps = remember(syncData) {
         syncData.trim().split(" ").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
@@ -703,7 +706,7 @@ private fun LyricsPane(
         lazyState.animateScrollToItem(itemIdx)
     }
 
-    androidx.compose.foundation.lazy.LazyColumn(
+    LazyColumn(
         state = lazyState,
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
@@ -715,7 +718,7 @@ private fun LyricsPane(
             ),
     ) {
         item { Spacer(Modifier.height(8.dp)) }
-        androidx.compose.foundation.lazy.itemsIndexed(lines) { lineIdx, line ->
+        itemsIndexed(lines) { lineIdx, line ->
             when (line.kind) {
                 ChordPro.Kind.EMPTY -> Spacer(Modifier.height((fontSp * 0.7f).dp))
                 ChordPro.Kind.COMMENT -> Text(

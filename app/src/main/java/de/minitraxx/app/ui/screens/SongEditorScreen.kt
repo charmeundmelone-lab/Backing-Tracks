@@ -202,7 +202,7 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                         OutlinedButton(onClick = { showLyricsEditor = true }) {
                             Text(stringResource(R.string.lyrics_edit))
                         }
-                        if (data.song.chordPro.contains('[')) {
+                        if (data.song.chordPro.isNotBlank()) {
                             OutlinedButton(onClick = { showChordEditor = true }) {
                                 Text("Akkorde ← →")
                             }

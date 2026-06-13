@@ -167,12 +167,16 @@ object ChordPro {
                     !isChordLine(trimmed.substring(1, trimmed.length - 1)) ->
                     out.add(Line(Kind.COMMENT, null, trimmed.substring(1, trimmed.length - 1)))
                 isChordLine(line) -> {
-                    val next = lines.getOrNull(i + 1)
+                    // Nächste NICHT-leere Zeile suchen (Import kann eine Leerzeile
+                    // zwischen Akkord- und Textzeile eingefügt haben).
+                    var j = i + 1
+                    while (j < lines.size && lines[j].isBlank()) j++
+                    val next = lines.getOrNull(j)
                     if (next != null && next.isNotBlank() && !isChordLine(next) &&
                         !(next.trim().startsWith("[") && next.trim().endsWith("]"))
                     ) {
                         out.add(Line(Kind.LYRIC, line, next))
-                        i++
+                        i = j
                     } else {
                         out.add(Line(Kind.LYRIC, line, ""))
                     }

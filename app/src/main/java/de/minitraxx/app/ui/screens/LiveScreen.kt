@@ -53,12 +53,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -75,6 +71,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.minitraxx.app.R
+import de.minitraxx.app.audio.NativeEngine
 import de.minitraxx.app.audio.PlaybackController
 import de.minitraxx.app.data.SettingsStore
 import de.minitraxx.app.data.SongRepository
@@ -669,16 +666,12 @@ private fun LyricsPane(
         buildMap { lines.forEachIndexed { idx, l -> if (l.kind == ChordPro.Kind.SECTION) put(si++, idx + 1) } }
     }
 
-    val positionState = remember { mutableLongStateOf(positionFrames) }
-    SideEffect { positionState.longValue = positionFrames }
-
-    val currentPlaySection by remember(syncTimestamps, syncOffsetMs) {
-        derivedStateOf {
-            if (syncTimestamps.isEmpty()) -1
-            else {
-                val posMs = positionState.longValue * 1000L / 48_000L
-                syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs }
-            }
+    // currentPlaySection für Section-Highlighting (nur Darstellung, kein Scroll).
+    val currentPlaySection: Int = remember(positionFrames, syncTimestamps, syncOffsetMs) {
+        if (syncTimestamps.isEmpty()) -1
+        else {
+            val posMs = positionFrames * 1000L / 48_000L
+            syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs }
         }
     }
 
@@ -695,25 +688,27 @@ private fun LyricsPane(
         }
     }
 
-    // Sektionsbasiertes Scrollen via snapshotFlow — reagiert direkt auf
-    // Positionsänderungen ohne Recomposition als Zwischenschritt.
-    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex) {
-        if (syncTimestamps.isEmpty()) return@LaunchedEffect
+    // Sektionsbasiertes Scrollen: NativeEngine direkt pollen — kein Umweg
+    // über Compose-State oder Flow-Machinery.
+    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isPlaying) {
+        if (!isPlaying || syncTimestamps.isEmpty()) return@LaunchedEffect
         var lastSection = -1
-        snapshotFlow { positionState.longValue }
-            .collect { frames ->
-                if (isSyncMode) return@collect
-                val posMs = frames * 1000L / 48_000L
+        while (true) {
+            val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
+            if (!isSyncMode) {
                 val target = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs - SCROLL_LEAD_MS }
-                if (target == lastSection) return@collect
-                lastSection = target
-                if (target < 0) {
-                    lazyState.animateScrollToItem(0)
-                } else {
-                    val itemIdx = sectionToItemIndex[target] ?: return@collect
-                    lazyState.animateScrollToItem(itemIdx)
+                if (target != lastSection) {
+                    lastSection = target
+                    if (target < 0) {
+                        lazyState.animateScrollToItem(0)
+                    } else {
+                        val itemIdx = sectionToItemIndex[target]
+                        if (itemIdx != null) lazyState.animateScrollToItem(itemIdx)
+                    }
                 }
             }
+            delay(150)
+        }
     }
 
     LazyColumn(

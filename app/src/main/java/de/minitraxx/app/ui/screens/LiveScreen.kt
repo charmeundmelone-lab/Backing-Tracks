@@ -53,9 +53,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -220,12 +223,20 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                     enabled = enabled,
                     onClick = {
                         if (isSyncMode) onCancelSync()
-                        else {
+                        else if (state.currentSong?.syncData.isNullOrBlank()) {
                             syncTaps = emptyList()
                             isSyncMode = true
                         }
+                        // has sync data → short-press does nothing; long-press to re-sync
                     },
-                    onLongClick = { showOffsetSheet = true },
+                    onLongClick = {
+                        if (!isSyncMode) {
+                            syncTaps = emptyList()
+                            isSyncMode = true
+                        } else {
+                            showOffsetSheet = true
+                        }
+                    },
                 ),
             contentAlignment = Alignment.Center,
         ) {
@@ -658,19 +669,26 @@ private fun LyricsPane(
         buildMap { lines.forEachIndexed { idx, l -> if (l.kind == ChordPro.Kind.SECTION) put(si++, idx + 1) } }
     }
 
-    val currentPlaySection = remember(positionFrames, syncTimestamps, syncOffsetMs) {
-        if (syncTimestamps.isEmpty()) -1
-        else {
-            val posMs = positionFrames * 1000L / 48_000L
-            syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs }
+    val positionState = remember { mutableLongStateOf(positionFrames) }
+    SideEffect { positionState.longValue = positionFrames }
+
+    val currentPlaySection by remember(syncTimestamps, syncOffsetMs) {
+        derivedStateOf {
+            if (syncTimestamps.isEmpty()) -1
+            else {
+                val posMs = positionState.longValue * 1000L / 48_000L
+                syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs }
+            }
         }
     }
 
-    val scrollTargetSection = remember(positionFrames, syncTimestamps, syncOffsetMs) {
-        if (syncTimestamps.isEmpty()) -1
-        else {
-            val posMs = positionFrames * 1000L / 48_000L
-            syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs - SCROLL_LEAD_MS }
+    val scrollTargetSection by remember(syncTimestamps, syncOffsetMs) {
+        derivedStateOf {
+            if (syncTimestamps.isEmpty()) -1
+            else {
+                val posMs = positionState.longValue * 1000L / 48_000L
+                syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs - SCROLL_LEAD_MS }
+            }
         }
     }
 

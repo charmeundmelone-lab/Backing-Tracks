@@ -112,6 +112,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     var lyricsFullscreen by rememberSaveable { mutableStateOf(false) }
     var isSyncMode by remember { mutableStateOf(false) }
     var syncTaps by remember { mutableStateOf(listOf<Long>()) }
+    var syncSaved by remember { mutableStateOf(false) }
     var showOffsetSheet by remember { mutableStateOf(false) }
 
     val hasLyrics = !state.currentSong?.chordPro.isNullOrBlank()
@@ -128,13 +129,14 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
             val posMs = state.positionFrames * 1000L / 48_000L
             val newTaps = syncTaps + posMs
             if (newTaps.size >= sections.size) {
-                // Letzter Tipp: sofort speichern und Modus beenden.
+                // Letzter Tipp: sofort speichern, Modus beenden, kurz grün zeigen.
                 val songId = state.currentSong?.songId
                 if (songId != null) {
                     controller.saveSyncData(songId, newTaps.joinToString(" "))
                 }
                 isSyncMode = false
                 syncTaps = emptyList()
+                syncSaved = true
             } else {
                 syncTaps = newTaps
             }
@@ -144,6 +146,13 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val onCancelSync: () -> Unit = {
         isSyncMode = false
         syncTaps = emptyList()
+    }
+
+    LaunchedEffect(syncSaved) {
+        if (syncSaved) {
+            kotlinx.coroutines.delay(2000L)
+            syncSaved = false
+        }
     }
 
     LaunchedEffect(setlistId, startIndex) {
@@ -175,19 +184,26 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
 
     @Composable
     fun SyncTapButton() {
-        if (!isSyncMode) return
+        if (!isSyncMode && !syncSaved) return
+        val saved = syncSaved && !isSyncMode
         Box(
             Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
-                .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
-                .clickable(onClick = onSyncTap)
+                .background(
+                    if (saved) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.errorContainer,
+                    RoundedCornerShape(12.dp),
+                )
+                .then(if (!saved) Modifier.clickable(onClick = onSyncTap) else Modifier)
                 .padding(16.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                "TIPPE HIER  •  ${sections.getOrElse(syncTaps.size) { "" }}  •  ${syncTaps.size + 1}/${sections.size}",
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                if (saved) "✓  Sync gespeichert"
+                else "TIPPE HIER  •  ${sections.getOrElse(syncTaps.size) { "" }}  •  ${syncTaps.size + 1}/${sections.size}",
+                color = if (saved) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onErrorContainer,
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
             )
@@ -676,7 +692,11 @@ private fun LyricsPane(
     }
 
     var lastScrolledSection by remember { mutableIntStateOf(-1) }
-    LaunchedEffect(chordPro, syncData) { lastScrolledSection = -1 }
+    // Sync-Daten neu: Scroll auf Anfang und Zustand zurücksetzen.
+    LaunchedEffect(chordPro, syncData) {
+        lastScrolledSection = -1
+        scroll.scrollTo(0)
+    }
 
     // Lineare Scroll-Kopplung (Fallback ohne Sync-Daten oder im Sync-Modus).
     LaunchedEffect(positionFrames, durationFrames, isPlaying) {
@@ -690,7 +710,15 @@ private fun LyricsPane(
 
     // Sektionsbasiertes Scrollen (600 ms Vorlauf, Reaktionszeit korrigiert).
     LaunchedEffect(scrollTargetSection, sectionOffsets.size) {
-        if (isSyncMode || syncTimestamps.isEmpty() || scrollTargetSection < 0) return@LaunchedEffect
+        if (isSyncMode || syncTimestamps.isEmpty()) return@LaunchedEffect
+        if (scrollTargetSection < 0) {
+            // Vor der ersten Section (Song-Anfang / Neustart): ganz nach oben.
+            if (lastScrolledSection != -1) {
+                scroll.animateScrollTo(0, animationSpec = tween(400, easing = LinearEasing))
+                lastScrolledSection = -1
+            }
+            return@LaunchedEffect
+        }
         if (scrollTargetSection == lastScrolledSection) return@LaunchedEffect
         lastScrolledSection = scrollTargetSection
         val targetY = sectionOffsets[scrollTargetSection] ?: return@LaunchedEffect

@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import de.minitraxx.app.R
 import de.minitraxx.app.audio.PlaybackController
 import de.minitraxx.app.data.SettingsStore
+import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.util.ChordPro
 import de.minitraxx.app.util.formatFrames
 import de.minitraxx.app.util.formatRemaining
@@ -101,6 +102,7 @@ private const val SCROLL_LEAD_MS = 600L
 fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val context = LocalContext.current
     val controller = remember { PlaybackController.get(context) }
+    val repo = remember { SongRepository.get(context) }
     val store = remember { SettingsStore.get(context) }
     val state by controller.state.collectAsState()
     val settings by store.settings.collectAsState()

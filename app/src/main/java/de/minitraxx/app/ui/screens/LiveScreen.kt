@@ -2,12 +2,9 @@ package de.minitraxx.app.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,7 +66,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -655,9 +651,6 @@ private fun LyricsPane(
 ) {
     val lines = remember(chordPro) { ChordPro.parse(chordPro) }
     val lazyState = rememberLazyListState()
-    // Gemeinsamer Horizontal-Scroll: alle Songbuch-Zeilen scrollen im Gleichtakt,
-    // damit lange Zeilen sichtbar bleiben OHNE die Spalten-Ausrichtung zu zerstören.
-    val hScroll = rememberScrollState()
 
     val syncTimestamps = remember(syncData) {
         syncData.trim().split(" ").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
@@ -779,7 +772,7 @@ private fun LyricsPane(
                         )
                     }
                 }
-                ChordPro.Kind.LYRIC -> LyricLine(line, fontSp, hScroll)
+                ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
@@ -787,45 +780,55 @@ private fun LyricsPane(
 }
 
 /**
- * Songbuch-Rendering: Akkordzeile und Textzeile beide in MONOSPACE, der Akkord
- * sitzt zeichengenau über der Silbe — exakt wie in der Original-PDF / einem
- * professionellen Songbuch. Kein Umbruch (der würde die Spalten zerstören);
- * stattdessen scrollen lange Zeilen horizontal im Gleichtakt (geteilter hScroll).
+ * Songbuch-Rendering nach OnSong/Ultimate-Guitar-Konvention: jede Silbe trägt
+ * ihren Akkord direkt darüber. Zeilen brechen an WORTGRENZEN um — der Akkord
+ * wandert mit seiner Silbe mit, läuft nie aus dem Bild, kein Horizontal-Scroll.
+ *
+ * Kollisions-Handling: Jede Silbe steckt in einer Column, deren Breite sich nach
+ * dem breiteren Kind richtet (Akkord ODER Silbe). Ist der Akkord breiter als die
+ * Silbe, schieben sich die folgenden Silben/Wörter automatisch nach rechts —
+ * genau wie in einem echten Akkordblatt. Der angehängte Space am Akkord
+ * garantiert immer eine Lücke zum nächsten Akkord.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LyricLine(line: ChordPro.Line, fontSp: Float, hScroll: ScrollState) {
-    val chordRow = line.chords
-    val textRow = line.text
-    if (chordRow.isNullOrBlank() && textRow.isBlank()) {
-        Spacer(Modifier.height((fontSp * 0.6f).dp))
+private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
+    val words = remember(line) { ChordPro.toWords(line) }
+    if (words.isEmpty()) {
+        Spacer(Modifier.height((fontSp * 0.5f).dp))
         return
     }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(hScroll)
-            .padding(vertical = (fontSp * 0.10f).dp),
+    val hasChord = remember(words) { words.any { w -> w.any { it.chord != null } } }
+    FlowRow(
+        Modifier.fillMaxWidth().padding(vertical = (fontSp * 0.14f).dp),
     ) {
-        if (!chordRow.isNullOrBlank()) {
-            Text(
-                chordRow,
-                fontFamily = FontFamily.Monospace,
-                fontSize = fontSp.sp,
-                lineHeight = (fontSp * 1.05f).sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                softWrap = false,
-            )
+        for (word in words) {
+            // Ein Wort = eine unzertrennliche Einheit (bricht nie mittendrin um).
+            Row(Modifier.padding(end = (fontSp * 0.30f).dp)) {
+                for (piece in word) {
+                    Column(horizontalAlignment = Alignment.Start) {
+                        if (hasChord) {
+                            Text(
+                                if (piece.chord != null) "${piece.chord} " else " ",
+                                fontSize = (fontSp * 0.80f).sp,
+                                lineHeight = (fontSp * 0.88f).sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        Text(
+                            piece.text.ifEmpty { " " },
+                            fontSize = fontSp.sp,
+                            lineHeight = (fontSp * 1.18f).sp,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+            }
         }
-        Text(
-            textRow.ifEmpty { " " },
-            fontFamily = FontFamily.Monospace,
-            fontSize = fontSp.sp,
-            lineHeight = (fontSp * 1.15f).sp,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            softWrap = false,
-        )
     }
 }

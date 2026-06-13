@@ -56,7 +56,7 @@ object ChordPro {
         }
 
         val used = BooleanArray(markers.size)
-        val result = ArrayList<Pair<Int, List<Piece>>>()
+        val result = ArrayList<Pair<Int, MutableList<Piece>>>()
         for (w in textWords) {
             val inWord = ArrayList<Pair<Int, String>>()
             for ((mi, m) in markers.withIndex()) {
@@ -80,11 +80,27 @@ object ChordPro {
             }
             result.add(w.start to pieces)
         }
+        // Gap-Akkorde (über Leerraum, z.B. Auftakt-Akkord vor eingerücktem Wort):
+        // dem direkt folgenden Wort als führender Akkord über die erste Silbe
+        // setzen — statt freischwebend. Songbuch-Konvention, deutlich lesbarer.
+        // Nur wenn dieses Wort dort noch keinen Akkord trägt; sonst freistehend.
+        val standalone = ArrayList<Pair<Int, String>>()
         for ((mi, m) in markers.withIndex()) {
-            if (!used[mi]) result.add(m.first to listOf(Piece(m.second, "")))
+            if (used[mi]) continue
+            val nextWord = result.filter { it.first > m.first }.minByOrNull { it.first }
+            val firstPiece = nextWord?.second?.firstOrNull()
+            if (nextWord != null && firstPiece != null && firstPiece.chord == null) {
+                nextWord.second[0] = Piece(m.second, firstPiece.text)
+                used[mi] = true
+            } else {
+                standalone.add(m)
+            }
         }
-        result.sortBy { it.first }
-        return result.map { it.second }
+        val out = ArrayList<Pair<Int, List<Piece>>>()
+        for (wp in result) out.add(wp.first to wp.second)
+        for (m in standalone) out.add(m.first to listOf(Piece(m.second, "")))
+        out.sortBy { it.first }
+        return out.map { it.second }
     }
 
     /** Erkennt einen einzelnen Akkordnamen wie Em7, Dsus4, Cadd9, D/F#. */

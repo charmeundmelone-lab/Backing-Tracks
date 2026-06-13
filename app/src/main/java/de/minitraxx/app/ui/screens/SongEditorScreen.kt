@@ -51,7 +51,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import de.minitraxx.app.R
-import de.minitraxx.app.audio.AudioImporter
 import de.minitraxx.app.data.EndAction
 import de.minitraxx.app.data.Slots
 import de.minitraxx.app.data.SongRepository
@@ -76,43 +75,32 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
     val genericError = stringResource(R.string.import_failed)
 
     var showLyricsEditor by remember { mutableStateOf(false) }
-    var importingPdf by remember { mutableStateOf(false) }
-    val lyricsTooBig = stringResource(R.string.lyrics_too_big)
-    val pdfPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        importingPdf = true
+    var importing by remember { mutableStateOf(false) }
+
+    // Egal über welchen Knopf: PDFs werden immer durch den Parser geschickt,
+    // Textdateien als Text gelesen — nie wieder Rohbytes im Songtext.
+    fun runImport(uri: Uri) {
+        importing = true
         scope.launch {
             try {
                 val cp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    PdfChordImporter.import(context, uri)
+                    loadLyrics(context, uri)
                 }
                 songWithStems?.song?.let { repo.songDao.update(it.copy(chordPro = cp)) }
             } catch (e: Exception) {
                 snackbar.showSnackbar(e.message ?: genericError)
             } finally {
-                importingPdf = false
+                importing = false
             }
         }
     }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> if (uri != null) runImport(uri) }
     val lyricsPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            try {
-                val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)
-                        ?.bufferedReader()?.use { it.readText() } ?: ""
-                }
-                if (text.length > 500_000) throw AudioImporter.ImportException(lyricsTooBig)
-                songWithStems?.song?.let { repo.songDao.update(it.copy(chordPro = text)) }
-            } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: genericError)
-            }
-        }
-    }
+    ) { uri: Uri? -> if (uri != null) runImport(uri) }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -202,7 +190,7 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (importingPdf) {
+                        if (importing) {
                             CircularProgressIndicator(Modifier.padding(4.dp))
                             Text(stringResource(R.string.lyrics_importing))
                         } else {
@@ -414,6 +402,28 @@ private fun StemSlotCard(
             }
         }
     }
+}
+
+/**
+ * Lädt Songtext aus einer Datei. PDFs (per MIME, Endung oder %PDF-Kennung im
+ * Inhalt) gehen durch den koordinaten-genauen Parser; alles andere wird als
+ * Text gelesen. So landen nie wieder PDF-Rohbytes im Songtext.
+ */
+private suspend fun loadLyrics(context: android.content.Context, uri: Uri): String {
+    val name = queryDisplayName(context, uri)?.lowercase(Locale.ROOT) ?: ""
+    val mime = context.contentResolver.getType(uri) ?: ""
+    if (mime == "application/pdf" || name.endsWith(".pdf")) {
+        return PdfChordImporter.import(context, uri)
+    }
+    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: throw PdfChordImporter.PdfImportException("Datei kann nicht geöffnet werden")
+    if (bytes.size >= 5 && bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte() &&
+        bytes[2] == 0x44.toByte() && bytes[3] == 0x46.toByte()
+    ) {
+        return PdfChordImporter.import(context, uri)
+    }
+    if (bytes.size > 500_000) throw PdfChordImporter.PdfImportException("Datei zu groß")
+    return String(bytes, Charsets.UTF_8)
 }
 
 private fun queryDisplayName(context: android.content.Context, uri: Uri): String? =

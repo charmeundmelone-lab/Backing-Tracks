@@ -1,8 +1,6 @@
 package de.minitraxx.app.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,12 +18,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -63,12 +57,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -626,13 +617,9 @@ private fun PlayPauseButton(isPlaying: Boolean, size: Int, onClick: () -> Unit) 
 /**
  * Textanzeige mit zwei Scroll-Modi:
  *
- * – Ohne Sync-Daten: lineare Positionskopplung (wie bisher).
- * – Mit Sync-Daten: sektionsbasiertes Scrollen — scrollt 600 ms vor jedem
- *   Sektionswechsel sanft zum nächsten Abschnitt, korrigiert um den
- *   gespeicherten Reaktionszeit-Ausgleich.
- *
- * Im Sync-Modus zeigt die Pane ein Banner mit dem nächsten Abschnitt und
- * reagiert auf Taps, ohne den normalen Scroll zu unterbrechen.
+ * – Ohne Sync-Daten: lineare Positionskopplung (LazyColumn-Item-Fraction).
+ * – Mit Sync-Daten: sektionsbasiertes Scrollen via animateScrollToItem —
+ *   kein Pixel-Tracking, zuverlässig auf jedem Gerät.
  */
 @Composable
 private fun LyricsPane(
@@ -650,28 +637,24 @@ private fun LyricsPane(
     modifier: Modifier = Modifier,
 ) {
     val lines = remember(chordPro) { ChordPro.parse(chordPro) }
-    val scroll = rememberScrollState()
+    val lazyState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     val syncTimestamps = remember(syncData) {
         syncData.trim().split(" ").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
     }
 
-    // lineIndex → sectionIndex (nur für Kind.SECTION-Zeilen)
+    // lineIndex → sectionIndex  (nur SECTION-Zeilen)
     val lineToSectionIndex: Map<Int, Int> = remember(lines) {
         var si = 0
-        buildMap {
-            lines.forEachIndexed { idx, line ->
-                if (line.kind == ChordPro.Kind.SECTION) put(idx, si++)
-            }
-        }
+        buildMap { lines.forEachIndexed { idx, l -> if (l.kind == ChordPro.Kind.SECTION) put(idx, si++) } }
     }
 
-    // Pixel-Y-Offset jeder Sektion innerhalb des scrollbaren Inhalts.
-    val sectionOffsets: SnapshotStateMap<Int, Int> = remember(chordPro) {
-        androidx.compose.runtime.mutableStateMapOf()
+    // sectionIndex → LazyColumn-Item-Index (Offset +1 wegen führendem Spacer)
+    val sectionToItemIndex: Map<Int, Int> = remember(lines) {
+        var si = 0
+        buildMap { lines.forEachIndexed { idx, l -> if (l.kind == ChordPro.Kind.SECTION) put(si++, idx + 1) } }
     }
 
-    // Welche Sektion gerade gespielt wird (für Hervorhebung).
     val currentPlaySection = remember(positionFrames, syncTimestamps, syncOffsetMs) {
         if (syncTimestamps.isEmpty()) -1
         else {
@@ -680,72 +663,59 @@ private fun LyricsPane(
         }
     }
 
-    // Welche Sektion als nächstes gescrollt werden soll (mit Vorlauf).
     val scrollTargetSection = remember(positionFrames, syncTimestamps, syncOffsetMs) {
         if (syncTimestamps.isEmpty()) -1
         else {
             val posMs = positionFrames * 1000L / 48_000L
-            syncTimestamps.indexOfLast { tsMs ->
-                posMs >= tsMs - syncOffsetMs - SCROLL_LEAD_MS
-            }
+            syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs - SCROLL_LEAD_MS }
         }
     }
 
     var lastScrolledSection by remember { mutableIntStateOf(-1) }
-    // Sync-Daten neu: Scroll auf Anfang und Zustand zurücksetzen.
+
     LaunchedEffect(chordPro, syncData) {
         lastScrolledSection = -1
-        scroll.scrollTo(0)
+        lazyState.scrollToItem(0)
     }
 
-    // Lineare Scroll-Kopplung (Fallback ohne Sync-Daten oder im Sync-Modus).
+    // Lineare Positionskopplung (Fallback ohne Sync oder im Sync-Modus).
     LaunchedEffect(positionFrames, durationFrames, isPlaying) {
-        if (isPlaying && durationFrames > 0 && scroll.maxValue > 0 &&
-            (syncTimestamps.isEmpty() || isSyncMode)
-        ) {
-            val target = ((positionFrames.toDouble() / durationFrames) * scroll.maxValue).toInt()
-            scroll.scrollTo(target.coerceIn(0, scroll.maxValue))
+        if (isPlaying && durationFrames > 0 && (syncTimestamps.isEmpty() || isSyncMode)) {
+            val targetIdx = ((positionFrames.toDouble() / durationFrames) * lines.size)
+                .toInt().coerceIn(0, lines.size)
+            lazyState.scrollToItem(targetIdx)
         }
     }
 
-    // Sektionsbasiertes Scrollen (600 ms Vorlauf, Reaktionszeit korrigiert).
-    LaunchedEffect(scrollTargetSection, sectionOffsets.size) {
+    // Sektionsbasiertes Scrollen — per Item-Index, kein Pixel-Tracking.
+    LaunchedEffect(scrollTargetSection) {
         if (isSyncMode || syncTimestamps.isEmpty()) return@LaunchedEffect
         if (scrollTargetSection < 0) {
-            // Vor der ersten Section (Song-Anfang / Neustart): ganz nach oben.
             if (lastScrolledSection != -1) {
-                scroll.animateScrollTo(0, animationSpec = tween(400, easing = LinearEasing))
+                lazyState.animateScrollToItem(0)
                 lastScrolledSection = -1
             }
             return@LaunchedEffect
         }
         if (scrollTargetSection == lastScrolledSection) return@LaunchedEffect
         lastScrolledSection = scrollTargetSection
-        val targetY = sectionOffsets[scrollTargetSection] ?: return@LaunchedEffect
-        scroll.animateScrollTo(
-            targetY.coerceIn(0, scroll.maxValue),
-            animationSpec = tween(SCROLL_LEAD_MS.toInt(), easing = LinearEasing),
-        )
+        val itemIdx = sectionToItemIndex[scrollTargetSection] ?: return@LaunchedEffect
+        lazyState.animateScrollToItem(itemIdx)
     }
 
-    Column(
-        modifier
-            .background(
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                RoundedCornerShape(12.dp),
-            )
+    androidx.compose.foundation.lazy.LazyColumn(
+        state = lazyState,
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp)
-            .verticalScroll(scroll)
             .then(
                 if (allowGestures) Modifier.pointerInput(Unit) {
-                    detectTransformGestures { _, _, zoom, _ ->
-                        if (zoom != 1f) onFontScale(zoom)
-                    }
+                    detectTransformGestures { _, _, zoom, _ -> if (zoom != 1f) onFontScale(zoom) }
                 } else Modifier
             ),
     ) {
-        Spacer(Modifier.height(8.dp))
-        lines.forEachIndexed { lineIdx, line ->
+        item { Spacer(Modifier.height(8.dp)) }
+        androidx.compose.foundation.lazy.itemsIndexed(lines) { lineIdx, line ->
             when (line.kind) {
                 ChordPro.Kind.EMPTY -> Spacer(Modifier.height((fontSp * 0.7f).dp))
                 ChordPro.Kind.COMMENT -> Text(
@@ -761,12 +731,7 @@ private fun LyricsPane(
                     val isNextTap = isSyncMode && si == syncTapIndex
                     val dividerAlpha = if (isCurrent || isNextTap) 0.8f else 0.3f
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp)
-                            .onGloballyPositioned { coords ->
-                                sectionOffsets[si] = coords.positionInParent().y.roundToInt()
-                            },
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         HorizontalDivider(
@@ -779,8 +744,7 @@ private fun LyricsPane(
                                 alpha = if (isCurrent || isNextTap) 1f else 0.6f,
                             ),
                             fontSize = (fontSp * 0.85f).sp,
-                            fontWeight = if (isCurrent || isNextTap) FontWeight.Bold
-                            else FontWeight.Normal,
+                            fontWeight = if (isCurrent || isNextTap) FontWeight.Bold else FontWeight.Normal,
                         )
                         HorizontalDivider(
                             Modifier.weight(1f),
@@ -791,7 +755,7 @@ private fun LyricsPane(
                 ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
             }
         }
-        Spacer(Modifier.height(8.dp))
+        item { Spacer(Modifier.height(8.dp)) }
     }
 }
 

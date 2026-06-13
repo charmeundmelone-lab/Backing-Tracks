@@ -59,6 +59,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -680,42 +681,44 @@ private fun LyricsPane(
         lazyState.scrollToItem(0)
     }
 
-    // Lineare Positionskopplung (Fallback ohne Sync oder im Sync-Modus).
-    LaunchedEffect(positionFrames, durationFrames, isPlaying) {
-        if (isPlaying && durationFrames > 0 && (syncTimestamps.isEmpty() || isSyncMode)) {
-            val targetIdx = ((positionFrames.toDouble() / durationFrames) * lines.size)
-                .toInt().coerceIn(0, lines.size)
-            lazyState.scrollToItem(targetIdx)
-        }
-    }
-
-    // Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
-    // Zwischen zwei Timestamps wird linear durch die Zeilen der Sektion gescrollt.
-    // durationFrames als Key: LaunchedEffect startet neu sobald Song geladen ist.
-    // isPlaying ist KEIN Key — kurzes Flackern würde lastTargetItem resetten.
+    // Smooth-Scroll — display-sync per withFrameNanos (60/90/120 Hz) statt delay(100).
+    // scrollToItem(index, pixelOffset) positioniert pixel-präzise innerhalb des Items,
+    // sodass der Scroll kontinuierlich fließt statt in Item-Sprüngen zu ruckeln.
+    // isPlaying ist KEIN Key (Race-Condition-Schutz, s. CLAUDE.md).
     LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
-        if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
+        if (durationFrames <= 0) return@LaunchedEffect
         val durationMs = durationFrames * 1000L / 48_000L
-        var lastTargetItem = -1
         while (true) {
-            delay(100)
-            val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-            val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
-            val targetItem = if (sec < 0) {
-                0
+            if (NativeEngine.isPlaying()) {
+                withFrameNanos { }  // suspend bis nächstem VSync
+                val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
+                val exactPosition: Double = if (syncTimestamps.isEmpty() || isSyncMode) {
+                    (posMs.toDouble() / durationMs) * lines.size
+                } else {
+                    val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
+                    if (sec < 0) {
+                        0.0
+                    } else {
+                        val secStart = syncTimestamps[sec]
+                        val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
+                        val firstItem = sectionToItemIndex[sec] ?: 0
+                        val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
+                        val t = if (secEnd > secStart)
+                            ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
+                        else 0.0
+                        firstItem + (nextFirst - firstItem) * t
+                    }
+                }
+                val targetIndex = exactPosition.toInt().coerceIn(0, lines.size)
+                val fraction = exactPosition - targetIndex
+                val avgItemPx = lazyState.layoutInfo.visibleItemsInfo
+                    .filter { it.index in 1..lines.size }
+                    .map { it.size }
+                    .average()
+                    .takeIf { !it.isNaN() }?.toInt() ?: 0
+                lazyState.scrollToItem(targetIndex, (fraction * avgItemPx).toInt())
             } else {
-                val secStart = syncTimestamps[sec]
-                val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
-                val firstItem = sectionToItemIndex[sec] ?: 0
-                val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
-                val t = if (secEnd > secStart)
-                    ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
-                else 0.0
-                (firstItem + (nextFirst - firstItem) * t).toInt()
-            }
-            if (targetItem != lastTargetItem) {
-                lastTargetItem = targetItem
-                lazyState.scrollToItem(targetItem)
+                delay(100)  // Pause: Batterie schonen, kein VSync nötig
             }
         }
     }

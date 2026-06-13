@@ -79,6 +79,7 @@ import de.minitraxx.app.util.ChordPro
 import de.minitraxx.app.util.formatFrames
 import de.minitraxx.app.util.formatRemaining
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private const val SCROLL_LEAD_MS = 600L
 

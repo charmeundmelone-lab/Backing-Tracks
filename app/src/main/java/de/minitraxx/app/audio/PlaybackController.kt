@@ -191,11 +191,14 @@ class PlaybackController private constructor(private val context: Context) {
         _state.value = _state.value.copy(positionFrames = frame)
     }
 
-    fun updateSyncData(songId: Long, data: String) {
-        val newQueue = _state.value.queue.map {
-            if (it.songId == songId) it.copy(syncData = data) else it
+    fun saveSyncData(songId: Long, data: String) {
+        scope.launch {
+            repo.songDao.updateSyncData(songId, data)
+            val newQueue = _state.value.queue.map {
+                if (it.songId == songId) it.copy(syncData = data) else it
+            }
+            _state.value = _state.value.copy(queue = newQueue)
         }
-        _state.value = _state.value.copy(queue = newQueue)
     }
 
     fun stopSession() {

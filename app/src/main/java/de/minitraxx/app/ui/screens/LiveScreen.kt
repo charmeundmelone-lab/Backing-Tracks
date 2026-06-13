@@ -61,7 +61,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
@@ -81,12 +80,10 @@ import androidx.compose.ui.unit.sp
 import de.minitraxx.app.R
 import de.minitraxx.app.audio.PlaybackController
 import de.minitraxx.app.data.SettingsStore
-import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.util.ChordPro
 import de.minitraxx.app.util.formatFrames
 import de.minitraxx.app.util.formatRemaining
 import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
 
 private const val SCROLL_LEAD_MS = 600L
 
@@ -104,11 +101,9 @@ private const val SCROLL_LEAD_MS = 600L
 fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val context = LocalContext.current
     val controller = remember { PlaybackController.get(context) }
-    val repo = remember { SongRepository.get(context) }
     val store = remember { SettingsStore.get(context) }
     val state by controller.state.collectAsState()
     val settings by store.settings.collectAsState()
-    val coroutineScope = rememberCoroutineScope()
 
     var locked by rememberSaveable { mutableStateOf(true) }
     var showSongSheet by remember { mutableStateOf(false) }
@@ -136,11 +131,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val onFinishSync: () -> Unit = {
         val songId = state.currentSong?.songId
         if (syncTaps.isNotEmpty() && songId != null) {
-            val data = syncTaps.joinToString(" ")
-            coroutineScope.launch {
-                repo.songDao.updateSyncData(songId, data)
-                controller.updateSyncData(songId, data)
-            }
+            controller.saveSyncData(songId, syncTaps.joinToString(" "))
         }
         isSyncMode = false
         syncTaps = emptyList()
@@ -171,6 +162,36 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
 
     val onFontScale: (Float) -> Unit = { zoom ->
         store.update { it.copy(lyricsFontSp = (it.lyricsFontSp * zoom).coerceIn(10f, 40f)) }
+    }
+
+    @Composable
+    fun SyncTapButton() {
+        if (!isSyncMode) return
+        val allDone = syncTaps.size >= sections.size
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .background(
+                    if (allDone) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.errorContainer,
+                    RoundedCornerShape(12.dp),
+                )
+                .then(if (!allDone) Modifier.clickable(onClick = onSyncTap) else Modifier)
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (allDone)
+                    "Fertig — tippe ✓ zum Speichern"
+                else
+                    "TIPPE HIER  •  ${sections.getOrElse(syncTaps.size) { "" }}  •  ${syncTaps.size}/${sections.size}",
+                color = if (allDone) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+            )
+        }
     }
 
     @Composable
@@ -234,9 +255,6 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                     syncOffsetMs = settings.syncOffsetMs,
                     isSyncMode = isSyncMode,
                     syncTapIndex = syncTaps.size,
-                    totalSections = sections.size,
-                    nextSectionName = sections.getOrNull(syncTaps.size) ?: "",
-                    onSyncTap = onSyncTap,
                     fontSp = settings.lyricsFontSp,
                     positionFrames = state.positionFrames,
                     durationFrames = state.durationFrames,
@@ -245,6 +263,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                     onFontScale = onFontScale,
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp),
                 )
+                SyncTapButton()
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -362,9 +381,6 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                         syncOffsetMs = settings.syncOffsetMs,
                         isSyncMode = isSyncMode,
                         syncTapIndex = syncTaps.size,
-                        totalSections = sections.size,
-                        nextSectionName = sections.getOrNull(syncTaps.size) ?: "",
-                        onSyncTap = onSyncTap,
                         fontSp = settings.lyricsFontSp,
                         positionFrames = state.positionFrames,
                         durationFrames = state.durationFrames,
@@ -376,6 +392,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                             .fillMaxWidth()
                             .padding(vertical = 8.dp),
                     )
+                    SyncTapButton()
                 } else {
                     Spacer(Modifier.weight(1f))
                     Text(
@@ -608,9 +625,6 @@ private fun LyricsPane(
     syncOffsetMs: Int,
     isSyncMode: Boolean,
     syncTapIndex: Int,
-    totalSections: Int,
-    nextSectionName: String,
-    onSyncTap: () -> Unit,
     fontSp: Float,
     positionFrames: Long,
     durationFrames: Long,
@@ -686,109 +700,70 @@ private fun LyricsPane(
         )
     }
 
-    Column(modifier) {
-        // Sync-Modus-Banner
-        if (isSyncMode) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(
-                        MaterialTheme.colorScheme.errorContainer,
-                        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
-                    )
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "SYNC",
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                )
-                Text(
-                    "  Tippe bei: $nextSectionName",
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    fontSize = 13.sp,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "${syncTapIndex}/${totalSections}",
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-        }
-
-        Column(
-            Modifier
-                .weight(1f)
-                .background(
-                    MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                    if (isSyncMode) RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
-                    else RoundedCornerShape(12.dp),
-                )
-                .padding(horizontal = 12.dp)
-                .verticalScroll(scroll)
-                .then(
-                    if (isSyncMode) Modifier.clickable(onClick = onSyncTap)
-                    else if (allowGestures) Modifier.pointerInput(Unit) {
-                        detectTransformGestures { _, _, zoom, _ ->
-                            if (zoom != 1f) onFontScale(zoom)
-                        }
+    Column(
+        modifier
+            .background(
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                RoundedCornerShape(12.dp),
+            )
+            .padding(horizontal = 12.dp)
+            .verticalScroll(scroll)
+            .then(
+                if (allowGestures) Modifier.pointerInput(Unit) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom != 1f) onFontScale(zoom)
                     }
-                    else Modifier
-                ),
-        ) {
-            Spacer(Modifier.height(8.dp))
-            lines.forEachIndexed { lineIdx, line ->
-                when (line.kind) {
-                    ChordPro.Kind.EMPTY -> Spacer(Modifier.height((fontSp * 0.7f).dp))
-                    ChordPro.Kind.COMMENT -> Text(
-                        line.text,
-                        fontSize = fontSp.sp,
-                        lineHeight = (fontSp * 1.3f).sp,
-                        fontStyle = FontStyle.Italic,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                    ChordPro.Kind.SECTION -> {
-                        val si = lineToSectionIndex[lineIdx] ?: 0
-                        val isCurrent = !isSyncMode && si == currentPlaySection
-                        val isNextTap = isSyncMode && si == syncTapIndex
-                        val dividerAlpha = if (isCurrent || isNextTap) 0.8f else 0.3f
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp)
-                                .onGloballyPositioned { coords ->
-                                    sectionOffsets[si] = coords.positionInParent().y.roundToInt()
-                                },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            HorizontalDivider(
-                                Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = dividerAlpha),
-                            )
-                            Text(
-                                "  ${line.text}  ",
-                                color = MaterialTheme.colorScheme.primary.copy(
-                                    alpha = if (isCurrent || isNextTap) 1f else 0.6f,
-                                ),
-                                fontSize = (fontSp * 0.85f).sp,
-                                fontWeight = if (isCurrent || isNextTap) FontWeight.Bold
-                                else FontWeight.Normal,
-                            )
-                            HorizontalDivider(
-                                Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = dividerAlpha),
-                            )
-                        }
+                } else Modifier
+            ),
+    ) {
+        Spacer(Modifier.height(8.dp))
+        lines.forEachIndexed { lineIdx, line ->
+            when (line.kind) {
+                ChordPro.Kind.EMPTY -> Spacer(Modifier.height((fontSp * 0.7f).dp))
+                ChordPro.Kind.COMMENT -> Text(
+                    line.text,
+                    fontSize = fontSp.sp,
+                    lineHeight = (fontSp * 1.3f).sp,
+                    fontStyle = FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                ChordPro.Kind.SECTION -> {
+                    val si = lineToSectionIndex[lineIdx] ?: 0
+                    val isCurrent = !isSyncMode && si == currentPlaySection
+                    val isNextTap = isSyncMode && si == syncTapIndex
+                    val dividerAlpha = if (isCurrent || isNextTap) 0.8f else 0.3f
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                            .onGloballyPositioned { coords ->
+                                sectionOffsets[si] = coords.positionInParent().y.roundToInt()
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        HorizontalDivider(
+                            Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = dividerAlpha),
+                        )
+                        Text(
+                            "  ${line.text}  ",
+                            color = MaterialTheme.colorScheme.primary.copy(
+                                alpha = if (isCurrent || isNextTap) 1f else 0.6f,
+                            ),
+                            fontSize = (fontSp * 0.85f).sp,
+                            fontWeight = if (isCurrent || isNextTap) FontWeight.Bold
+                            else FontWeight.Normal,
+                        )
+                        HorizontalDivider(
+                            Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = dividerAlpha),
+                        )
                     }
-                    ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
                 }
+                ChordPro.Kind.LYRIC -> LyricLine(line, fontSp)
             }
-            Spacer(Modifier.height(8.dp))
         }
+        Spacer(Modifier.height(8.dp))
     }
 }
 

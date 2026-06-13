@@ -56,8 +56,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -682,20 +682,7 @@ private fun LyricsPane(
         }
     }
 
-    val scrollTargetSection by remember(syncTimestamps, syncOffsetMs) {
-        derivedStateOf {
-            if (syncTimestamps.isEmpty()) -1
-            else {
-                val posMs = positionState.longValue * 1000L / 48_000L
-                syncTimestamps.indexOfLast { tsMs -> posMs >= tsMs - syncOffsetMs - SCROLL_LEAD_MS }
-            }
-        }
-    }
-
-    var lastScrolledSection by remember { mutableIntStateOf(-1) }
-
-    LaunchedEffect(chordPro, syncData) {
-        lastScrolledSection = -1
+    LaunchedEffect(chordPro) {
         lazyState.scrollToItem(0)
     }
 
@@ -708,20 +695,25 @@ private fun LyricsPane(
         }
     }
 
-    // Sektionsbasiertes Scrollen — per Item-Index, kein Pixel-Tracking.
-    LaunchedEffect(scrollTargetSection) {
-        if (isSyncMode || syncTimestamps.isEmpty()) return@LaunchedEffect
-        if (scrollTargetSection < 0) {
-            if (lastScrolledSection != -1) {
-                lazyState.animateScrollToItem(0)
-                lastScrolledSection = -1
+    // Sektionsbasiertes Scrollen via snapshotFlow — reagiert direkt auf
+    // Positionsänderungen ohne Recomposition als Zwischenschritt.
+    LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex) {
+        if (syncTimestamps.isEmpty()) return@LaunchedEffect
+        var lastSection = -1
+        snapshotFlow { positionState.longValue }
+            .collect { frames ->
+                if (isSyncMode) return@collect
+                val posMs = frames * 1000L / 48_000L
+                val target = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs - SCROLL_LEAD_MS }
+                if (target == lastSection) return@collect
+                lastSection = target
+                if (target < 0) {
+                    lazyState.animateScrollToItem(0)
+                } else {
+                    val itemIdx = sectionToItemIndex[target] ?: return@collect
+                    lazyState.animateScrollToItem(itemIdx)
+                }
             }
-            return@LaunchedEffect
-        }
-        if (scrollTargetSection == lastScrolledSection) return@LaunchedEffect
-        lastScrolledSection = scrollTargetSection
-        val itemIdx = sectionToItemIndex[scrollTargetSection] ?: return@LaunchedEffect
-        lazyState.animateScrollToItem(itemIdx)
     }
 
     LazyColumn(

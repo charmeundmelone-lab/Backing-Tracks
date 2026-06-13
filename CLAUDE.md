@@ -1,5 +1,34 @@
 # MiniTraxx — Projektkontext für Claude
 
+## ⛔ APK-AUSLIEFERUNG — HARTE REGEL (zuerst lesen, niemals überspringen)
+
+**Es ist einmal passiert, dass eine APK an den User geschickt wurde, die
+seine Fixes NICHT enthielt** — weil der CI-Deploy-Schritt auf bestimmte
+Branch-Namen beschränkt war und der Arbeitsbranch nicht dazugehörte. Der
+User installierte stundenlang einen veralteten Build. Das darf NIE wieder
+passieren. Deshalb:
+
+**Bevor du dem User jemals eine APK schickst, MUSST du verifizieren, dass
+sie aus deinem letzten Commit gebaut wurde:**
+
+```bash
+git fetch origin apk-dist -q
+git log origin/apk-dist -1 --format='%s'   # enthält "build <SHA>"
+git rev-parse HEAD                          # dein letzter Commit
+```
+
+Die `<SHA>` in der apk-dist-Commit-Message MUSS mit `git rev-parse HEAD`
+übereinstimmen (bzw. dem Commit, den du gerade gepusht hast). **Stimmt sie
+nicht → NICHT senden.** Stattdessen: warten bis CI fertig ist, erneut
+prüfen. Wenn die apk-dist-Zeit alt aussieht (z. B. Stunden zurück),
+ist das ein Alarmsignal — untersuchen, nicht blind senden.
+
+Der CI-Workflow (`.github/workflows/android-build.yml`) pusht die APK von
+JEDEM Branch (außer apk-dist selbst) auf `apk-dist`. Diese Bedingung NICHT
+wieder auf einzelne Branch-Namen einschränken.
+
+---
+
 ## Kontext-Monitoring (WICHTIG — immer beachten)
 
 Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind

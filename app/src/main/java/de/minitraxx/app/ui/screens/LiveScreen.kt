@@ -711,12 +711,13 @@ private fun LyricsPane(
                 }
                 val targetIndex = exactPosition.toInt().coerceIn(0, lines.size)
                 val fraction = exactPosition - targetIndex
-                val avgItemPx = lazyState.layoutInfo.visibleItemsInfo
-                    .filter { it.index in 1..lines.size }
-                    .map { it.size }
-                    .average()
-                    .takeIf { !it.isNaN() }?.toInt() ?: 0
-                lazyState.scrollToItem(targetIndex, (fraction * avgItemPx).toInt())
+                val visInfo = lazyState.layoutInfo.visibleItemsInfo
+                // Exact item size wenn sichtbar → kein Sprung beim Itemwechsel;
+                // sonst Durchschnitt aller sichtbaren Content-Items als Fallback.
+                val itemPx = visInfo.firstOrNull { it.index == targetIndex }?.size
+                    ?: visInfo.filter { it.index in 1..lines.size }
+                        .map { it.size }.average().takeIf { !it.isNaN() }?.toInt() ?: 0
+                lazyState.scrollToItem(targetIndex, (fraction * itemPx).toInt())
             } else {
                 delay(100)  // Pause: Batterie schonen, kein VSync nötig
             }

@@ -113,9 +113,33 @@ object ChordPro {
 
     fun parse(source: String): List<Line> {
         val out = if (looksLikeChordPro(source)) parseChordPro(source) else parsePlain(source)
+        mergeChordOnlyLines(out)
         while (out.isNotEmpty() && out.first().kind == Kind.EMPTY) out.removeAt(0)
         while (out.isNotEmpty() && out.last().kind == Kind.EMPTY) out.removeAt(out.size - 1)
         return out
+    }
+
+    /**
+     * Fusioniert Akkord-Only-Zeilen (Liedtext leer, Akkorde gesetzt) mit der
+     * unmittelbar folgenden Text-Only-Zeile (keine Akkorde). Entsteht z. B.
+     * wenn der Importer [C]   [G] und "And all the lights..." als getrennte
+     * Zeilen speichert — nach dem Merge sitzen die Akkorde korrekt über dem Text.
+     */
+    private fun mergeChordOnlyLines(lines: MutableList<Line>) {
+        var i = 0
+        while (i < lines.size - 1) {
+            val cur = lines[i]
+            val next = lines[i + 1]
+            val curIsChordOnly = cur.kind == Kind.LYRIC && !cur.chords.isNullOrBlank() && cur.text.isBlank()
+            val nextIsLyricOnly = next.kind == Kind.LYRIC && next.chords == null && next.text.isNotBlank()
+            if (curIsChordOnly && nextIsLyricOnly) {
+                lines[i] = Line(Kind.LYRIC, cur.chords, next.text)
+                lines.removeAt(i + 1)
+                // don't advance i — check merged line again in case of chain
+            } else {
+                i++
+            }
+        }
     }
 
     private fun looksLikeChordPro(source: String): Boolean {

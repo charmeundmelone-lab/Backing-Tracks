@@ -61,6 +61,47 @@ interface SongDao {
 
     @Query("UPDATE songs SET syncData = :data WHERE id = :songId")
     suspend fun updateSyncData(songId: Long, data: String)
+
+    @Query("UPDATE songs SET genre = :genre WHERE id = :songId")
+    suspend fun updateGenre(songId: Long, genre: String)
+
+    @Query("SELECT DISTINCT genre FROM songs WHERE genre != '' ORDER BY genre COLLATE NOCASE")
+    fun observeAllGenres(): Flow<List<String>>
+}
+
+data class SongPlayCount(val songId: Long, val count: Int)
+
+@Dao
+interface GigDao {
+    @Query("SELECT * FROM gigs WHERE endedAt IS NULL LIMIT 1")
+    fun observeActiveGig(): Flow<GigEntity?>
+
+    @Query("SELECT * FROM gigs WHERE endedAt IS NULL LIMIT 1")
+    suspend fun getActiveGig(): GigEntity?
+
+    @Insert
+    suspend fun insertGig(gig: GigEntity): Long
+
+    @Query("UPDATE gigs SET endedAt = :endedAt WHERE id = :gigId")
+    suspend fun endGig(gigId: Long, endedAt: Long)
+
+    @Insert
+    suspend fun insertPlay(play: GigPlayEntity): Long
+
+    @Query("SELECT songId FROM gig_plays WHERE gigId = :gigId AND songId IS NOT NULL")
+    fun observePlayedSongIds(gigId: Long): Flow<List<Long?>>
+
+    @Query("SELECT songId, COUNT(*) as count FROM gig_plays WHERE gigId = :gigId AND songId IS NOT NULL GROUP BY songId")
+    fun observePlayCounts(gigId: Long): Flow<List<SongPlayCount>>
+
+    @Query("SELECT COUNT(DISTINCT songId) FROM gig_plays WHERE gigId = :gigId AND songId IS NOT NULL")
+    fun observePlayedSongCount(gigId: Long): Flow<Int>
+
+    @Query("SELECT * FROM gigs ORDER BY startedAt DESC")
+    suspend fun getAllGigs(): List<GigEntity>
+
+    @Query("SELECT * FROM gig_plays WHERE gigId = :gigId ORDER BY playedAt")
+    suspend fun getPlaysForGig(gigId: Long): List<GigPlayEntity>
 }
 
 @Dao

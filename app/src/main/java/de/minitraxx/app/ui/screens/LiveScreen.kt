@@ -1,10 +1,14 @@
 package de.minitraxx.app.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,9 +42,11 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +57,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -57,10 +65,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -73,6 +83,7 @@ import androidx.compose.ui.unit.sp
 import de.minitraxx.app.R
 import de.minitraxx.app.audio.NativeEngine
 import de.minitraxx.app.audio.PlaybackController
+import de.minitraxx.app.data.GigRepository
 import de.minitraxx.app.data.SettingsStore
 import de.minitraxx.app.data.SongRepository
 import de.minitraxx.app.util.ChordPro
@@ -80,6 +91,7 @@ import de.minitraxx.app.util.formatFrames
 import de.minitraxx.app.util.formatRemaining
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private const val SCROLL_LEAD_MS = 600L
 
@@ -98,9 +110,15 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val context = LocalContext.current
     val controller = remember { PlaybackController.get(context) }
     val repo = remember { SongRepository.get(context) }
+    val gigRepo = remember { GigRepository.get(context) }
     val store = remember { SettingsStore.get(context) }
     val state by controller.state.collectAsState()
     val settings by store.settings.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    val activeGig by gigRepo.gigDao.observeActiveGig().collectAsState(null)
+    val playedSongIds by gigRepo.playedSongIdsForActiveGig.collectAsState(emptySet())
+    val playCounts by gigRepo.playCountsForActiveGig.collectAsState(emptyMap())
 
     var locked by rememberSaveable { mutableStateOf(true) }
     var showSongSheet by remember { mutableStateOf(false) }
@@ -499,7 +517,26 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     if (showSongSheet) {
         val setlists by repo.setlistDao.observeAll().collectAsState(initial = emptyList())
         var listMenuOpen by remember { mutableStateOf(false) }
+        var selectedGenre by remember { mutableStateOf<String?>(null) }
+        val queueGenres = remember(state.queue) {
+            state.queue.map { it.genre }.filter { it.isNotEmpty() }.distinct().sorted()
+        }
+        val displayedQueue = remember(state.queue, selectedGenre) {
+            if (selectedGenre == null) state.queue
+            else state.queue.filter { it.genre == selectedGenre }
+        }
+
         ModalBottomSheet(onDismissRequest = { showSongSheet = false }) {
+            // Gig-Button
+            GigStatusButton(
+                activeGig = activeGig,
+                playedCount = playCounts.values.sumOf { 1 }.coerceAtLeast(playedSongIds.size),
+                onStartGig = { scope.launch { gigRepo.startGig() } },
+                onEndGig = { scope.launch { activeGig?.id?.let { gigRepo.endGig(it) } } },
+            )
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+            // Setlist-Header
             Box {
                 ListItem(
                     headlineContent = { Text(state.setlistName) },
@@ -525,30 +562,83 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                     }
                 }
             }
+
+            // Genre-Chips (nur wenn vorhanden)
+            if (queueGenres.isNotEmpty()) {
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = selectedGenre == null,
+                        onClick = { selectedGenre = null },
+                        label = { Text("Alle") },
+                    )
+                    queueGenres.forEach { genre ->
+                        FilterChip(
+                            selected = selectedGenre == genre,
+                            onClick = { selectedGenre = if (selectedGenre == genre) null else genre },
+                            label = { Text(genre) },
+                        )
+                    }
+                }
+            }
+
             HorizontalDivider()
+
             LazyColumn {
-                itemsIndexed(state.queue) { index, song ->
-                    val isCurrent = index == state.currentIndex
+                itemsIndexed(displayedQueue) { _, song ->
+                    val queueIndex = state.queue.indexOf(song)
+                    val isCurrent = queueIndex == state.currentIndex
+                    val playCount = playCounts[song.songId] ?: 0
+                    val wasPlayed = song.songId in playedSongIds
                     ListItem(
                         headlineContent = {
                             Text(
-                                "${index + 1}.  ${song.title}",
-                                color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurface,
+                                "${queueIndex + 1}.  ${song.title}",
+                                color = when {
+                                    isCurrent -> MaterialTheme.colorScheme.primary
+                                    wasPlayed -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                },
                             )
                         },
-                        supportingContent = { Text(formatFrames(song.durationFrames)) },
+                        supportingContent = {
+                            Text(
+                                formatFrames(song.durationFrames),
+                                color = if (wasPlayed && !isCurrent)
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
                         trailingContent = {
-                            if (isCurrent) {
-                                Icon(
-                                    Icons.Filled.PlayArrow,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (wasPlayed) {
+                                    Badge(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    ) {
+                                        Text(
+                                            if (playCount > 1) "${playCount}×" else "✓",
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        )
+                                    }
+                                }
+                                if (isCurrent) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Filled.PlayArrow,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
                         },
                         modifier = Modifier.clickableItem {
-                            controller.loadIndex(index)
+                            controller.loadIndex(queueIndex)
                             showSongSheet = false
                         },
                     )
@@ -576,6 +666,96 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
                         "Standard: 200 ms. Gilt für alle Songs.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GigStatusButton(
+    activeGig: de.minitraxx.app.data.GigEntity?,
+    playedCount: Int,
+    onStartGig: () -> Unit,
+    onEndGig: () -> Unit,
+) {
+    if (activeGig == null) {
+        TextButton(
+            onClick = onStartGig,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        ) {
+            Text(
+                "＋  Neuen Gig starten",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    } else {
+        val progress = remember { Animatable(0f) }
+        var pressing by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+        val errorColor = MaterialTheme.colorScheme.error
+
+        LaunchedEffect(pressing) {
+            if (pressing) {
+                progress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 2000, easing = LinearEasing),
+                )
+                if (pressing) {
+                    pressing = false
+                    onEndGig()
+                }
+            } else {
+                progress.snapTo(0f)
+            }
+        }
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            pressing = true
+                            tryAwaitRelease()
+                            pressing = false
+                        },
+                    )
+                }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "⊙",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 16.sp,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Gig läuft  •  $playedCount Song${if (playedCount == 1) "" else "s"} gespielt",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (pressing) {
+                    Text(
+                        "halten…",
+                        color = errorColor,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            if (pressing && progress.value > 0f) {
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { progress.value },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = errorColor,
                 )
             }
         }

@@ -21,10 +21,14 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -150,6 +154,46 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                     Modifier.padding(start = 8.dp),
                     style = MaterialTheme.typography.bodyMedium,
                 )
+            }
+
+            // Genre mit kurzer Verzögerung automatisch speichern.
+            var genre by remember(data.song.id) { mutableStateOf(data.song.genre) }
+            val allGenres by repo.songDao.observeAllGenres().collectAsState(emptyList())
+            var genreMenuOpen by remember { mutableStateOf(false) }
+            LaunchedEffect(genre) {
+                if (genre != data.song.genre) {
+                    kotlinx.coroutines.delay(600)
+                    repo.songDao.updateGenre(data.song.id, genre)
+                }
+            }
+            ExposedDropdownMenuBox(
+                expanded = genreMenuOpen && allGenres.isNotEmpty(),
+                onExpandedChange = { genreMenuOpen = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedTextField(
+                    value = genre,
+                    onValueChange = { genre = it },
+                    label = { Text("Genre / Motto") },
+                    placeholder = { Text("z. B. Rock, Ballade, Pop") },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                    trailingIcon = {
+                        if (allGenres.isNotEmpty())
+                            ExposedDropdownMenuDefaults.TrailingIcon(genreMenuOpen)
+                    },
+                    singleLine = true,
+                )
+                ExposedDropdownMenu(
+                    expanded = genreMenuOpen && allGenres.isNotEmpty(),
+                    onDismissRequest = { genreMenuOpen = false },
+                ) {
+                    allGenres.forEach { g ->
+                        DropdownMenuItem(
+                            text = { Text(g) },
+                            onClick = { genre = g; genreMenuOpen = false },
+                        )
+                    }
+                }
             }
 
             // Notizen mit kurzer Verzögerung automatisch speichern.

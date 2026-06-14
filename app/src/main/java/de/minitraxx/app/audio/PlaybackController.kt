@@ -6,6 +6,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import de.minitraxx.app.data.EndAction
+import de.minitraxx.app.data.GigRepository
 import de.minitraxx.app.data.SettingsStore
 import de.minitraxx.app.data.Slots
 import de.minitraxx.app.data.SongRepository
@@ -33,6 +34,8 @@ data class QueueSong(
     val chordPro: String,
     /** Tap-Once-Sync-Daten: leerzeichen-getrennte ms-Timestamps je {section:}-Marker. */
     val syncData: String,
+    /** Genre / Motto-Preset-Tag. */
+    val genre: String = "",
 )
 
 data class PlayerState(
@@ -60,6 +63,7 @@ class PlaybackController private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val repo = SongRepository.get(context)
+    private val gigRepo = GigRepository.get(context)
     private val settingsStore = SettingsStore.get(context)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
@@ -68,6 +72,11 @@ class PlaybackController private constructor(private val context: Context) {
 
     private var tickJob: Job? = null
     private var focusRequest: AudioFocusRequest? = null
+
+    // Gig-Tracking: akkumulierte Abspielzeit pro Song-Besuch.
+    private var accumPlayMs = 0L
+    private var lastTrackedSongId = -1L
+    private var gigPlayRecordedThisVisit = false
 
     init {
         scope.launch {
@@ -87,7 +96,7 @@ class PlaybackController private constructor(private val context: Context) {
                 QueueSong(
                     it.song.id, it.song.title, it.song.artist,
                     it.song.durationFrames, it.song.endAction, it.song.notes,
-                    it.song.chordPro, it.song.syncData,
+                    it.song.chordPro, it.song.syncData, it.song.genre,
                 )
             }
             if (queue.isEmpty()) {
@@ -246,6 +255,27 @@ class PlaybackController private constructor(private val context: Context) {
                     )
                 } else if (s.positionFrames != pos || s.isPlaying != playing) {
                     _state.value = s.copy(positionFrames = pos, isPlaying = playing)
+                }
+
+                // Gig-Tracking: akkumulierte Spielzeit; Schwelle 60 s.
+                val currentSongId = s.currentSong?.songId ?: -1L
+                if (currentSongId != lastTrackedSongId) {
+                    accumPlayMs = 0L
+                    lastTrackedSongId = currentSongId
+                    gigPlayRecordedThisVisit = false
+                }
+                if (playing && currentSongId != -1L) {
+                    accumPlayMs += 100
+                    if (accumPlayMs >= 60_000L && !gigPlayRecordedThisVisit) {
+                        gigPlayRecordedThisVisit = true
+                        val song = s.currentSong
+                        scope.launch {
+                            val gig = gigRepo.gigDao.getActiveGig()
+                            if (gig != null && song != null) {
+                                gigRepo.recordPlay(gig.id, song.songId, song.title, song.artist, accumPlayMs)
+                            }
+                        }
+                    }
                 }
             }
         }

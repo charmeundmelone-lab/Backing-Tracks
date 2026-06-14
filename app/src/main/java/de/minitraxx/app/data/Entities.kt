@@ -31,6 +31,8 @@ data class SongEntity(
     val chordPro: String = "",
     /** Leerzeichen-getrennte Millisekunden-Timestamps, einer pro {section:}-Marker. */
     val syncData: String = "",
+    /** Genre / Motto-Preset-Tag (z. B. "Rock", "Ballade"). */
+    val genre: String = "",
 )
 
 /**
@@ -58,6 +60,43 @@ data class StemEntity(
     val fileName: String,
     val gainDb: Float = 0f,
     val frames: Long = 0,
+)
+
+@Entity(tableName = "gigs")
+data class GigEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val label: String,
+    val startedAt: Long = System.currentTimeMillis(),
+    val endedAt: Long? = null,
+)
+
+@Entity(
+    tableName = "gig_plays",
+    foreignKeys = [
+        ForeignKey(
+            entity = GigEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["gigId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = SongEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["songId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index("gigId"), Index("songId")],
+)
+data class GigPlayEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gigId: Long,
+    /** null wenn der Song nachträglich gelöscht wurde — Snapshot bleibt trotzdem erhalten. */
+    val songId: Long? = null,
+    val titleSnapshot: String,
+    val artistSnapshot: String,
+    val playedAt: Long = System.currentTimeMillis(),
+    val playedMs: Long = 0,
 )
 
 @Entity(tableName = "setlists")

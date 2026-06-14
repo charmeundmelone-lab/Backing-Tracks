@@ -2,49 +2,55 @@
 
 ## ⛔ APK-AUSLIEFERUNG — HARTE REGEL (zuerst lesen, niemals überspringen)
 
-**Es ist einmal passiert, dass eine APK an den User geschickt wurde, die
-seine Fixes NICHT enthielt** — weil der CI-Deploy-Schritt auf bestimmte
-Branch-Namen beschränkt war und der Arbeitsbranch nicht dazugehörte. Der
-User installierte stundenlang einen veralteten Build. Das darf NIE wieder
-passieren. Deshalb:
+**Diese Regel wurde eingeführt, weil eine veraltete APK ausgeliefert wurde
+und der User stundenlang den falschen Build installiert hatte. Das darf NIE
+wieder passieren.**
 
-**Bevor du dem User jemals eine APK schickst, MUSST du verifizieren, dass
-sie aus deinem letzten Commit gebaut wurde:**
+**Bevor du dem User jemals eine APK schickst, MUSST du ALLE drei Schritte
+ausführen:**
 
 ```bash
 git fetch origin apk-dist -q
-git log origin/apk-dist -1 --format='%s'   # enthält "build <SHA>"
-git rev-parse HEAD                          # dein letzter Commit
+git log origin/apk-dist -1 --format='%s'   # muss "build <SHA>" enthalten
+git rev-parse HEAD                          # dein letzter gepushter Commit
 ```
 
 Die `<SHA>` in der apk-dist-Commit-Message MUSS mit `git rev-parse HEAD`
-übereinstimmen (bzw. dem Commit, den du gerade gepusht hast). **Stimmt sie
-nicht → NICHT senden.** Stattdessen: warten bis CI fertig ist, erneut
-prüfen. Wenn die apk-dist-Zeit alt aussieht (z. B. Stunden zurück),
-ist das ein Alarmsignal — untersuchen, nicht blind senden.
+**exakt übereinstimmen**. Stimmt sie nicht → **NICHT senden**.
+Warte mit Monitor auf CI und prüfe erneut:
+
+```kotlin
+// Monitor-Pattern für CI-Warten:
+Monitor(command = """
+MY_SHA=$(git rev-parse HEAD)
+until git fetch origin apk-dist -q && git log origin/apk-dist -1 --format='%s' | grep -q "$MY_SHA"; do sleep 30; done
+echo "BEREIT: $(git log origin/apk-dist -1 --format='%s')"
+""", timeout_ms = 600000)
+```
+
+Danach APK holen und senden:
+```bash
+git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
+```
 
 Der CI-Workflow (`.github/workflows/android-build.yml`) pusht die APK von
-JEDEM Branch (außer apk-dist selbst) auf `apk-dist`. Diese Bedingung NICHT
-wieder auf einzelne Branch-Namen einschränken.
+**JEDEM Branch** (außer apk-dist selbst) auf `apk-dist`. NICHT auf einzelne
+Branch-Namen beschränken — diese Bedingung wurde bereits falsch konfiguriert
+und war Ursache des Problems.
 
 ---
 
 ## Kontext-Monitoring (WICHTIG — immer beachten)
 
-Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind
-(`totalTokensReminder: countdown`). Handle danach:
-
-- **< 40.000 Tokens übrig:** Sag dem User aktiv: "Kontext läuft voll —
-  bitte starte nach diesem Task eine neue Session. CLAUDE.md enthält alles
-  was du brauchst."
-- **< 20.000 Tokens übrig:** Sofort stoppen, nichts mehr implementieren.
-  Stattdessen: aktuellen Stand committen & pushen, dann dem User sagen er
-  soll jetzt eine neue Session starten.
+- **< 40.000 Tokens übrig:** User aktiv warnen: "Kontext läuft voll —
+  bitte neue Session starten. CLAUDE.md enthält alles."
+- **< 20.000 Tokens übrig:** Sofort stoppen, committen & pushen,
+  User auffordern neue Session zu starten.
 
 **Nahtloser Session-Übergang:**
-1. Alle Änderungen committen & auf `claude/kind-hawking-h4833c` pushen
-2. User sagt Claude in neuer Session: *"Lies CLAUDE.md und mach weiter."*
-3. Neue Claude-Instanz liest CLAUDE.md → hat vollen Kontext → kein Warmup nötig
+1. Alle Änderungen committen & pushen
+2. User sagt in neuer Session: *"Lies CLAUDE.md und mach weiter."*
+3. Neue Claude-Instanz hat vollen Kontext — kein Warmup nötig.
 
 ---
 
@@ -55,8 +61,9 @@ zeigt ChordPro-Lyrics mit automatischem Scroll (Tap-Once-Sync), verwaltet
 Setlisten und Songs mit Room-Datenbank.
 
 **Repo:** `charmeundmelone-lab/Backing-Tracks`
-**Aktiver Branch:** `claude/kind-hawking-h4833c`
+**Aktiver Branch:** `claude/current-apk-disto-y2wzvi`
 **APK-Dist Branch:** `apk-dist` (wird per CI bei jedem Push gebaut)
+**Letzter Commit:** `de8279d`
 
 ## Architektur
 
@@ -72,14 +79,17 @@ app/src/main/java/de/minitraxx/app/
 │   ├── SongRepository.kt      — Zugriff auf Songs, Stems, Setlisten
 │   └── Slots.kt               — Stem-Slot-Konstanten (TOTAL = 8)
 ├── ui/screens/
-│   ├── LiveScreen.kt          — Live-Ansicht (der hauptsächlich bearbeitete Screen)
-│   └── ...                    — weitere Screens (Setup, Song-Editor, etc.)
+│   ├── LiveScreen.kt          — Live-Ansicht (LyricsPane, Scroll, SyncButton)
+│   ├── SongEditorScreen.kt    — Song-Editor mit "Akkorde ← →" Button
+│   ├── ChordEditorDialog.kt   — Chord-Tap-Editor (Akkorde per Tap verschieben)
+│   └── ...
 └── util/
-    ├── ChordPro.kt            — Parser für ChordPro-Format ({section:}, {c:}, Lyrics)
+    ├── ChordPro.kt            — Parser (ChordPro + UG-Plain-Text Autoerkennung)
+    ├── PdfChordImporter.kt    — PDF-Import mit koordinatengenauer Akkord-Platzierung
     └── formatFrames.kt        — Zeitformatierung
 ```
 
-## NativeEngine API (wichtig)
+## NativeEngine API
 
 ```kotlin
 object NativeEngine {
@@ -88,9 +98,7 @@ object NativeEngine {
     fun isFinished(): Boolean
     fun clearFinished()
     fun hadStreamError(): Boolean
-    fun play()
-    fun pause()
-    fun stop()
+    fun play(); fun pause(); fun stop()
     fun seek(frame: Long)
     fun start()                  // Stream (neu) öffnen
     fun loadSong(paths: Array<String?>, gains: FloatArray): Long  // → durationFrames
@@ -105,137 +113,192 @@ object NativeEngine {
 
 ```kotlin
 data class PlayerState(
-    val setlistId: Long,
-    val setlistName: String,
-    val queue: List<QueueSong>,
-    val currentIndex: Int,
-    val positionFrames: Long,   // aktualisiert alle 100ms per Tick
+    val setlistId: Long, val setlistName: String,
+    val queue: List<QueueSong>, val currentIndex: Int,
+    val positionFrames: Long,   // alle 100ms per Tick aktualisiert
     val durationFrames: Long,
-    val isPlaying: Boolean,
-    val isLoading: Boolean,
-    val error: String?,
+    val isPlaying: Boolean, val isLoading: Boolean, val error: String?,
 )
 data class QueueSong(
     val songId: Long, val title: String, val artist: String,
     val durationFrames: Long, val endAction: Int, val notes: String,
     val chordPro: String,
-    val syncData: String,  // leerzeichen-getrennte ms-Timestamps; "" wenn kein Sync
+    val syncData: String,  // leerzeichen-getrennte ms-Timestamps; "" = kein Sync
 )
 ```
 
-PlaybackController ist ein Singleton (`PlaybackController.get(context)`).
-Der Tick-Job läuft alle 100 ms und aktualisiert `_state.positionFrames`.
+PlaybackController ist Singleton (`PlaybackController.get(context)`).
 
-## Tap-Once-Sync — Feature-Beschreibung
+## LyricsPane — Scroll-Implementierung (LiveScreen.kt ~688)
 
-Der Nutzer tippt beim ersten Durchlauf des Songs einmal pro Sektion auf
-einen Button. Die Timestamps (ms) werden als `syncData = "1234 5678 ..."` in
-der DB gespeichert (Song-Feld).
-
-Im Live-Betrieb scrollt die LyricsPane automatisch:
-- **Mit Sync-Daten:** Sektionsbasiert + Innerhalb-Sektion interpoliert
-- **Ohne Sync-Daten oder im Sync-Modus:** Lineare Position (Fallback)
-
-## LyricsPane — aktueller Scroll-Code (LiveScreen.kt ~692)
+**Einheitliche Schleife** — ein `LaunchedEffect` deckt beide Modi ab:
 
 ```kotlin
-// Lineare Positionskopplung (Fallback ohne Sync oder im Sync-Modus).
-LaunchedEffect(positionFrames, durationFrames, isPlaying) {
-    if (isPlaying && durationFrames > 0 && (syncTimestamps.isEmpty() || isSyncMode)) {
-        val targetIdx = ((positionFrames.toDouble() / durationFrames) * lines.size)
-            .toInt().coerceIn(0, lines.size)
-        lazyState.scrollToItem(targetIdx)
-    }
-}
-
-// Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
-// isPlaying ist KEIN Key — kurzes Flackern würde lastTargetItem resetten.
 LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
-    if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
+    if (durationFrames <= 0) return@LaunchedEffect
     val durationMs = durationFrames * 1000L / 48_000L
-    var lastTargetItem = -1
     while (true) {
-        delay(100)
-        val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-        val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
-        val targetItem = if (sec < 0) {
-            0
+        if (NativeEngine.isPlaying()) {
+            withFrameNanos { }  // VSync-sync (60/90/120 Hz)
+            val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
+            val exactPosition: Double = if (syncTimestamps.isEmpty() || isSyncMode) {
+                (posMs.toDouble() / durationMs) * lines.size
+            } else {
+                // sektionsbasiert mit Interpolation innerhalb der Sektion
+                ...
+            }
+            val targetIndex = exactPosition.toInt().coerceIn(0, lines.size)
+            val fraction = exactPosition - targetIndex
+            // Exakte Item-Größe verwenden wenn sichtbar (kein avg-Sprung):
+            val visInfo = lazyState.layoutInfo.visibleItemsInfo
+            val itemPx = visInfo.firstOrNull { it.index == targetIndex }?.size
+                ?: visInfo.filter { it.index in 1..lines.size }
+                    .map { it.size }.average().takeIf { !it.isNaN() }?.toInt() ?: 0
+            lazyState.scrollToItem(targetIndex, (fraction * itemPx).toInt())
         } else {
-            val secStart = syncTimestamps[sec]
-            val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
-            val firstItem = sectionToItemIndex[sec] ?: 0
-            val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
-            val t = if (secEnd > secStart)
-                ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
-            else 0.0
-            (firstItem + (nextFirst - firstItem) * t).toInt()
-        }
-        if (targetItem != lastTargetItem) {
-            lastTargetItem = targetItem
-            lazyState.scrollToItem(targetItem)
+            delay(100)
         }
     }
 }
 ```
 
-**Warum `isPlaying` KEIN Key ist:**
-`NativeEngine.isPlaying()` kann im PlaybackController-Tick kurz `false` melden
-(Race-Condition), was den LaunchedEffect neu startet, `lastTargetItem` resettet
-und die Schleife immer bei Sektion 0 festhält. Deshalb pollen wir NativeEngine
-direkt im `while(true)`-Loop ohne `isPlaying` als Key.
+**Warum `isPlaying` KEIN Key ist:** Race-Condition im PlaybackController-Tick
+kann kurz `false` melden → Effect-Restart → `lastTargetItem`-Reset →
+Schleife hängt bei Sektion 0. Deshalb `NativeEngine.isPlaying()` direkt pollen.
 
-## SyncButton-Verhalten
+## ChordPro-Parser — wichtige Details (ChordPro.kt)
 
-- **Kurz-Tap ohne Sync-Daten:** Startet Sync-Modus
-- **Kurz-Tap mit Sync-Daten:** Nichts (kein Re-Sync durch Versehen)
-- **Lang-Tap ohne Sync-Modus:** Startet Re-Sync (Daten überschreiben)
-- **Lang-Tap im Sync-Modus:** Öffnet Offset-Sheet (syncOffsetMs)
-- **Im Sync-Modus Kurz-Tap:** Bricht Sync ab
-- Sync-Modus endet automatisch beim Songwechsel
+**Zwei Formate** werden automatisch erkannt:
+- **ChordPro** (`looksLikeChordPro` = true): `{section:}`, `{c:}`, `[Akkord]text`
+- **UG-Plain-Text**: eigene Akkordzeile über Textzeile, `[Verse 1]`-Header
 
-## CI / APK-Dist
+**`parse()`** ruft nach dem Parsen `mergeChordOnlyLines()` auf:
+- Akkord-Only-Zeilen (text leer, chords gesetzt) + folgende Text-Only-Zeile
+  werden zu EINER Zeile fusioniert.
+- Verhindert visuelle Trennung von Akkorden und Lyrics im Renderer.
 
-GitHub Actions baut bei jedem Push auf `claude/kind-hawking-h4833c` eine
-Debug-APK und pusht sie auf den Branch `apk-dist` als `MiniTraxx-debug.apk`.
+**`toWords(line)`** konvertiert eine LYRIC-Zeile in `List<List<Piece>>`:
+- Range-Matching: Akkord innerhalb W(start,end) → direkt zugewiesen
+- Gap-Akkorde: nearest-word-by-distance (nicht mehr "next word after position")
+  → robuster bei eingerückten Textzeilen
 
-So APK holen:
-```bash
-git fetch origin apk-dist
-git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
+**`Kind.SECTION`** (neu, neben LYRIC/COMMENT/EMPTY):
+- Erzeugt den Section-Divider mit horizontaler Linie im Live-Screen
+- `{section: Verse 1}` → Kind.SECTION
+
+## LyricLine-Renderer (LiveScreen.kt ~795)
+
+```kotlin
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
+    val words = remember(line) { ChordPro.toWords(line) }
+    if (words.isEmpty()) { Spacer(Modifier.height((fontSp * 0.5f).dp)); return }
+    val hasChord = remember(words) { words.any { w -> w.any { it.chord != null } } }
+    FlowRow(Modifier.fillMaxWidth().padding(vertical = (fontSp * 0.14f).dp)) {
+        for (word in words) {
+            Row(Modifier.padding(end = (fontSp * 0.30f).dp)) {
+                for (piece in word) {
+                    Column(horizontalAlignment = Alignment.Start) {
+                        if (hasChord) {
+                            Text(chord_or_space, fontWeight = Bold, color = primary, ...)
+                        }
+                        // WICHTIG: Kein Text(" ") für leere Pieces!
+                        // Standalone-Akkorde (piece.text.isEmpty) rendern keine Textzeile.
+                        if (piece.text.isNotEmpty()) {
+                            Text(piece.text, ...)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 ```
+
+**Warum kein `Text(" ")` für leere Pieces:** Standalone-Akkorde (Intro-Muster
+ohne Liedtext) erzeugten sonst eine volle Leerzeile — Akkorde wirkten visuell
+von den Lyrics getrennt.
+
+## PdfChordImporter — Architektur
+
+Koordinaten-genauer Import aus PDFs mit echtem Textlayer (UG-Style):
+- `collectGlyphs`: liest X/Y-Koordinaten jedes Zeichens per PDFBox
+- `groupLines`: gruppiert Glyphen mit ähnlichem Y zu Zeilen
+- `tokenize`: zerlegt Zeile in Tokens anhand X-Lücken
+- `isChordTokens` / `isSectionHeader` / `isTabLine`: Zeilen-Klassifikation
+- `mergeChordLyric`: **Wort-Grenz-Snapping** — jeder Akkord geht zum nächsten
+  Wortanfang (minimaler |lyric[i].x - chord.startX|). Erzeugt Inline-ChordPro.
+- `chordOnly`: für Akkord-Zeilen ohne Lyrics (Intro-Pattern)
+- Ausgabe: Inline-ChordPro mit `[Akkord]text`-Markern + `{section:}`-Direktiven
+
+**Hinweis für exakte Akkordplatzierung:** Wenn Akkorde verschoben wirken,
+hilft ein Neu-Import der PDF. Der Importer platziert Akkorde koordinatengenau
+über dem nächsten Wortanfang im Original-PDF.
+
+## ChordEditorDialog (ui/screens/ChordEditorDialog.kt)
+
+Tap-to-Move-Editor: User kann Akkorde per Tap auswählen und mit ← → ein Wort
+nach links/rechts verschieben. Öffnet über "Akkorde ← →" Button im SongEditor.
+
+## Tap-Once-Sync
+
+- User tippt im Sync-Modus einmal pro Sektion
+- Timestamps als `syncData = "1234 5678 ..."` in DB gespeichert
+- Scroll: sektionsbasiert + innerhalb Sektion interpoliert
+
+**SyncButton-Verhalten:**
+- Kurz-Tap ohne Sync-Daten → Sync-Modus starten
+- Kurz-Tap mit Sync-Daten → nichts (Schutz vor versehentlichem Re-Sync)
+- Lang-Tap ohne Sync-Modus → Re-Sync (Daten überschreiben)
+- Lang-Tap im Sync-Modus → Offset-Sheet (syncOffsetMs)
+- Kurz-Tap im Sync-Modus → Sync abbrechen
+- **syncOffsetMs** (Standard 200 ms): kompensiert Tipp-Reaktionszeit
 
 ## Wichtige Gotchas
 
-1. **`delay` muss importiert werden:** `import kotlinx.coroutines.delay`
-   (andernfalls Compile-Fehler; `kotlinx.coroutines.delay(...)` fully-qualified geht auch)
+1. **`delay` importieren:** `import kotlinx.coroutines.delay`
+2. **LazyColumn-Item-Indizes:** Item 0 = Spacer, Items 1..N = Lines, N+1 = Spacer.
+   `sectionToItemIndex[s] = lineIndex + 1` (wegen Spacer-Offset).
+3. **`sectionToItemIndex`** ist `Map<Int, Int>` — Zugriff gibt `null` zurück → `?: fallback`
+4. **Room DB Version 5** — Migration erforderlich bei Schema-Änderungen
+5. **Stems-Slots:** `Slots.TOTAL = 8`
+6. **`withFrameNanos`** aus `androidx.compose.runtime` importieren
+7. **FlowRow** braucht `@OptIn(ExperimentalLayoutApi::class)`
 
-2. **LazyColumn-Item-Indizes:** Item 0 = führender Spacer, Items 1..N = Lines, Item N+1 = Spacer.
-   `sectionToItemIndex[s] = lineIndex + 1` (wegen Spacer).
+## Aktueller Stand (Session 2026-06-14)
 
-3. **`sectionToItemIndex`** ist `Map<Int, Int>` (sectionIndex → lazyColumnItemIndex).
-   Zugriff mit `[key]` gibt `null` zurück wenn nicht vorhanden — immer `?: fallback` nutzen.
+**Branch:** `claude/current-apk-disto-y2wzvi`
+**Letzter Commit:** `de8279d`
 
-4. **Room DB Version 5** — Migration nicht vergessen wenn Schema geändert wird.
+### In dieser Session behoben:
 
-5. **Stems-Slots:** `Slots.TOTAL = 8`. Stems werden per Slot-Index den Audio-Engine-Kanälen zugeordnet.
+1. **Akkord-Zeilen-Fusion** (`ChordPro.mergeChordOnlyLines`): Akkord-Only +
+   Text-Only-Zeilen werden nach dem Parsen automatisch fusioniert. Vorher saßen
+   Akkorde auf einer eigenen Zeile, Liedtext darunter — jetzt korrekt übereinander.
 
-6. **syncOffsetMs** (Standard 200 ms): Reaktionszeit-Korrektur — Timestamps werden um diesen
-   Wert nach vorne verschoben, damit der Scroll die gefühlte Tipp-Verzögerung ausgleicht.
+2. **Gap-Akkord-Zuweisung** (`ChordPro.toWords`): Statt "nächstes Wort nach
+   der Akkord-Position" jetzt "nächstes Wort nach absolutem Abstand" — robuster
+   bei eingerückten Textzeilen und Spaltenversätzen.
 
-## Offene / geplante Features
+3. **Standalone-Chord-Rendering** (`LiveScreen.LyricLine`): Leere Piece-Texte
+   rendern keine Leerzeile mehr — verhinderte visuelle Trennung Akkord/Lyrics.
 
-- **Freeform-Sync:** Sektions-Buttons in beliebiger Reihenfolge antippen während Sync
-- **Quick-Add-Section:** Neue Sektion während Sync hinzufügen (nicht im ChordPro vorhanden)
-- **Zoom während Sync-Wiedergabe:** Scroll-Geschwindigkeit anpassen
-- **PDF-Import:** Akkorde über Text korrekt positionieren
+4. **Scroll-Präzision** (`LiveScreen.LyricsPane`): Exakte Item-Größe statt
+   Durchschnitt für Pixel-Offset → keine Mikro-Sprünge beim Itemwechsel.
 
-## Letzter Stand (Session vom 2026-06-13)
+5. **Smooth-Scroll** (frühere Session): `withFrameNanos` + VSync-Sync +
+   `scrollToItem(index, pixelOffset)` → butterweicher Scroll bei 60/90/120 Hz.
 
-Commit `ca97612` (Branch `claude/kind-hawking-h4833c`) — innerhalb-Sektion-Scroll
-implementiert. CI läuft, APK noch nicht verfügbar.
+6. **CI-Deploy-Fix**: APK wird von JEDEM Branch (außer apk-dist) gebaut.
 
-Davor behoben:
-- Sektionswechsel-Scroll funktioniert (Commit `fee808c`)
-- SyncButton Re-Sync-Schutz (Kurz-Tap tut nichts wenn Sync-Daten vorhanden)
-- Auto-Save von Sync-Daten + "✓ Sync gespeichert" Feedback
-- Scroll-to-top beim Song-Neustart
+### Noch offen / geplant:
+
+- Scroll-Geschwindigkeit: leichte Variation (etwas schneller/langsamer) — User
+  hat es als "sehr smooth" beschrieben, aber noch nicht perfekt gleichmäßig.
+  Mögliche Ursache: `NativeEngine.positionFrames()` nicht thread-safe oder
+  kleine Jitter im Audio-Timing.
+- Akkord-Zuordnung: Für bereits importierte Songs mit verschobenen Akkorden
+  hilft Neu-Import der PDF. Kein automatischer Fix für bestehende DB-Daten.
+- ChordEditorDialog: Gebaut, aber UX noch nicht vom User getestet/bewertet.
+- Offene Features: Freeform-Sync, Quick-Add-Section, Zoom während Sync

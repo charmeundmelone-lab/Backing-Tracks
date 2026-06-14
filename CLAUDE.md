@@ -200,13 +200,21 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 - **Zoom während Sync-Wiedergabe:** Scroll-Geschwindigkeit anpassen
 - **PDF-Import:** Akkorde über Text korrekt positionieren
 
-## Letzter Stand (Session vom 2026-06-13)
+## Letzter Stand (Session vom 2026-06-14)
 
-Commit `ca97612` (Branch `claude/kind-hawking-h4833c`) — innerhalb-Sektion-Scroll
-implementiert. CI läuft, APK noch nicht verfügbar.
+Commit `cfbc435` (Branch `claude/claude-md-review-052dfg`) — Motto-Preset mit
+Gig-Gedächtnis implementiert. CI läuft; APK auf `apk-dist` sobald Build durch.
 
-Davor behoben:
-- Sektionswechsel-Scroll funktioniert (Commit `fee808c`)
-- SyncButton Re-Sync-Schutz (Kurz-Tap tut nichts wenn Sync-Daten vorhanden)
-- Auto-Save von Sync-Daten + "✓ Sync gespeichert" Feedback
-- Scroll-to-top beim Song-Neustart
+**Was neu ist:**
+- DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`
+- `GigRepository`: Gig starten/beenden, Play aufzeichnen, reaktive Flows
+- `PlaybackController`: 60-Sek-akkumuliertes-Tracking per Songwechsel-reset
+- `SongEditorScreen`: Genre-Feld mit Autocomplete
+- `LiveScreen` Bottom Sheet: morphender Gig-Button (2s Long-Press beendet),
+  Genre-FilterChips, ausgegraute Songs mit ✓/2×-Badge
+
+**Aktiver Branch:** `claude/claude-md-review-052dfg`
+
+Davor (Session 2026-06-13):
+- Innerhalb-Sektion-Scroll (Commit `ca97612`)
+- SyncButton Re-Sync-Schutz, Auto-Save Sync-Daten

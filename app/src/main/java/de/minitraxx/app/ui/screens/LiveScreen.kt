@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -73,6 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -94,6 +96,32 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val SCROLL_LEAD_MS = 600L
+
+/** Polling-Takt für flüssiges Auto-Scroll (~30 fps). */
+private const val SCROLL_FRAME_MS = 32L
+
+/**
+ * Scrollt die LazyColumn auf eine *gebrochene* Item-Position [targetF].
+ * Der Ganzzahlanteil wählt das Item, der Nachkommaanteil wird in einen
+ * Pixel-Offset innerhalb des Items übersetzt → flüssiges Gleiten statt
+ * zeilenweisem Springen. Item-Höhe kommt aus dem aktuellen Layout
+ * (Fallback: Schätzung über fontSp), damit es auf jedem Gerät passt.
+ */
+private suspend fun smoothScrollTo(
+    state: LazyListState,
+    targetF: Double,
+    lineCount: Int,
+    fontSp: Float,
+    density: Float,
+) {
+    val maxIndex = lineCount + 1
+    val index = targetF.toInt().coerceIn(0, maxIndex)
+    val frac = (targetF - index).coerceIn(0.0, 1.0)
+    val itemHeightPx = state.layoutInfo.visibleItemsInfo
+        .firstOrNull { it.index == index }?.size
+        ?: (fontSp * 1.6f * density).toInt()
+    state.scrollToItem(index, (frac * itemHeightPx).toInt())
+}
 
 /**
  * Live-Screen: großer Restzeit-Countdown, nächster Song, Play/Pause.
@@ -828,6 +856,7 @@ private fun LyricsPane(
 ) {
     val lines = remember(chordPro) { ChordPro.parse(chordPro) }
     val lazyState = rememberLazyListState()
+    val density = LocalDensity.current.density
 
     val syncTimestamps = remember(syncData) {
         syncData.trim().split(" ").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
@@ -859,28 +888,36 @@ private fun LyricsPane(
     }
 
     // Lineare Positionskopplung (Fallback ohne Sync oder im Sync-Modus).
-    LaunchedEffect(positionFrames, durationFrames, isPlaying) {
-        if (isPlaying && durationFrames > 0 && (syncTimestamps.isEmpty() || isSyncMode)) {
-            val targetIdx = ((positionFrames.toDouble() / durationFrames) * lines.size)
-                .toInt().coerceIn(0, lines.size)
-            lazyState.scrollToItem(targetIdx)
+    // Pollt die Engine mit ~30 fps und scrollt mit Sub-Item-Pixel-Offset →
+    // flüssiges Gleiten statt zeilenweisem Springen (kein 100ms-State-Takt).
+    LaunchedEffect(durationFrames, isSyncMode, syncTimestamps) {
+        if (durationFrames <= 0) return@LaunchedEffect
+        if (syncTimestamps.isNotEmpty() && !isSyncMode) return@LaunchedEffect
+        while (true) {
+            delay(SCROLL_FRAME_MS)
+            if (!NativeEngine.isPlaying()) continue
+            val pos = NativeEngine.positionFrames()
+            val targetF = (pos.toDouble() / durationFrames) * lines.size
+            smoothScrollTo(lazyState, targetF, lines.size, fontSp, density)
         }
     }
 
     // Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
-    // Zwischen zwei Timestamps wird linear durch die Zeilen der Sektion gescrollt.
+    // Zwischen zwei Timestamps wird linear durch die Zeilen der Sektion gescrollt,
+    // mit Sub-Item-Pixel-Offset für flüssiges Gleiten.
     // durationFrames als Key: LaunchedEffect startet neu sobald Song geladen ist.
-    // isPlaying ist KEIN Key — kurzes Flackern würde lastTargetItem resetten.
+    // isPlaying ist KEIN Key — kurzes Flackern würde den Loop neu starten;
+    // stattdessen pollen wir isPlaying im Loop und überspringen nur einen Frame.
     LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
         if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
         val durationMs = durationFrames * 1000L / 48_000L
-        var lastTargetItem = -1
         while (true) {
-            delay(100)
+            delay(SCROLL_FRAME_MS)
+            if (!NativeEngine.isPlaying()) continue
             val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
             val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
-            val targetItem = if (sec < 0) {
-                0
+            val targetF = if (sec < 0) {
+                0.0
             } else {
                 val secStart = syncTimestamps[sec]
                 val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
@@ -889,12 +926,9 @@ private fun LyricsPane(
                 val t = if (secEnd > secStart)
                     ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
                 else 0.0
-                (firstItem + (nextFirst - firstItem) * t).toInt()
+                firstItem + (nextFirst - firstItem) * t
             }
-            if (targetItem != lastTargetItem) {
-                lastTargetItem = targetItem
-                lazyState.scrollToItem(targetItem)
-            }
+            smoothScrollTo(lazyState, targetF, lines.size, fontSp, density)
         }
     }
 

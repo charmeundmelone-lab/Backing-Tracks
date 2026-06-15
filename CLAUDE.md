@@ -8,11 +8,25 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Nahtloser Session-Übergang | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `00827dd` |
+| Letzter Commit | Letzter Stand | `fdeff23` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
+
+## Branch-Verifikation — ALLERERSTER SCHRITT
+
+**Bevor du irgendetwas tust: Führe `git branch` aus und prüfe den aktiven Branch.**
+
+```
+Erwarteter Branch: claude/claude-md-review-052dfg
+```
+
+- Stimmt der Branch? → Weiter mit CI-Check
+- Falscher Branch? → `git checkout claude/claude-md-review-052dfg` ausführen, dann weiter
+- Branch existiert nicht lokal? → `git fetch origin && git checkout claude/claude-md-review-052dfg`
+
+**Niemals Code committen oder pushen ohne diesen Check. Niemals.**
 
 ## CI-Check — PFLICHT vor jedem Weitermachen
 

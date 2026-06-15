@@ -34,6 +34,12 @@ object PdfChordImporter {
         RegexOption.IGNORE_CASE,
     )
 
+    /** Metadaten-Präfixe die als roher Text durchgereicht werden (kein Chord-Snapping). */
+    private val METADATA_KEYS = Regex(
+        "^(capo|tuning|strumming|tempo|key|time|bpm|difficulty|version|artist|title|album)\\s*:",
+        RegexOption.IGNORE_CASE,
+    )
+
     fun import(context: Context, uri: Uri): String {
         PDFBoxResourceLoader.init(context.applicationContext)
         val stream = context.contentResolver.openInputStream(uri)
@@ -103,6 +109,7 @@ object PdfChordImporter {
             when {
                 isSectionHeader(tokens) -> appendLine(out, "{section: ${sectionText(tokens)}}")
                 isTabLine(tokens) -> { /* Guitar tab lines: skip silently */ }
+                isMetadataLine(tokens) -> appendLine(out, reconstructText(line))
                 isChordTokens(tokens) -> {
                     val next = lines.getOrNull(i + 1)
                     val nextTokens = next?.let { tokenize(it) }
@@ -217,6 +224,13 @@ object PdfChordImporter {
         return joined.matches(Regex("[eEBGDAd]\\|[-0-9|x/\\\\hpb~. ]+.*"))
     }
 
+    /** Metadaten-Zeilen wie "Capo: 2" oder "Strumming: D DU" als rohen Text durchreichen. */
+    private fun isMetadataLine(tokens: List<Token>): Boolean {
+        if (tokens.isEmpty()) return false
+        val joined = tokens.joinToString(" ") { it.text }.trim()
+        return METADATA_KEYS.containsMatchIn(joined)
+    }
+
     private fun sectionText(tokens: List<Token>): String =
         tokens.joinToString(" ") { it.text }.trim()
             .removeSurrounding("[", "]").removeSurrounding("(", ")").trim()
@@ -241,16 +255,20 @@ object PdfChordImporter {
             if (lyric[i].x - (lyric[i - 1].x + lyric[i - 1].w) > spaceGap) wordStarts.add(i)
         }
 
-        // Jeden Akkord zum NÄCHSTEN Wortanfang snappen (minimaler Abstand zur chord.startX).
-        // minByOrNull: Akkord geht zu dem Wortanfang, der räumlich am nächsten liegt —
-        // das entspricht am ehesten dem Visuellen in der Original-PDF.
+        // Dangling Chords (nach dem letzten Wort) separat sammeln.
+        val lastWordEndX = lyric.last().x + lyric.last().w
         val chordAt = mutableMapOf<Int, MutableList<String>>()
+        val danglingChords = mutableListOf<String>()
         for (chord in chords) {
-            val targetIdx = wordStarts
-                .filter { lyric[it].x <= chord.startX + halfChar }
-                .maxByOrNull { lyric[it].x }
-                ?: wordStarts.first()
-            chordAt.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
+            if (chord.startX > lastWordEndX + halfChar) {
+                danglingChords.add(chord.text.removeSuffix(","))
+            } else {
+                val targetIdx = wordStarts
+                    .filter { lyric[it].x <= chord.startX + halfChar }
+                    .maxByOrNull { lyric[it].x }
+                    ?: wordStarts.first()
+                chordAt.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
+            }
         }
 
         val sb = StringBuilder()
@@ -264,16 +282,28 @@ object PdfChordImporter {
             sb.append(g.c)
             prevEnd = g.x + g.w
         }
-        // Akkorde die hinter dem Zeilenende liegen (Akkord ohne Lyric darunter)
-        chordAt[lyric.size]?.forEach { c -> sb.append('[').append(c).append(']') }
+        if (danglingChords.isNotEmpty()) {
+            sb.append(' ')
+            danglingChords.forEach { c -> sb.append('[').append(c).append(']') }
+        }
         return sb.toString()
     }
 
-    private fun chordOnly(tokens: List<Token>): String = buildString {
-        for ((idx, t) in tokens.withIndex()) {
-            if (idx > 0) append("   ")
-            val c = t.text.removeSuffix(",")
-            if (ChordPro.isChord(c)) append('[').append(c).append(']') else append(c)
+    private fun chordOnly(tokens: List<Token>): String {
+        if (tokens.isEmpty()) return ""
+        val avgCharW = tokens
+            .map { (it.endX - it.startX) / it.text.length.toFloat().coerceAtLeast(1f) }
+            .average().toFloat().coerceAtLeast(1f)
+        return buildString {
+            for ((idx, t) in tokens.withIndex()) {
+                if (idx > 0) {
+                    val gap = t.startX - tokens[idx - 1].endX
+                    val spaces = (gap / avgCharW).toInt().coerceIn(1, 20)
+                    repeat(spaces) { append(' ') }
+                }
+                val c = t.text.removeSuffix(",")
+                if (ChordPro.isChord(c)) append('[').append(c).append(']') else append(c)
+            }
         }
     }
 

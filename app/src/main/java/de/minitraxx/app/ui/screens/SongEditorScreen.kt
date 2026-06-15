@@ -156,9 +156,9 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                 )
             }
 
-            // Genre mit kurzer Verzögerung automatisch speichern.
+            // Genre-Dropdown mit fester Auswahlliste.
+            val genreOptions = listOf("", "Rock", "Pop", "Jazz", "Schlager", "Latin")
             var genre by remember(data.song.id) { mutableStateOf(data.song.genre) }
-            val allGenres by repo.songDao.observeAllGenres().collectAsState(emptyList())
             var genreMenuOpen by remember { mutableStateOf(false) }
             LaunchedEffect(genre) {
                 if (genre != data.song.genre) {
@@ -167,29 +167,26 @@ fun SongEditorScreen(songId: Long, onBack: () -> Unit) {
                 }
             }
             ExposedDropdownMenuBox(
-                expanded = genreMenuOpen && allGenres.isNotEmpty(),
+                expanded = genreMenuOpen,
                 onExpandedChange = { genreMenuOpen = it },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 OutlinedTextField(
                     value = genre,
-                    onValueChange = { genre = it },
+                    onValueChange = {},
+                    readOnly = true,
                     label = { Text("Genre / Motto") },
-                    placeholder = { Text("z. B. Rock, Ballade, Pop") },
-                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
-                    trailingIcon = {
-                        if (allGenres.isNotEmpty())
-                            ExposedDropdownMenuDefaults.TrailingIcon(genreMenuOpen)
-                    },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(genreMenuOpen) },
                     singleLine = true,
                 )
                 ExposedDropdownMenu(
-                    expanded = genreMenuOpen && allGenres.isNotEmpty(),
+                    expanded = genreMenuOpen,
                     onDismissRequest = { genreMenuOpen = false },
                 ) {
-                    allGenres.forEach { g ->
+                    genreOptions.forEach { g ->
                         DropdownMenuItem(
-                            text = { Text(g) },
+                            text = { Text(if (g.isEmpty()) "— kein Genre —" else g) },
                             onClick = { genre = g; genreMenuOpen = false },
                         )
                     }

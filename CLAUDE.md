@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `93d9045` |
+| Letzter Commit | Letzter Stand | `(folgt nach Push)` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -268,23 +268,20 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 
 ## Letzter Stand (Session vom 2026-06-15)
 
-Branch `claude/claude-md-review-052dfg` — android-build.yml branch-agnostisch gemacht.
+Branch `claude/claude-md-review-052dfg` — Genre-Dropdown auf feste Liste umgebaut.
 
 **Was neu ist:**
-- `android-build.yml`: Trigger auf `branches-ignore: ["apk-dist"]` (kein Loop mehr)
-- `android-build.yml`: Publish-Schritt auf `if: github.ref != 'refs/heads/apk-dist'`
-  → APK wird bei JEDEM Push publiziert, kein fester Branch mehr nötig
+- `SongEditorScreen.kt`: Genre-Feld ist jetzt ein read-only `ExposedDropdownMenuBox`
+  mit fester Liste: `["", "Rock", "Pop", "Jazz", "Schlager", "Latin"]`
+- Leeres Element zeigt `"— kein Genre —"` und setzt das Feld zurück
+- `observeAllGenres()` wird nicht mehr im UI genutzt (DAO-Methode bleibt erhalten)
 
 **Aktiver Branch:** `claude/claude-md-review-052dfg`
-**Letzter Commit:** `780d385`
+**Letzter Commit:** `(folgt nach Push)`
 
 ## Nächste Aufgabe (für neue Session)
 
-**Genre-Dropdown im Song-Editor:**
-- Aktuell: Freitextfeld mit Autocomplete aus bestehenden Genres
-- Gewünscht: Dropdown mit wenigen vordefinierten sinnvollen Optionen (z. B. Rock, Pop, Jazz, Blues, Schlager, Latin, Ballad, etc.)
-- Der User legt die Optionen fest — in der neuen Session zunächst fragen welche Kategorien er möchte, dann `ExposedDropdownMenuBox` mit fester Liste statt Autocomplete-Freitext umbauen
-- Datei: `app/src/main/java/de/minitraxx/app/ui/screens/SongEditorScreen.kt`
+Keine konkrete Aufgabe offen — mit dem User besprechen was als nächstes kommt.
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

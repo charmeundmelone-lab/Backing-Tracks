@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `e4f2bc2` |
+| Letzter Commit | Letzter Stand | `78e947d` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -273,20 +273,35 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 
 ## Letzter Stand (Session vom 2026-06-15)
 
-Branch `claude/claude-md-review-052dfg` — Genre-Dropdown auf feste Liste umgebaut.
+Branch `claude/claude-md-review-052dfg` — PDF-Importer-Regression gefixt.
 
 **Was neu ist:**
-- `SongEditorScreen.kt`: Genre-Feld ist jetzt ein read-only `ExposedDropdownMenuBox`
-  mit fester Liste: `["", "Rock", "Pop", "Jazz", "Schlager", "Latin"]`
-- Leeres Element zeigt `"— kein Genre —"` und setzt das Feld zurück
-- `observeAllGenres()` wird nicht mehr im UI genutzt (DAO-Methode bleibt erhalten)
+- `PdfChordImporter.kt`: verbesserte Version (309 statt 270 Zeilen) vom Branch
+  `current-apk-disto-y2wzvi` chirurgisch portiert. Akkorde snappen jetzt an
+  **Wortgrenzen** (nicht mehr zeichenweise mitten ins Wort, z.B. `t[G]he`).
+  Zusätzlich: Tab-Zeilen-Filter (`isTabLine`) + Akkord-nach-Lyrik-Erkennung.
+- Davor: Genre-Dropdown auf feste Liste (`SongEditorScreen.kt`, read-only
+  `ExposedDropdownMenuBox`, Liste `["", "Rock", "Pop", "Jazz", "Schlager", "Latin"]`).
 
 **Aktiver Branch:** `claude/claude-md-review-052dfg`
-**Letzter Commit:** `e4f2bc2`
+**Letzter Commit:** `78e947d`
+
+## ⚠️ Branch-Divergenz — WICHTIG
+
+Mehrere `claude/*`-Branches sind bei Merge-Base `517243e` auseinandergelaufen
+und haben **unterschiedliche, inkompatible** Versionen derselben Dateien:
+- `claude/claude-md-review-052dfg` (DIESER): Genre-Dropdown, Gig-Tracking, DB v6
+- `claude/current-apk-disto-y2wzvi`: besserer PDF-Importer, Chord-Editor, anderer Renderer — **ohne** Gig/Genre
+
+**Niemals** einen dieser Branches blind mergen — das dreht Features zurück.
+Verbesserungen immer **datei-/funktionsweise chirurgisch** portieren (wie beim
+PDF-Importer-Fix geschehen). Noch offen aus `current-apk-disto`: ggf.
+`ChordEditorDialog.kt` (Chord-Tap-Editor) — mit User klären ob gewünscht.
 
 ## Nächste Aufgabe (für neue Session)
 
-Keine konkrete Aufgabe offen — mit dem User besprechen was als nächstes kommt.
+User testet die PDF-Import-Fix-APK. Bei Erfolg: mit User klären, ob weitere
+Verbesserungen aus `current-apk-disto-y2wzvi` portiert werden sollen.
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

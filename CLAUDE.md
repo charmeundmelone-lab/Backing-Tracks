@@ -41,7 +41,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.github/workflows/android-build.yml`** (Publish-Schritt `if:`) | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `cf85759` |
+| Letzter Commit | Letzter Stand | `241b47f` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **ACHTUNG Branch-Wechsel:** Der Publish-Schritt in `android-build.yml` hat ein
@@ -273,6 +273,20 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 
 6. **syncOffsetMs** (Standard 200 ms): Reaktionszeit-Korrektur — Timestamps werden um diesen
    Wert nach vorne verschoben, damit der Scroll die gefühlte Tipp-Verzögerung ausgleicht.
+
+7. **versionCode kommt aus der CI-Build-Nummer** (`-PversionCode=${{ github.run_number }}`).
+   NIE wieder fest auf 1 setzen — sonst installiert sich eine neue APK auf dem Gerät NICHT
+   als Update und der User sieht „keine neuen Features", obwohl sie gebaut sind.
+   Lokaler Build ohne Property → versionCode 1.
+
+8. **Flüssiges Auto-Scroll:** `smoothScrollTo()` nutzt `scrollToItem(index, offsetPx)` mit
+   Sub-Item-Pixel-Offset (Nachkommaanteil der Item-Position → Pixel). NIE nur `.toInt()`
+   auf den Item-Index — das lässt die Liste zeilenweise springen (ruckelig). Polling ~30 fps
+   (`SCROLL_FRAME_MS = 32`), `isPlaying` im Loop pollen statt als LaunchedEffect-Key.
+
+9. **APK vor dem Ausliefern verifizieren:** APK ist ein ZIP — Roh-`grep` auf der `.apk`
+   findet Strings NICHT. Stattdessen `classes*.dex` entpacken und `strings classes*.dex
+   | grep <Feature>`. So sicherstellen, dass das gewünschte Feature wirklich im Build ist.
 
 ## Offene / geplante Features
 

@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `ed2f240` |
+| Letzter Commit | Letzter Stand | wird gleich gesetzt nach Commit |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -278,38 +278,35 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 
 ## Letzter Stand (Session vom 2026-06-15)
 
-Branch umbenannt zu `main` — das ist ab sofort der einzige Branch.
-
 **Was bisher in main ist:**
-- `PdfChordImporter.kt`: Wortgrenzen-Snapping (309 Zeilen, Commit `ed2f240`)
+- Butterweicher frame-sync Scroll (withFrameNanos, EMA-geglättet, nur vorwärts) — portiert aus be54cec
+- `/start` und `/ende` Slash-Commands in `.claude/commands/`
+- `PdfChordImporter.kt`: Wortgrenzen-Snapping (309 Zeilen)
 - `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste (Rock/Pop/Jazz/Schlager/Latin)
 - Genre-Feld + Gig-Tracking + DB v6
-- Smooth Scroll, Tap-Once-Sync, Sektion-Scroll
+- Tap-Once-Sync, Sektion-Scroll
 
 **Aktiver Branch:** `main`
-**Letzter Commit:** `4c59a27`
+**Letzter Commit:** wird gleich gesetzt nach Commit
 
 ## Nächste Aufgabe (für neue Session)
 
-PDF-Import zeigt Akkorde noch nicht an der richtigen Stelle (Live-Ansicht).
-Editor zeigt importierten ChordPro-Text korrekt an — Problem liegt im Renderer.
+PDF-Renderer fixen — ChordPro.kt hat noch 3 fehlende Fixes aus `current-apk-disto-y2wzvi` (a3527f6):
 
-Bisher portiert (Commits `0890a99`, `ed2f240` auf main):
-- mergeChordOnlyLines ✅
-- toWords Gap-Assignment mit MutableList (wie a3527f6) ✅
-- Leerzeilen-Lookahead parsePlain ✅
-- softWrap=false + hasChord-Guard in LyricLine ✅
+1. **Leerzeilen-Skip zwischen Akkord- und Textzeile** (parsePlain):
+   `while (j < lines.size && lines[j].isBlank()) j++` — fehlt in main's ChordPro.kt
+2. **mergeChordOnlyLines — `// don't advance i`-Fix** fehlt (Ketten-Merge funktioniert nicht)
+3. **result-Typ**: `ArrayList<Pair<Int, MutableList<Piece>>>` statt `ArrayList<Piece>` — bereits portiert ✅
 
-Noch nicht gelöst: User sagt v0.1.0.107 zeigt immer noch altes Verhalten.
+Konkret zu prüfen:
+```
+git diff origin/main origin/claude/current-apk-disto-y2wzvi -- app/src/main/java/de/minitraxx/app/util/ChordPro.kt
+```
 
 **Nächste Schritte:**
 1. CI auf `main` prüfen (grün?)
-2. `git diff a3527f6..HEAD -- app/src/main/java/de/minitraxx/app/util/ChordPro.kt` ausführen
-   und jeden verbleibenden Unterschied prüfen
-3. `git diff a3527f6..HEAD -- app/src/main/java/de/minitraxx/app/ui/screens/LiveScreen.kt`
-   — nur LyricLine-Block vergleichen
-4. Fehlende Teile portieren, APK bauen, User fragen ob zufrieden
-   (PFLICHT: immer zuerst fragen bevor neues Feature!)
+2. Die 2 fehlenden ChordPro.kt-Fixes portieren
+3. APK bauen + User fragen ob PDF-Renderer jetzt stimmt (PFLICHT vor neuem Feature)
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

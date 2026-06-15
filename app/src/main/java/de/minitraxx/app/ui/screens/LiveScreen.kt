@@ -9,7 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -62,6 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,7 +76,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -97,31 +98,6 @@ import kotlinx.coroutines.launch
 
 private const val SCROLL_LEAD_MS = 600L
 
-/** Polling-Takt für flüssiges Auto-Scroll (~30 fps). */
-private const val SCROLL_FRAME_MS = 32L
-
-/**
- * Scrollt die LazyColumn auf eine *gebrochene* Item-Position [targetF].
- * Der Ganzzahlanteil wählt das Item, der Nachkommaanteil wird in einen
- * Pixel-Offset innerhalb des Items übersetzt → flüssiges Gleiten statt
- * zeilenweisem Springen. Item-Höhe kommt aus dem aktuellen Layout
- * (Fallback: Schätzung über fontSp), damit es auf jedem Gerät passt.
- */
-private suspend fun smoothScrollTo(
-    state: LazyListState,
-    targetF: Double,
-    lineCount: Int,
-    fontSp: Float,
-    density: Float,
-) {
-    val maxIndex = lineCount + 1
-    val index = targetF.toInt().coerceIn(0, maxIndex)
-    val frac = (targetF - index).coerceIn(0.0, 1.0)
-    val itemHeightPx = state.layoutInfo.visibleItemsInfo
-        .firstOrNull { it.index == index }?.size
-        ?: (fontSp * 1.6f * density).toInt()
-    state.scrollToItem(index, (frac * itemHeightPx).toInt())
-}
 
 /**
  * Live-Screen: großer Restzeit-Countdown, nächster Song, Play/Pause.
@@ -856,7 +832,6 @@ private fun LyricsPane(
 ) {
     val lines = remember(chordPro) { ChordPro.parse(chordPro) }
     val lazyState = rememberLazyListState()
-    val density = LocalDensity.current.density
 
     val syncTimestamps = remember(syncData) {
         syncData.trim().split(" ").filter { it.isNotBlank() }.mapNotNull { it.toLongOrNull() }
@@ -888,47 +863,80 @@ private fun LyricsPane(
     }
 
     // Lineare Positionskopplung (Fallback ohne Sync oder im Sync-Modus).
-    // Pollt die Engine mit ~30 fps und scrollt mit Sub-Item-Pixel-Offset →
-    // flüssiges Gleiten statt zeilenweisem Springen (kein 100ms-State-Takt).
-    LaunchedEffect(durationFrames, isSyncMode, syncTimestamps) {
-        if (durationFrames <= 0) return@LaunchedEffect
-        if (syncTimestamps.isNotEmpty() && !isSyncMode) return@LaunchedEffect
-        while (true) {
-            delay(SCROLL_FRAME_MS)
-            if (!NativeEngine.isPlaying()) continue
-            val pos = NativeEngine.positionFrames()
-            val targetF = (pos.toDouble() / durationFrames) * lines.size
-            smoothScrollTo(lazyState, targetF, lines.size, fontSp, density)
+    LaunchedEffect(positionFrames, durationFrames, isPlaying) {
+        if (isPlaying && durationFrames > 0 && (syncTimestamps.isEmpty() || isSyncMode)) {
+            val targetIdx = ((positionFrames.toDouble() / durationFrames) * lines.size)
+                .toInt().coerceIn(0, lines.size)
+            lazyState.scrollToItem(targetIdx)
         }
     }
 
-    // Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
-    // Zwischen zwei Timestamps wird linear durch die Zeilen der Sektion gescrollt,
-    // mit Sub-Item-Pixel-Offset für flüssiges Gleiten.
-    // durationFrames als Key: LaunchedEffect startet neu sobald Song geladen ist.
-    // isPlaying ist KEIN Key — kurzes Flackern würde den Loop neu starten;
-    // stattdessen pollen wir isPlaying im Loop und überspringen nur einen Frame.
+    // Teleprompter-Scroll, frame-synchron für maximale Glätte.
+    //
+    // - withFrameNanos: pro Display-Frame (60/90/120 Hz) ein winziger Schritt statt
+    //   20 grobe Sprünge/Sek (delay(50)) → keine Mikroruckler mehr.
+    // - Zeilenhöhe live gemessen, aber EMA-geglättet → konstante Geschwindigkeit
+    //   ohne Velocity-Wobble, passt sich aber an hohe (umbrechende) Zeilen an.
+    // - Sektionswechsel: NUR vorwärts und sanft animiert. Sind wir schon am/über
+    //   dem Sektionsstart, wird NICHT zurückgesprungen — der abgehackte Rücksprung
+    //   entfällt.
+    // - isPlaying ist KEIN Key — kurzes Flackern würde den State resetten.
     LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
         if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
         val durationMs = durationFrames * 1000L / 48_000L
+        var lastSec = -2
+        var prevFrameNs = 0L
+        var smoothHeightPx = 0f
         while (true) {
-            delay(SCROLL_FRAME_MS)
-            if (!NativeEngine.isPlaying()) continue
+            val frameNs = withFrameNanos { it }
+            val dtMs = if (prevFrameNs == 0L) 0f else (frameNs - prevFrameNs) / 1_000_000f
+            prevFrameNs = frameNs
+
             val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-            val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
-            val targetF = if (sec < 0) {
-                0.0
-            } else {
-                val secStart = syncTimestamps[sec]
-                val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
-                val firstItem = sectionToItemIndex[sec] ?: 0
-                val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
-                val t = if (secEnd > secStart)
-                    ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
-                else 0.0
-                firstItem + (nextFirst - firstItem) * t
+
+            // Zeilenhöhe aus sichtbaren Zeilen, exponentiell geglättet (EMA).
+            val measured = lazyState.layoutInfo.visibleItemsInfo
+                .filter { it.size > 20 }
+                .takeIf { it.isNotEmpty() }
+                ?.map { it.size }
+                ?.average()
+                ?.toFloat()
+            if (measured != null) {
+                smoothHeightPx = if (smoothHeightPx <= 0f) measured
+                                 else smoothHeightPx * 0.85f + measured * 0.15f
             }
-            smoothScrollTo(lazyState, targetF, lines.size, fontSp, density)
+            val itemHeightPx = smoothHeightPx
+
+            val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
+            if (sec < 0) {
+                if (lastSec != sec) lazyState.animateScrollToItem(0)
+                lastSec = sec
+                prevFrameNs = 0L
+                continue
+            }
+            val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
+            val firstItem = sectionToItemIndex[sec] ?: 0
+            val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
+            val sectionItems = (nextFirst - firstItem).coerceAtLeast(1).toFloat()
+            val sectionDurationMs = (secEnd - syncTimestamps[sec]).coerceAtLeast(1L).toFloat()
+
+            if (sec != lastSec) {
+                lastSec = sec
+                // Sanfter, NUR-vorwärts-Übergang zum Sektionsstart.
+                val info = lazyState.layoutInfo.visibleItemsInfo.find { it.index == firstItem }
+                when {
+                    // Sektionskopf sichtbar und noch unter der Oberkante → sanft hochziehen.
+                    info != null -> if (info.offset > 4) lazyState.animateScrollBy(info.offset.toFloat())
+                    // Sektionskopf noch weiter unten (wir hinken hinterher) → sanft hinscrollen.
+                    firstItem > lazyState.firstVisibleItemIndex -> lazyState.animateScrollToItem(firstItem)
+                    // Sonst sind wir schon am/über dem Start — kein Rücksprung.
+                }
+                prevFrameNs = 0L  // dt nach der Animations-Pause zurücksetzen
+            } else if (itemHeightPx > 0f && dtMs > 0f) {
+                val pixelsPerMs = (sectionItems * itemHeightPx) / sectionDurationMs
+                val delta = pixelsPerMs * dtMs
+                if (delta > 0f) lazyState.scrollBy(delta)
+            }
         }
     }
 

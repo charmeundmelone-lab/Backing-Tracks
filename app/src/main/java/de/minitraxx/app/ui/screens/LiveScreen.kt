@@ -104,7 +104,7 @@ private const val SCROLL_LEAD_MS = 600L
  * Tap-Once-Sync-Daten, scrollt die Anzeige sektionsgenau mit der Musik —
  * kein Slider, keine Geschwindigkeit, nur einmal Tippen im Sync-Modus.
  */
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
     val context = LocalContext.current
@@ -530,7 +530,7 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
             // Gig-Button
             GigStatusButton(
                 activeGig = activeGig,
-                playedCount = playCounts.values.sumOf { 1 }.coerceAtLeast(playedSongIds.size),
+                playedCount = playedSongIds.size,
                 onStartGig = { scope.launch { gigRepo.startGig() } },
                 onEndGig = { scope.launch { activeGig?.id?.let { gigRepo.endGig(it) } } },
             )

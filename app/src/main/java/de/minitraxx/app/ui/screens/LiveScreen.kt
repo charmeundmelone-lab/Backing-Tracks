@@ -9,9 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,7 +61,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -871,71 +868,31 @@ private fun LyricsPane(
         }
     }
 
-    // Teleprompter-Scroll, frame-synchron für maximale Glätte.
-    //
-    // - withFrameNanos: pro Display-Frame (60/90/120 Hz) ein winziger Schritt statt
-    //   20 grobe Sprünge/Sek (delay(50)) → keine Mikroruckler mehr.
-    // - Zeilenhöhe live gemessen, aber EMA-geglättet → konstante Geschwindigkeit
-    //   ohne Velocity-Wobble, passt sich aber an hohe (umbrechende) Zeilen an.
-    // - Sektionswechsel: NUR vorwärts und sanft animiert. Sind wir schon am/über
-    //   dem Sektionsstart, wird NICHT zurückgesprungen — der abgehackte Rücksprung
-    //   entfällt.
-    // - isPlaying ist KEIN Key — kurzes Flackern würde den State resetten.
+    // Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
+    // isPlaying ist KEIN Key — kurzes Flackern würde lastTargetItem resetten.
     LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
         if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
         val durationMs = durationFrames * 1000L / 48_000L
-        var lastSec = -2
-        var prevFrameNs = 0L
-        var smoothHeightPx = 0f
+        var lastTargetItem = -1
         while (true) {
-            val frameNs = withFrameNanos { it }
-            val dtMs = if (prevFrameNs == 0L) 0f else (frameNs - prevFrameNs) / 1_000_000f
-            prevFrameNs = frameNs
-
+            delay(100)
             val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-
-            // Zeilenhöhe aus sichtbaren Zeilen, exponentiell geglättet (EMA).
-            val measured = lazyState.layoutInfo.visibleItemsInfo
-                .filter { it.size > 20 }
-                .takeIf { it.isNotEmpty() }
-                ?.map { it.size }
-                ?.average()
-                ?.toFloat()
-            if (measured != null) {
-                smoothHeightPx = if (smoothHeightPx <= 0f) measured
-                                 else smoothHeightPx * 0.85f + measured * 0.15f
-            }
-            val itemHeightPx = smoothHeightPx
-
             val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
-            if (sec < 0) {
-                if (lastSec != sec) lazyState.animateScrollToItem(0)
-                lastSec = sec
-                prevFrameNs = 0L
-                continue
+            val targetItem = if (sec < 0) {
+                0
+            } else {
+                val secStart = syncTimestamps[sec]
+                val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
+                val firstItem = sectionToItemIndex[sec] ?: 0
+                val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
+                val t = if (secEnd > secStart)
+                    ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
+                else 0.0
+                (firstItem + (nextFirst - firstItem) * t).toInt()
             }
-            val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
-            val firstItem = sectionToItemIndex[sec] ?: 0
-            val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
-            val sectionItems = (nextFirst - firstItem).coerceAtLeast(1).toFloat()
-            val sectionDurationMs = (secEnd - syncTimestamps[sec]).coerceAtLeast(1L).toFloat()
-
-            if (sec != lastSec) {
-                lastSec = sec
-                // Sanfter, NUR-vorwärts-Übergang zum Sektionsstart.
-                val info = lazyState.layoutInfo.visibleItemsInfo.find { it.index == firstItem }
-                when {
-                    // Sektionskopf sichtbar und noch unter der Oberkante → sanft hochziehen.
-                    info != null -> if (info.offset > 4) lazyState.animateScrollBy(info.offset.toFloat())
-                    // Sektionskopf noch weiter unten (wir hinken hinterher) → sanft hinscrollen.
-                    firstItem > lazyState.firstVisibleItemIndex -> lazyState.animateScrollToItem(firstItem)
-                    // Sonst sind wir schon am/über dem Start — kein Rücksprung.
-                }
-                prevFrameNs = 0L  // dt nach der Animations-Pause zurücksetzen
-            } else if (itemHeightPx > 0f && dtMs > 0f) {
-                val pixelsPerMs = (sectionItems * itemHeightPx) / sectionDurationMs
-                val delta = pixelsPerMs * dtMs
-                if (delta > 0f) lazyState.scrollBy(delta)
+            if (targetItem != lastTargetItem) {
+                lastTargetItem = targetItem
+                lazyState.scrollToItem(targetItem)
             }
         }
     }
@@ -1012,10 +969,9 @@ private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
     val hasChord = words.any { w -> w.any { it.chord != null } }
     FlowRow(
         Modifier.fillMaxWidth().padding(vertical = (fontSp * 0.14f).dp),
-        horizontalArrangement = Arrangement.spacedBy((fontSp * 0.3f).dp),
     ) {
         for (word in words) {
-            Row {
+            Row(Modifier.padding(end = (fontSp * 0.3f).dp)) {
                 for (piece in word) {
                     Column(horizontalAlignment = Alignment.Start) {
                         if (hasChord) {

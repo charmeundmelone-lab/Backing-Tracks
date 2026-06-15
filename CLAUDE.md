@@ -4,12 +4,17 @@
 
 **Wenn du „Letzter Stand" aktualisierst, MUSST du diese vier Felder synchron halten:**
 
-| Feld | Wo in dieser Datei | Aktueller Wert |
+| Feld | Wo | Aktueller Wert |
 |---|---|---|
-| Aktiver Branch | Überblick + Nahtloser Session-Übergang | `claude/claude-md-review-052dfg` |
+| Aktiver Branch | Überblick + Session-Übergang + **`.github/workflows/android-build.yml`** (Publish-Schritt `if:`) | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `95cbb37` |
+| Letzter Commit | Letzter Stand | `c9261d1` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
+
+**ACHTUNG Branch-Wechsel:** Der Publish-Schritt in `android-build.yml` hat ein
+`if: github.ref == 'refs/heads/<branch>'`. Steht dort ein falscher Branch, wird die
+APK gebaut aber **nie** auf `apk-dist` gepusht (Schritt = skipped). Bei jedem
+Branch-Wechsel diese Zeile mitändern.
 
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.

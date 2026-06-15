@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `(folgt nach Push)` |
+| Letzter Commit | Letzter Stand | `e4f2bc2` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -277,7 +277,7 @@ Branch `claude/claude-md-review-052dfg` — Genre-Dropdown auf feste Liste umgeb
 - `observeAllGenres()` wird nicht mehr im UI genutzt (DAO-Methode bleibt erhalten)
 
 **Aktiver Branch:** `claude/claude-md-review-052dfg`
-**Letzter Commit:** `(folgt nach Push)`
+**Letzter Commit:** `e4f2bc2`
 
 ## Nächste Aufgabe (für neue Session)
 

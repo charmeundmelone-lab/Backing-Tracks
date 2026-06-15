@@ -1,5 +1,21 @@
 # MiniTraxx — Projektkontext für Claude
 
+## CLAUDE.md pflegen — PFLICHT bei jeder Session
+
+**Wenn du „Letzter Stand" aktualisierst, MUSST du diese vier Felder synchron halten:**
+
+| Feld | Wo in dieser Datei | Aktueller Wert |
+|---|---|---|
+| Aktiver Branch | Überblick + Nahtloser Session-Übergang | `claude/claude-md-review-052dfg` |
+| DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
+| Letzter Commit | Letzter Stand | `f856287` |
+| Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
+
+**Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
+Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
+
+---
+
 ## Kontext-Monitoring (WICHTIG — immer beachten)
 
 Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind
@@ -13,7 +29,7 @@ Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind
   soll jetzt eine neue Session starten.
 
 **Nahtloser Session-Übergang:**
-1. Alle Änderungen committen & auf `claude/kind-hawking-h4833c` pushen
+1. Alle Änderungen committen & auf `claude/claude-md-review-052dfg` pushen
 2. User sagt Claude in neuer Session: *"Lies CLAUDE.md und mach weiter."*
 3. Neue Claude-Instanz liest CLAUDE.md → hat vollen Kontext → kein Warmup nötig
 
@@ -26,7 +42,7 @@ zeigt ChordPro-Lyrics mit automatischem Scroll (Tap-Once-Sync), verwaltet
 Setlisten und Songs mit Room-Datenbank.
 
 **Repo:** `charmeundmelone-lab/Backing-Tracks`
-**Aktiver Branch:** `claude/kind-hawking-h4833c`
+**Aktiver Branch:** `claude/claude-md-review-052dfg`
 **APK-Dist Branch:** `apk-dist` (wird per CI bei jedem Push gebaut)
 
 ## Architektur
@@ -38,7 +54,8 @@ app/src/main/java/de/minitraxx/app/
 │   ├── PlaybackController.kt  — Setlist-Queue, Songwechsel-Logik, State (StateFlow)
 │   └── PlaybackService.kt     — Foreground-Service für Hintergrundwiedergabe
 ├── data/
-│   ├── AppDatabase.kt         — Room DB (Version 5)
+│   ├── AppDatabase.kt         — Room DB (Version 6)
+│   ├── GigRepository.kt       — Gig starten/beenden, Play aufzeichnen, Flows
 │   ├── SettingsStore.kt       — DataStore: mainGain, cueGain, swapSides, lyricsFontSp, syncOffsetMs
 │   ├── SongRepository.kt      — Zugriff auf Songs, Stems, Setlisten
 │   └── Slots.kt               — Stem-Slot-Konstanten (TOTAL = 8)
@@ -91,6 +108,7 @@ data class QueueSong(
     val durationFrames: Long, val endAction: Int, val notes: String,
     val chordPro: String,
     val syncData: String,  // leerzeichen-getrennte ms-Timestamps; "" wenn kein Sync
+    val genre: String,     // Genre / Motto-Preset-Tag; "" wenn nicht gesetzt
 )
 ```
 
@@ -166,7 +184,7 @@ direkt im `while(true)`-Loop ohne `isPlaying` als Key.
 
 ## CI / APK-Dist
 
-GitHub Actions baut bei jedem Push auf `claude/kind-hawking-h4833c` eine
+GitHub Actions baut bei jedem Push auf `claude/claude-md-review-052dfg` eine
 Debug-APK und pusht sie auf den Branch `apk-dist` als `MiniTraxx-debug.apk`.
 
 So APK holen:
@@ -186,7 +204,7 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 3. **`sectionToItemIndex`** ist `Map<Int, Int>` (sectionIndex → lazyColumnItemIndex).
    Zugriff mit `[key]` gibt `null` zurück wenn nicht vorhanden — immer `?: fallback` nutzen.
 
-4. **Room DB Version 5** — Migration nicht vergessen wenn Schema geändert wird.
+4. **Room DB Version 6** — nächste Migration wäre 6→7. Migrationen 1→2 bis 5→6 existieren bereits in `AppDatabase.kt` — nie doppelt anlegen.
 
 5. **Stems-Slots:** `Slots.TOTAL = 8`. Stems werden per Slot-Index den Audio-Engine-Kanälen zugeordnet.
 

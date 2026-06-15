@@ -80,7 +80,12 @@ object PdfChordImporter {
                     val u = tp.unicode ?: continue
                     if (u.isEmpty()) continue
                     val ch = u[0]
-                    if (ch == '\n' || ch == '\r' || ch == '\t') continue
+                    // Leerzeichen-Glyphen verwerfen: Monospace-PDFs (Ultimate Guitar)
+                    // betten echte Space-Zeichen ein, die alle X-Lücken auffüllen. Dann
+                    // kann tokenize() nicht mehr an Lücken splitten und Akkordzeilen
+                    // werden als ein einziger Token gelesen → nie als Akkorde erkannt.
+                    // Der Importer rekonstruiert Abstände ohnehin koordinatenbasiert.
+                    if (ch == '\n' || ch == '\r' || ch == '\t' || ch == ' ' || ch == ' ') continue
                     glyphs.add(Glyph(ch, tp.xDirAdj, tp.yDirAdj, tp.widthDirAdj, tp.heightDir))
                 }
             }

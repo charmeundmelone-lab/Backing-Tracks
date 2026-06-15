@@ -56,7 +56,7 @@ object ChordPro {
         }
 
         val used = BooleanArray(markers.size)
-        val result = ArrayList<Pair<Int, List<Piece>>>()
+        val result = ArrayList<Pair<Int, ArrayList<Piece>>>()
         for (w in textWords) {
             val inWord = ArrayList<Pair<Int, String>>()
             for ((mi, m) in markers.withIndex()) {
@@ -80,21 +80,23 @@ object ChordPro {
             }
             result.add(w.start to pieces)
         }
+        val standalone = ArrayList<Pair<Int, String>>()
         for ((mi, m) in markers.withIndex()) {
-            if (!used[mi]) {
-                val nearestWord = result.minByOrNull { kotlin.math.abs(it.first - m.first) }
-                val firstPiece = nearestWord?.second?.firstOrNull()
-                if (nearestWord != null && firstPiece != null && firstPiece.chord == null) {
-                    val idx = result.indexOf(nearestWord)
-                    result[idx] = nearestWord.first to listOf(Piece(m.second, firstPiece.text)) +
-                        nearestWord.second.drop(1)
-                } else {
-                    result.add(m.first to listOf(Piece(m.second, "")))
-                }
+            if (used[mi]) continue
+            val nearestWord = result.minByOrNull { kotlin.math.abs(it.first - m.first) }
+            val firstPiece = nearestWord?.second?.firstOrNull()
+            if (nearestWord != null && firstPiece != null && firstPiece.chord == null) {
+                nearestWord.second[0] = Piece(m.second, firstPiece.text)
+                used[mi] = true
+            } else {
+                standalone.add(m)
             }
         }
-        result.sortBy { it.first }
-        return result.map { it.second }
+        val out = ArrayList<Pair<Int, List<Piece>>>()
+        for (wp in result) out.add(wp.first to wp.second)
+        for (m in standalone) out.add(m.first to listOf(Piece(m.second, "")))
+        out.sortBy { it.first }
+        return out.map { it.second }
     }
 
     /** Erkennt einen einzelnen Akkordnamen wie Em7, Dsus4, Cadd9, D/F#. */

@@ -41,7 +41,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.github/workflows/android-build.yml`** (Publish-Schritt `if:`) | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `241b47f` |
+| Letzter Commit | Letzter Stand | `c68f589` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **ACHTUNG Branch-Wechsel:** Der Publish-Schritt in `android-build.yml` hat ein

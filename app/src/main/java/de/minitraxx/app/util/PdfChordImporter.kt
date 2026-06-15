@@ -249,36 +249,31 @@ object PdfChordImporter {
         val spaceGap = medianW * 0.6f
         val halfChar = medianW * 0.5f
 
-        // Indizes der Wortanfänge (erster Buchstabe nach einer Lücke)
-        val wordStarts = mutableListOf(0)
-        for (i in 1 until lyric.size) {
-            if (lyric[i].x - (lyric[i - 1].x + lyric[i - 1].w) > spaceGap) wordStarts.add(i)
-        }
-
-        // Dangling Chords (nach dem letzten Wort) separat sammeln.
-        val lastWordEndX = lyric.last().x + lyric.last().w
-        val chordAt = mutableMapOf<Int, MutableList<String>>()
+        // Dangling Chords (nach letztem Buchstaben) separat sammeln.
+        val lastCharEndX = lyric.last().x + lyric.last().w
+        val chordAtChar = mutableMapOf<Int, MutableList<String>>()
         val danglingChords = mutableListOf<String>()
         for (chord in chords) {
-            if (chord.startX > lastWordEndX + halfChar) {
+            if (chord.startX > lastCharEndX + halfChar) {
                 danglingChords.add(chord.text.removeSuffix(","))
             } else {
-                val targetIdx = wordStarts
+                // Exaktes Character-Index-Snapping: rechtester Buchstabe LINKS vom Akkord.
+                val targetIdx = lyric.indices
                     .filter { lyric[it].x <= chord.startX + halfChar }
-                    .maxByOrNull { lyric[it].x }
-                    ?: wordStarts.first()
-                chordAt.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
+                    .maxOrNull() ?: 0
+                chordAtChar.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
             }
         }
 
         val sb = StringBuilder()
         var prevEnd: Float? = null
-        for ((idx, g) in lyric.withIndex()) {
+        for (i in lyric.indices) {
+            val g = lyric[i]
             if (prevEnd != null) {
                 val gap = g.x - prevEnd
                 if (gap > spaceGap) repeat((gap / medianW).toInt().coerceIn(1, 8)) { sb.append(' ') }
             }
-            chordAt[idx]?.forEach { c -> sb.append('[').append(c).append(']') }
+            chordAtChar[i]?.forEach { c -> sb.append('[').append(c).append(']') }
             sb.append(g.c)
             prevEnd = g.x + g.w
         }

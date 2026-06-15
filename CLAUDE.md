@@ -6,13 +6,19 @@
 
 | Feld | Wo | Aktueller Wert |
 |---|---|---|
-| Aktiver Branch | Überblick + Session-Übergang | `claude/claude-md-review-052dfg` |
+| Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `780d385` |
+| Letzter Commit | Letzter Stand | `93d9045` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
 Bei Branch-Wechseln muss der Workflow **nicht mehr** angepasst werden.
+
+**Branch-Wechsel — was zu tun ist (NUR diese zwei Schritte):**
+1. `.claude/active-branch` → neuen Branch-Namen eintragen und pushen
+2. Diese Tabelle hier → Branch-Zeile aktualisieren
+
+Das war's. Der SessionStart-Hook liest `.claude/active-branch` und checkt automatisch den richtigen Branch aus.
 
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.

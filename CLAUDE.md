@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `6de8da7` |
+| Letzter Commit | Letzter Stand | `03c3159` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -281,27 +281,50 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 **Was bisher in main ist:**
 - Butterweicher frame-sync Scroll (withFrameNanos, EMA-geglättet, nur vorwärts)
 - `/start` und `/ende` Slash-Commands in `.claude/commands/`
-- `PdfChordImporter.kt`: 4 Fixes aus dieser Session:
+- `PdfChordImporter.kt`: 5 Fixes aus dieser Session:
   1. Linksdirektionales Akkord-Snapping (halfChar-Toleranz, Commit `b624f13`)
   2. Koordinatenbasiertes Spacing bei Chord-Only-Zeilen (Intro etc.)
   3. Dangling Chords ans Zeilenende statt ans letzte Wort
   4. Metadaten-Zeilen (Capo, Strumming...) als Text durchreichen
+  5. **Leerzeichen-Glyphen verwerfen** (`03c3159`) — behob das fehlende-Klammern-Problem
 - `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste
 - Genre-Feld + Gig-Tracking + DB v6
 - Tap-Once-Sync, Sektion-Scroll
 
 **Aktiver Branch:** `main`
-**Letzter Commit:** `6de8da7`
+**Letzter Commit:** `03c3159`
 
-## Nächste Aufgabe (für neue Session)
+## Nächste Aufgabe (für neue Session) — PDF-Bug GELÖST, Bestätigung offen
 
-APK Build #120 wurde an User geliefert — **PDF-Import noch NICHT vom User bestätigt**.
+**Root-Cause gefunden & gefixt (Commit `03c3159`):** Monospace-PDFs (Ultimate
+Guitar) betten echte Leerzeichen-Glyphen ein, die alle X-Lücken lückenlos
+auffüllen. `collectGlyphs` filterte nur `\n\r\t`, nicht Space. Folge:
+`tokenize()` konnte nicht mehr an Lücken splitten → `Em7          G` wurde EIN
+Token statt `["Em7","G"]` → `isChordTokens` false → Akkordzeile fiel in den
+Plain-Text-Zweig → KEINE Klammern.
 
-Nächste Session:
-1. CI auf `main` prüfen (grün = Build #120 ✅)
-2. User fragt: "Bist du zufrieden mit der APK?" — Wonderwall-PDF testen
-3. Falls OK: Feature abgeschlossen
-4. Falls nicht OK: Konkrete Fehlerbeschreibung vom User holen, dann gezielt fixen
+**Fix:** `collectGlyphs()` überspringt jetzt `' '` und `' '` (U+00A0). Der
+Importer rekonstruiert Abstände ohnehin koordinatenbasiert aus den X-Lücken.
+Mit echten Wonderwall-Koordinaten verifiziert (pdfplumber-Simulation):
+Output ist jetzt `[Em7]Today is [G]gonna be the day`. APK an User geliefert.
+
+**Verlauf der PDF-Fixes dieser Session (alle in main, alle korrekt):**
+- `b624f13` linksdirektionales Akkord-Snapping (halfChar-Toleranz)
+- `6de8da7` koordinatenbasiertes Chord-Only-Spacing + Dangling Chords + Metadaten
+- `0543635` character-index Snapping (statt word-start)
+- `03c3159` **Leerzeichen-Glyphen verwerfen — DER eigentliche Bug**
+
+**Nächste Session:**
+1. CI auf `main` prüfen (grün?)
+2. User fragen: "Bist du zufrieden?" — Wonderwall NEU importieren, Klammern prüfen
+3. Falls Akkorde mitten im Wort stehen (`g[Dsus4]onna`): char-index-Snapping
+   ist absichtlich pixel-genau zum PDF. Bei Bedarf wieder auf word-start
+   umstellen (siehe `mergeChordLyric`, `lyric.indices` → `wordStarts`).
+4. Falls OK: PDF-Import-Feature abgeschlossen.
+
+**Debug-Werkzeug:** PDF-Koordinaten lassen sich offline mit `pdfplumber`
+(Python) extrahieren — Leerzeichen-Glyphen sichtbar via `c['text']==' '`.
+So lässt sich die Importer-Pipeline ohne Gerät simulieren.
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

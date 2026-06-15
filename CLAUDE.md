@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `adcf534` |
+| Letzter Commit | Letzter Stand | `6de8da7` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -279,34 +279,29 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 ## Letzter Stand (Session vom 2026-06-15)
 
 **Was bisher in main ist:**
-- Butterweicher frame-sync Scroll (withFrameNanos, EMA-geglättet, nur vorwärts) — portiert aus be54cec
+- Butterweicher frame-sync Scroll (withFrameNanos, EMA-geglättet, nur vorwärts)
 - `/start` und `/ende` Slash-Commands in `.claude/commands/`
-- `PdfChordImporter.kt`: Wortgrenzen-Snapping (309 Zeilen)
-- `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste (Rock/Pop/Jazz/Schlager/Latin)
+- `PdfChordImporter.kt`: 4 Fixes aus dieser Session:
+  1. Linksdirektionales Akkord-Snapping (halfChar-Toleranz, Commit `b624f13`)
+  2. Koordinatenbasiertes Spacing bei Chord-Only-Zeilen (Intro etc.)
+  3. Dangling Chords ans Zeilenende statt ans letzte Wort
+  4. Metadaten-Zeilen (Capo, Strumming...) als Text durchreichen
+- `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste
 - Genre-Feld + Gig-Tracking + DB v6
 - Tap-Once-Sync, Sektion-Scroll
 
 **Aktiver Branch:** `main`
-**Letzter Commit:** `adcf534`
+**Letzter Commit:** `6de8da7`
 
 ## Nächste Aufgabe (für neue Session)
 
-PDF-Renderer fixen — ChordPro.kt hat noch 3 fehlende Fixes aus `current-apk-disto-y2wzvi` (a3527f6):
+APK Build #120 wurde an User geliefert — **PDF-Import noch NICHT vom User bestätigt**.
 
-1. **Leerzeilen-Skip zwischen Akkord- und Textzeile** (parsePlain):
-   `while (j < lines.size && lines[j].isBlank()) j++` — fehlt in main's ChordPro.kt
-2. **mergeChordOnlyLines — `// don't advance i`-Fix** fehlt (Ketten-Merge funktioniert nicht)
-3. **result-Typ**: `ArrayList<Pair<Int, MutableList<Piece>>>` statt `ArrayList<Piece>` — bereits portiert ✅
-
-Konkret zu prüfen:
-```
-git diff origin/main origin/claude/current-apk-disto-y2wzvi -- app/src/main/java/de/minitraxx/app/util/ChordPro.kt
-```
-
-**Nächste Schritte:**
-1. CI auf `main` prüfen (grün?)
-2. Die 2 fehlenden ChordPro.kt-Fixes portieren
-3. APK bauen + User fragen ob PDF-Renderer jetzt stimmt (PFLICHT vor neuem Feature)
+Nächste Session:
+1. CI auf `main` prüfen (grün = Build #120 ✅)
+2. User fragt: "Bist du zufrieden mit der APK?" — Wonderwall-PDF testen
+3. Falls OK: Feature abgeschlossen
+4. Falls nicht OK: Konkrete Fehlerbeschreibung vom User holen, dann gezielt fixen
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

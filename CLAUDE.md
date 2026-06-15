@@ -1,53 +1,18 @@
 # MiniTraxx — Projektkontext für Claude
 
-> # ⚠️ ZUERST ERLEDIGEN — offene Aufgabe (Stand 2026-06-15)
->
-> **Bevor du IRGENDETWAS anderes tust, arbeite diese Aufgabe ab. Sie hat Vorrang
-> vor neuen Features. Erst wenn sie erledigt UND der CI grün ist, weitermachen.**
->
-> **Problem (in der Vergangenheit MEHRFACH aufgetreten):**
-> Der aktive Branch-Name ist an mehreren Stellen hartcodiert und driftet bei
-> jedem Branch-Wechsel auseinander. Zuletzt war der Publish-Schritt in
-> `.github/workflows/android-build.yml` auf einen ALTEN Branch verdrahtet
-> (`if: github.ref == 'refs/heads/claude/kind-hawking-h4833c'`) — dadurch wurde
-> die APK zwar gebaut, aber NIE auf `apk-dist` veröffentlicht (Schritt = skipped).
-> Der User bekam wochenlang alte APKs.
->
-> **Ziel: den Branch-Namen aus ALLEN Automatismen entfernen, sodass er nie wieder
-> nachgezogen werden muss — ein für alle Mal.**
->
-> **Konkrete Schritte (in dieser Reihenfolge):**
-> 1. `.github/workflows/android-build.yml` — Publish-Schritt so umbauen, dass er
->    KEINEN festen Dev-Branch-Namen mehr braucht.
->    Vorschlag: `if: github.ref != 'refs/heads/apk-dist'` (publiziert von jedem
->    Branch außer apk-dist selbst).
-> 2. **Endlosschleife prüfen:** Der Publish-Schritt force-pusht auf `apk-dist`.
->    Der Workflow triggert aktuell auf `branches: ["**"]` — das schließt apk-dist
->    ein → ein Push auf apk-dist würde einen neuen Run starten = Loop-Gefahr.
->    Absichern, z. B. Trigger auf `branches-ignore: ["apk-dist"]` umstellen.
-> 3. Sobald der Workflow keinen Dev-Branch mehr hartcodiert: die Branch-Zeile in
->    der Pflege-Tabelle unten entsprechend entschlacken (Workflow-Verweis raus).
-> 4. Mit echtem Push testen: Build grün **und** Publish-Schritt = success **und**
->    neue APK landet auf `apk-dist` (per `git fetch origin apk-dist` prüfen).
-> 5. Diesen ⚠️-Block hier löschen, sobald alles grün und getestet ist.
->
-> Danach erst: neue Features (siehe „Offene / geplante Features" unten).
-
 ## CLAUDE.md pflegen — PFLICHT bei jeder Session
 
 **Wenn du „Letzter Stand" aktualisierst, MUSST du diese vier Felder synchron halten:**
 
 | Feld | Wo | Aktueller Wert |
 |---|---|---|
-| Aktiver Branch | Überblick + Session-Übergang + **`.github/workflows/android-build.yml`** (Publish-Schritt `if:`) | `claude/claude-md-review-052dfg` |
+| Aktiver Branch | Überblick + Session-Übergang | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
 | Letzter Commit | Letzter Stand | `c68f589` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
-**ACHTUNG Branch-Wechsel:** Der Publish-Schritt in `android-build.yml` hat ein
-`if: github.ref == 'refs/heads/<branch>'`. Steht dort ein falscher Branch, wird die
-APK gebaut aber **nie** auf `apk-dist` gepusht (Schritt = skipped). Bei jedem
-Branch-Wechsel diese Zeile mitändern.
+**Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
+Bei Branch-Wechseln muss der Workflow **nicht mehr** angepasst werden.
 
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
@@ -247,7 +212,7 @@ direkt im `while(true)`-Loop ohne `isPlaying` als Key.
 
 ## CI / APK-Dist
 
-GitHub Actions baut bei jedem Push auf `claude/claude-md-review-052dfg` eine
+GitHub Actions baut bei jedem Push (außer auf `apk-dist` selbst) eine
 Debug-APK und pusht sie auf den Branch `apk-dist` als `MiniTraxx-debug.apk`.
 
 So APK holen:
@@ -295,20 +260,24 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 - **Zoom während Sync-Wiedergabe:** Scroll-Geschwindigkeit anpassen
 - **PDF-Import:** Akkorde über Text korrekt positionieren
 
-## Letzter Stand (Session vom 2026-06-14)
+## Letzter Stand (Session vom 2026-06-15)
 
-Commit `cfbc435` (Branch `claude/claude-md-review-052dfg`) — Motto-Preset mit
-Gig-Gedächtnis implementiert. CI läuft; APK auf `apk-dist` sobald Build durch.
+Branch `claude/claude-md-review-052dfg` — android-build.yml branch-agnostisch gemacht.
 
 **Was neu ist:**
+- `android-build.yml`: Trigger auf `branches-ignore: ["apk-dist"]` (kein Loop mehr)
+- `android-build.yml`: Publish-Schritt auf `if: github.ref != 'refs/heads/apk-dist'`
+  → APK wird bei JEDEM Push publiziert, kein fester Branch mehr nötig
+
+**Aktiver Branch:** `claude/claude-md-review-052dfg`
+
+Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`
 - `GigRepository`: Gig starten/beenden, Play aufzeichnen, reaktive Flows
 - `PlaybackController`: 60-Sek-akkumuliertes-Tracking per Songwechsel-reset
 - `SongEditorScreen`: Genre-Feld mit Autocomplete
 - `LiveScreen` Bottom Sheet: morphender Gig-Button (2s Long-Press beendet),
   Genre-FilterChips, ausgegraute Songs mit ✓/2×-Badge
-
-**Aktiver Branch:** `claude/claude-md-review-052dfg`
 
 Davor (Session 2026-06-13):
 - Innerhalb-Sektion-Scroll (Commit `ca97612`)

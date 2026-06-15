@@ -2,7 +2,7 @@ name: Android Build
 
 on:
   push:
-    branches: ["**"]
+    branches-ignore: ["apk-dist"]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
       # APK zusätzlich auf den Branch apk-dist pushen, damit sie per git
       # abholbar ist (Artifact-Download ist nicht überall erreichbar).
       - name: Publish APK to apk-dist branch
-        if: github.ref == 'refs/heads/claude/claude-md-review-052dfg'
+        if: github.ref != 'refs/heads/apk-dist'
         run: |
           mkdir /tmp/apkpub && cd /tmp/apkpub
           git init -b apk-dist

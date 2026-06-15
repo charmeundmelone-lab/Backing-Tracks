@@ -246,8 +246,10 @@ object PdfChordImporter {
         // das entspricht am ehesten dem Visuellen in der Original-PDF.
         val chordAt = mutableMapOf<Int, MutableList<String>>()
         for (chord in chords) {
-            val targetIdx = wordStarts.minByOrNull { kotlin.math.abs(lyric[it].x - chord.startX) }
-                ?: lyric.size
+            val targetIdx = wordStarts
+                .filter { lyric[it].x <= chord.startX + halfChar }
+                .maxByOrNull { lyric[it].x }
+                ?: wordStarts.first()
             chordAt.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
         }
 

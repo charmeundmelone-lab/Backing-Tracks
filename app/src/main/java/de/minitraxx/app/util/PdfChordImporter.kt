@@ -102,11 +102,13 @@ object PdfChordImporter {
             val tokens = tokenize(line)
             when {
                 isSectionHeader(tokens) -> appendLine(out, "{section: ${sectionText(tokens)}}")
+                isTabLine(tokens) -> { /* Guitar tab lines: skip silently */ }
                 isChordTokens(tokens) -> {
                     val next = lines.getOrNull(i + 1)
                     val nextTokens = next?.let { tokenize(it) }
                     if (next != null && nextTokens != null &&
-                        !isChordTokens(nextTokens) && !isSectionHeader(nextTokens)
+                        !isChordTokens(nextTokens) && !isSectionHeader(nextTokens) &&
+                        !isTabLine(nextTokens)
                     ) {
                         appendLine(out, mergeChordLyric(tokens, next))
                         prevY = next.first().y
@@ -116,7 +118,21 @@ object PdfChordImporter {
                         appendLine(out, chordOnly(tokens))
                     }
                 }
-                else -> appendLine(out, reconstructText(line))
+                else -> {
+                    // Manche UG-PDFs liefern Akkordzeile NACH der Lyrik (umgekehrte Y-Reihenfolge).
+                    val next = lines.getOrNull(i + 1)
+                    val nextTokens = next?.let { tokenize(it) }
+                    if (next != null && nextTokens != null &&
+                        isChordTokens(nextTokens) && !isTabLine(nextTokens)
+                    ) {
+                        appendLine(out, mergeChordLyric(nextTokens, line))
+                        prevY = next.first().y
+                        i += 2
+                        continue
+                    } else {
+                        appendLine(out, reconstructText(line))
+                    }
+                }
             }
             i++
         }
@@ -195,36 +211,59 @@ object PdfChordImporter {
         return inner.length <= 24 && SECTION_KEYS.matches(inner)
     }
 
+    /** Gitarren-Tab-Zeilen wie "e|---5-2---|" oder "B|-3-2-3---|" überspringen. */
+    private fun isTabLine(tokens: List<Token>): Boolean {
+        val joined = tokens.joinToString("") { it.text }
+        return joined.matches(Regex("[eEBGDAd]\\|[-0-9|x/\\\\hpb~. ]+.*"))
+    }
+
     private fun sectionText(tokens: List<Token>): String =
         tokens.joinToString(" ") { it.text }.trim()
             .removeSurrounding("[", "]").removeSurrounding("(", ")").trim()
 
     /**
-     * Setzt jeden Akkord der Akkordzeile vor das Textzeichen, dessen X-Position
-     * direkt unter dem Akkord-Start liegt — das eigentliche Anti-Verrutsch-Herz.
+     * Setzt jeden Akkord an die nächste Wortgrenze rechts von chord.startX.
+     *
+     * Kernproblem der alten Logik: "chords[ci].startX <= g.x" platziert Akkorde
+     * zeichenweise und landet dadurch mitten in Wörtern (z.B. "t[G]he").
+     * Neue Logik: Akkorde snappen immer an Wortanfänge — mit einem halben
+     * Zeichen Lookahead nach links, damit ein UG-Akkord der 2–3 px rechts vom
+     * Wortanfang steht trotzdem korrekt zugeordnet wird.
      */
     private fun mergeChordLyric(chords: List<Token>, lyric: List<Glyph>): String {
         val medianW = median(lyric.map { it.w }).coerceAtLeast(1f)
         val spaceGap = medianW * 0.6f
+        val halfChar = medianW * 0.5f
+
+        // Indizes der Wortanfänge (erster Buchstabe nach einer Lücke)
+        val wordStarts = mutableListOf(0)
+        for (i in 1 until lyric.size) {
+            if (lyric[i].x - (lyric[i - 1].x + lyric[i - 1].w) > spaceGap) wordStarts.add(i)
+        }
+
+        // Jeden Akkord zum NÄCHSTEN Wortanfang snappen (minimaler Abstand zur chord.startX).
+        // minByOrNull: Akkord geht zu dem Wortanfang, der räumlich am nächsten liegt —
+        // das entspricht am ehesten dem Visuellen in der Original-PDF.
+        val chordAt = mutableMapOf<Int, MutableList<String>>()
+        for (chord in chords) {
+            val targetIdx = wordStarts.minByOrNull { kotlin.math.abs(lyric[it].x - chord.startX) }
+                ?: lyric.size
+            chordAt.getOrPut(targetIdx) { mutableListOf() }.add(chord.text.removeSuffix(","))
+        }
+
         val sb = StringBuilder()
-        var ci = 0
         var prevEnd: Float? = null
-        for (g in lyric) {
+        for ((idx, g) in lyric.withIndex()) {
             if (prevEnd != null) {
                 val gap = g.x - prevEnd
                 if (gap > spaceGap) repeat((gap / medianW).toInt().coerceIn(1, 8)) { sb.append(' ') }
             }
-            while (ci < chords.size && chords[ci].startX <= g.x) {
-                sb.append('[').append(chords[ci].text.removeSuffix(",")).append(']')
-                ci++
-            }
+            chordAt[idx]?.forEach { c -> sb.append('[').append(c).append(']') }
             sb.append(g.c)
             prevEnd = g.x + g.w
         }
-        while (ci < chords.size) {
-            sb.append('[').append(chords[ci].text.removeSuffix(",")).append(']')
-            ci++
-        }
+        // Akkorde die hinter dem Zeilenende liegen (Akkord ohne Lyric darunter)
+        chordAt[lyric.size]?.forEach { c -> sb.append('[').append(c).append(']') }
         return sb.toString()
     }
 

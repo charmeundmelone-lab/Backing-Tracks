@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Nahtloser Session-Übergang | `claude/claude-md-review-052dfg` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `f856287` |
+| Letzter Commit | Letzter Stand | `00827dd` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.

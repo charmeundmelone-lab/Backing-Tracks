@@ -998,32 +998,39 @@ private fun LyricsPane(
 private fun LyricLine(line: ChordPro.Line, fontSp: Float) {
     val words = remember(line) { ChordPro.toWords(line) }
     if (words.isEmpty()) {
-        Spacer(Modifier.height((fontSp * 0.6f).dp))
+        Spacer(Modifier.height((fontSp * 0.5f).dp))
         return
     }
+    val hasChord = words.any { w -> w.any { it.chord != null } }
     FlowRow(
-        Modifier.fillMaxWidth().padding(vertical = (fontSp * 0.12f).dp),
+        Modifier.fillMaxWidth().padding(vertical = (fontSp * 0.14f).dp),
         horizontalArrangement = Arrangement.spacedBy((fontSp * 0.3f).dp),
     ) {
         for (word in words) {
             Row {
                 for (piece in word) {
                     Column(horizontalAlignment = Alignment.Start) {
-                        Text(
-                            piece.chord ?: " ",
-                            fontSize = (fontSp * 0.82f).sp,
-                            lineHeight = (fontSp * 0.92f).sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                        )
-                        Text(
-                            piece.text,
-                            fontSize = fontSp.sp,
-                            lineHeight = (fontSp * 1.1f).sp,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = 1,
-                        )
+                        if (hasChord) {
+                            Text(
+                                if (piece.chord != null) "${piece.chord} " else " ",
+                                fontSize = (fontSp * 0.80f).sp,
+                                lineHeight = (fontSp * 0.88f).sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        if (piece.text.isNotEmpty()) {
+                            Text(
+                                piece.text,
+                                fontSize = fontSp.sp,
+                                lineHeight = (fontSp * 1.18f).sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
             }

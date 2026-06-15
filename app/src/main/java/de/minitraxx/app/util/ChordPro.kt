@@ -81,7 +81,17 @@ object ChordPro {
             result.add(w.start to pieces)
         }
         for ((mi, m) in markers.withIndex()) {
-            if (!used[mi]) result.add(m.first to listOf(Piece(m.second, "")))
+            if (!used[mi]) {
+                val nearestWord = result.minByOrNull { kotlin.math.abs(it.first - m.first) }
+                val firstPiece = nearestWord?.second?.firstOrNull()
+                if (nearestWord != null && firstPiece != null && firstPiece.chord == null) {
+                    val idx = result.indexOf(nearestWord)
+                    result[idx] = nearestWord.first to listOf(Piece(m.second, firstPiece.text)) +
+                        nearestWord.second.drop(1)
+                } else {
+                    result.add(m.first to listOf(Piece(m.second, "")))
+                }
+            }
         }
         result.sortBy { it.first }
         return result.map { it.second }
@@ -96,6 +106,7 @@ object ChordPro {
 
     fun parse(source: String): List<Line> {
         val out = if (looksLikeChordPro(source)) parseChordPro(source) else parsePlain(source)
+        mergeChordOnlyLines(out)
         while (out.isNotEmpty() && out.first().kind == Kind.EMPTY) out.removeAt(0)
         while (out.isNotEmpty() && out.last().kind == Kind.EMPTY) out.removeAt(out.size - 1)
         return out
@@ -167,12 +178,14 @@ object ChordPro {
                     !isChordLine(trimmed.substring(1, trimmed.length - 1)) ->
                     out.add(Line(Kind.COMMENT, null, trimmed.substring(1, trimmed.length - 1)))
                 isChordLine(line) -> {
-                    val next = lines.getOrNull(i + 1)
+                    var j = i + 1
+                    while (j < lines.size && lines[j].isBlank()) j++
+                    val next = lines.getOrNull(j)
                     if (next != null && next.isNotBlank() && !isChordLine(next) &&
                         !(next.trim().startsWith("[") && next.trim().endsWith("]"))
                     ) {
                         out.add(Line(Kind.LYRIC, line, next))
-                        i++
+                        i = j
                     } else {
                         out.add(Line(Kind.LYRIC, line, ""))
                     }
@@ -197,6 +210,22 @@ object ChordPro {
             }
         }
         return chordCount > 0
+    }
+
+    private fun mergeChordOnlyLines(lines: MutableList<Line>) {
+        var i = 0
+        while (i < lines.size - 1) {
+            val cur = lines[i]
+            val next = lines[i + 1]
+            val curIsChordOnly = cur.kind == Kind.LYRIC && !cur.chords.isNullOrBlank() && cur.text.isBlank()
+            val nextIsLyricOnly = next.kind == Kind.LYRIC && next.chords == null && next.text.isNotBlank()
+            if (curIsChordOnly && nextIsLyricOnly) {
+                lines[i] = Line(Kind.LYRIC, cur.chords, next.text)
+                lines.removeAt(i + 1)
+            } else {
+                i++
+            }
+        }
     }
 
     private fun parseLyricLine(line: String): Line {

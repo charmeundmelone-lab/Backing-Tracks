@@ -565,7 +565,6 @@ fun LiveScreen(setlistId: Long, startIndex: Int, onExit: () -> Unit) {
 
             // Genre-Chips (nur wenn vorhanden)
             if (queueGenres.isNotEmpty()) {
-                @OptIn(ExperimentalLayoutApi::class)
                 FlowRow(
                     Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -694,7 +693,6 @@ private fun GigStatusButton(
     } else {
         val progress = remember { Animatable(0f) }
         var pressing by remember { mutableStateOf(false) }
-        val scope = rememberCoroutineScope()
         val errorColor = MaterialTheme.colorScheme.error
 
         LaunchedEffect(pressing) {

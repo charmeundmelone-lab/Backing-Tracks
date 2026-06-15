@@ -300,8 +300,13 @@ PDF-Importer-Fix geschehen). Noch offen aus `current-apk-disto`: ggf.
 
 ## Nächste Aufgabe (für neue Session)
 
-User testet die PDF-Import-Fix-APK. Bei Erfolg: mit User klären, ob weitere
-Verbesserungen aus `current-apk-disto-y2wzvi` portiert werden sollen.
+CI-Build auf `claude/current-apk-disto-y2wzvi` wurde manuell getriggert (workflow_dispatch).
+Sobald er grün ist, APK von `apk-dist` holen und dem User als Test-APK schicken.
+Versionsnummer wird eine neue Run-Nummer > 100 haben.
+
+Ziel: User bestätigt, ob diese APK (ohne Genre/Gig, aber mit perfektem PDF-Renderer)
+tatsächlich die „perfekte" Version ist. Dann entscheiden wir, ob wir den kompletten
+ChordPro-Renderer aus `current-apk-disto-y2wzvi` in den aktuellen Branch portieren.
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

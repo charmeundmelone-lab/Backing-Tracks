@@ -6,7 +6,7 @@
 
 | Feld | Wo | Aktueller Wert |
 |---|---|---|
-| Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `claude/claude-md-review-052dfg` |
+| Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
 | Letzter Commit | Letzter Stand | `78e947d` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
@@ -23,24 +23,33 @@ Das war's. Der SessionStart-Hook liest `.claude/active-branch` und checkt automa
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
 
-## Branch-Verifikation — ALLERERSTER SCHRITT
+## ⛔ ABSOLUT VERBINDLICHE BRANCH-REGEL — ALLERERSTER SCHRITT
 
-**Bevor du irgendetwas tust: Führe `git branch` aus und prüfe den aktiven Branch.**
+**Es gibt genau EINEN erlaubten Branch: `main`**
 
 ```
-Erwarteter Branch: claude/claude-md-review-052dfg
+Erwarteter Branch: main
 ```
 
 - Stimmt der Branch? → Weiter mit CI-Check
-- Falscher Branch? → `git checkout claude/claude-md-review-052dfg` ausführen, dann weiter
-- Branch existiert nicht lokal? → `git fetch origin && git checkout claude/claude-md-review-052dfg`
+- Falscher Branch? → `git checkout main` ausführen, dann weiter
+- Branch existiert nicht lokal? → `git fetch origin && git checkout main`
 
 **Niemals Code committen oder pushen ohne diesen Check. Niemals.**
 
-> **WICHTIG — Andere Branches existieren auf Remote, sind aber veraltet und dürfen NICHT verwendet werden.**
-> Es gibt nur einen erlaubten Arbeits-Branch: `claude/claude-md-review-052dfg`.
-> Alle anderen `claude/*`-Branches (z. B. `claude/kind-hawking-*`, `claude/claude-md-review-97ln3k` etc.)
-> sind Altlasten aus früheren Sessions. Code NUR auf `claude/claude-md-review-052dfg` committen und pushen.
+> **ABSOLUTES VERBOT:** Kein neuer Branch darf erstellt werden — niemals, unter keinen Umständen.
+> Alle `claude/*`-Branches auf Remote sind Altlasten aus früheren Sessions und dürfen NICHT verwendet werden.
+> Code ausschließlich auf `main` committen und pushen. Immer. Ohne Ausnahme.
+
+## ⛔ APK-LIEFERUNG — PFLICHTWORKFLOW
+
+**Jedes Mal wenn du eine APK lieferst, MUSST du danach sofort fragen:**
+
+> „Bist du zufrieden mit dieser APK?"
+> - **Ja, alles gut** → weiter mit dem nächsten Feature
+> - **Nein, muss noch bearbeitet werden** → direkt hier im Chat fixen, keine neue Session
+
+Kein neues Feature beginnen, bevor der User die APK bestätigt hat.
 
 ## CI-Check — PFLICHT vor jedem Weitermachen
 

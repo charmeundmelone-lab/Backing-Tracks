@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | wird gleich gesetzt nach Commit |
+| Letzter Commit | Letzter Stand | `adcf534` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -287,7 +287,7 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 - Tap-Once-Sync, Sektion-Scroll
 
 **Aktiver Branch:** `main`
-**Letzter Commit:** wird gleich gesetzt nach Commit
+**Letzter Commit:** `adcf534`
 
 ## Nächste Aufgabe (für neue Session)
 

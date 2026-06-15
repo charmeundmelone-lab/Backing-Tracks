@@ -2,5 +2,17 @@
   "model": "claude-opus-4-8",
   "autoCompactEnabled": true,
   "alwaysThinkingEnabled": true,
-  "totalTokensReminder": "countdown"
+  "totalTokensReminder": "countdown",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
 }

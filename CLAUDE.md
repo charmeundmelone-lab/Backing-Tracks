@@ -14,11 +14,7 @@
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
 Bei Branch-Wechseln muss der Workflow **nicht mehr** angepasst werden.
 
-**Branch-Wechsel — was zu tun ist (NUR diese zwei Schritte):**
-1. `.claude/active-branch` → neuen Branch-Namen eintragen und pushen
-2. Diese Tabelle hier → Branch-Zeile aktualisieren
-
-Das war's. Der SessionStart-Hook liest `.claude/active-branch` und checkt automatisch den richtigen Branch aus.
+**⛔ KEIN Branch-Wechsel erlaubt.** Es gibt nur `main`. Niemals einen neuen Branch erstellen.
 
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
@@ -56,7 +52,7 @@ Kein neues Feature beginnen, bevor der User die APK bestätigt hat.
 **Jede neue Session MUSS zuerst den letzten CI-Build prüfen, bevor Code geschrieben wird.**
 
 Ablauf:
-1. GitHub Actions für Branch `claude/claude-md-review-052dfg` abfragen
+1. GitHub Actions für Branch `main` abfragen
 2. Ist der letzte Build **grün** → weiter wie geplant
 3. Ist der letzte Build **rot** → zuerst den Fehler aus den Logs lesen, fixen, pushen, warten bis grün — erst dann das eigentliche Feature anfangen
 
@@ -77,7 +73,7 @@ Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind
   soll jetzt eine neue Session starten.
 
 **Nahtloser Session-Übergang:**
-1. Alle Änderungen committen & auf `claude/claude-md-review-052dfg` pushen
+1. Alle Änderungen committen & auf `main` pushen
 2. User sagt Claude in neuer Session: *"Lies CLAUDE.md und mach weiter."*
 3. Neue Claude-Instanz liest CLAUDE.md → hat vollen Kontext → kein Warmup nötig
 
@@ -90,7 +86,7 @@ zeigt ChordPro-Lyrics mit automatischem Scroll (Tap-Once-Sync), verwaltet
 Setlisten und Songs mit Room-Datenbank.
 
 **Repo:** `charmeundmelone-lab/Backing-Tracks`
-**Aktiver Branch:** `claude/claude-md-review-052dfg`
+**Aktiver Branch:** `main`
 **APK-Dist Branch:** `apk-dist` (wird per CI bei jedem Push gebaut)
 
 ## Architektur
@@ -282,40 +278,29 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 
 ## Letzter Stand (Session vom 2026-06-15)
 
-Branch `claude/claude-md-review-052dfg` — PDF-Importer-Regression gefixt.
+Branch umbenannt zu `main` — das ist ab sofort der einzige Branch.
 
-**Was neu ist:**
-- `PdfChordImporter.kt`: verbesserte Version (309 statt 270 Zeilen) vom Branch
-  `current-apk-disto-y2wzvi` chirurgisch portiert. Akkorde snappen jetzt an
-  **Wortgrenzen** (nicht mehr zeichenweise mitten ins Wort, z.B. `t[G]he`).
-  Zusätzlich: Tab-Zeilen-Filter (`isTabLine`) + Akkord-nach-Lyrik-Erkennung.
-- Davor: Genre-Dropdown auf feste Liste (`SongEditorScreen.kt`, read-only
-  `ExposedDropdownMenuBox`, Liste `["", "Rock", "Pop", "Jazz", "Schlager", "Latin"]`).
+**Was bisher in main ist:**
+- `PdfChordImporter.kt`: Wortgrenzen-Snapping (309 Zeilen, Commit `78e947d`)
+- `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste (Rock/Pop/Jazz/Schlager/Latin)
+- Genre-Feld + Gig-Tracking + DB v6
+- Smooth Scroll, Tap-Once-Sync, Sektion-Scroll
 
-**Aktiver Branch:** `claude/claude-md-review-052dfg`
-**Letzter Commit:** `78e947d`
-
-## ⚠️ Branch-Divergenz — WICHTIG
-
-Mehrere `claude/*`-Branches sind bei Merge-Base `517243e` auseinandergelaufen
-und haben **unterschiedliche, inkompatible** Versionen derselben Dateien:
-- `claude/claude-md-review-052dfg` (DIESER): Genre-Dropdown, Gig-Tracking, DB v6
-- `claude/current-apk-disto-y2wzvi`: besserer PDF-Importer, Chord-Editor, anderer Renderer — **ohne** Gig/Genre
-
-**Niemals** einen dieser Branches blind mergen — das dreht Features zurück.
-Verbesserungen immer **datei-/funktionsweise chirurgisch** portieren (wie beim
-PDF-Importer-Fix geschehen). Noch offen aus `current-apk-disto`: ggf.
-`ChordEditorDialog.kt` (Chord-Tap-Editor) — mit User klären ob gewünscht.
+**Aktiver Branch:** `main`
+**Letzter Commit:** `4c59a27`
 
 ## Nächste Aufgabe (für neue Session)
 
-CI-Build auf `claude/current-apk-disto-y2wzvi` wurde manuell getriggert (workflow_dispatch).
-Sobald er grün ist, APK von `apk-dist` holen und dem User als Test-APK schicken.
-Versionsnummer wird eine neue Run-Nummer > 100 haben.
+PDF-Import funktioniert noch nicht zuverlässig. Der User hat v0.1.0.102
+(aus dem alten `current-apk-disto-y2wzvi`-Branch) als „perfekt" bewertet —
+dieser Branch ist nun gelöscht, aber sein Code-Stand (SHA `a3527f6`) existiert
+noch in git-History.
 
-Ziel: User bestätigt, ob diese APK (ohne Genre/Gig, aber mit perfektem PDF-Renderer)
-tatsächlich die „perfekte" Version ist. Dann entscheiden wir, ob wir den kompletten
-ChordPro-Renderer aus `current-apk-disto-y2wzvi` in den aktuellen Branch portieren.
+**Nächste Schritte:**
+1. CI auf `main` prüfen (grün?)
+2. APK an User schicken + fragen: „Bist du zufrieden mit dem PDF-Import?"
+3. Falls nein: ChordPro-Renderer aus `a3527f6` (git show) chirurgisch portieren
+   Betroffene Dateien: `ChordPro.kt`, `LiveScreen.kt` (LyricLine-Renderer)
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

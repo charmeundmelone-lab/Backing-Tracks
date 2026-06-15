@@ -1,5 +1,38 @@
 # MiniTraxx — Projektkontext für Claude
 
+> # ⚠️ ZUERST ERLEDIGEN — offene Aufgabe (Stand 2026-06-15)
+>
+> **Bevor du IRGENDETWAS anderes tust, arbeite diese Aufgabe ab. Sie hat Vorrang
+> vor neuen Features. Erst wenn sie erledigt UND der CI grün ist, weitermachen.**
+>
+> **Problem (in der Vergangenheit MEHRFACH aufgetreten):**
+> Der aktive Branch-Name ist an mehreren Stellen hartcodiert und driftet bei
+> jedem Branch-Wechsel auseinander. Zuletzt war der Publish-Schritt in
+> `.github/workflows/android-build.yml` auf einen ALTEN Branch verdrahtet
+> (`if: github.ref == 'refs/heads/claude/kind-hawking-h4833c'`) — dadurch wurde
+> die APK zwar gebaut, aber NIE auf `apk-dist` veröffentlicht (Schritt = skipped).
+> Der User bekam wochenlang alte APKs.
+>
+> **Ziel: den Branch-Namen aus ALLEN Automatismen entfernen, sodass er nie wieder
+> nachgezogen werden muss — ein für alle Mal.**
+>
+> **Konkrete Schritte (in dieser Reihenfolge):**
+> 1. `.github/workflows/android-build.yml` — Publish-Schritt so umbauen, dass er
+>    KEINEN festen Dev-Branch-Namen mehr braucht.
+>    Vorschlag: `if: github.ref != 'refs/heads/apk-dist'` (publiziert von jedem
+>    Branch außer apk-dist selbst).
+> 2. **Endlosschleife prüfen:** Der Publish-Schritt force-pusht auf `apk-dist`.
+>    Der Workflow triggert aktuell auf `branches: ["**"]` — das schließt apk-dist
+>    ein → ein Push auf apk-dist würde einen neuen Run starten = Loop-Gefahr.
+>    Absichern, z. B. Trigger auf `branches-ignore: ["apk-dist"]` umstellen.
+> 3. Sobald der Workflow keinen Dev-Branch mehr hartcodiert: die Branch-Zeile in
+>    der Pflege-Tabelle unten entsprechend entschlacken (Workflow-Verweis raus).
+> 4. Mit echtem Push testen: Build grün **und** Publish-Schritt = success **und**
+>    neue APK landet auf `apk-dist` (per `git fetch origin apk-dist` prüfen).
+> 5. Diesen ⚠️-Block hier löschen, sobald alles grün und getestet ist.
+>
+> Danach erst: neue Features (siehe „Offene / geplante Features" unten).
+
 ## CLAUDE.md pflegen — PFLICHT bei jeder Session
 
 **Wenn du „Letzter Stand" aktualisierst, MUSST du diese vier Felder synchron halten:**

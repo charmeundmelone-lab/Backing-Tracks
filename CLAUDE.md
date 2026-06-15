@@ -37,6 +37,11 @@ Erwarteter Branch: claude/claude-md-review-052dfg
 
 **Niemals Code committen oder pushen ohne diesen Check. Niemals.**
 
+> **WICHTIG — Andere Branches existieren auf Remote, sind aber veraltet und dürfen NICHT verwendet werden.**
+> Es gibt nur einen erlaubten Arbeits-Branch: `claude/claude-md-review-052dfg`.
+> Alle anderen `claude/*`-Branches (z. B. `claude/kind-hawking-*`, `claude/claude-md-review-97ln3k` etc.)
+> sind Altlasten aus früheren Sessions. Code NUR auf `claude/claude-md-review-052dfg` committen und pushen.
+
 ## CI-Check — PFLICHT vor jedem Weitermachen
 
 **Jede neue Session MUSS zuerst den letzten CI-Build prüfen, bevor Code geschrieben wird.**

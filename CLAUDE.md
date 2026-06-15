@@ -14,6 +14,17 @@
 **Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
 Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
 
+## CI-Check — PFLICHT vor jedem Weitermachen
+
+**Jede neue Session MUSS zuerst den letzten CI-Build prüfen, bevor Code geschrieben wird.**
+
+Ablauf:
+1. GitHub Actions für Branch `claude/claude-md-review-052dfg` abfragen
+2. Ist der letzte Build **grün** → weiter wie geplant
+3. Ist der letzte Build **rot** → zuerst den Fehler aus den Logs lesen, fixen, pushen, warten bis grün — erst dann das eigentliche Feature anfangen
+
+Kein grünes Licht = kein neuer Code.
+
 ---
 
 ## Kontext-Monitoring (WICHTIG — immer beachten)

@@ -8,7 +8,7 @@
 |---|---|---|
 | Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
 | DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `78e947d` |
+| Letzter Commit | Letzter Stand | `ed2f240` |
 | Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
 
 **Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
@@ -281,7 +281,7 @@ git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
 Branch umbenannt zu `main` — das ist ab sofort der einzige Branch.
 
 **Was bisher in main ist:**
-- `PdfChordImporter.kt`: Wortgrenzen-Snapping (309 Zeilen, Commit `78e947d`)
+- `PdfChordImporter.kt`: Wortgrenzen-Snapping (309 Zeilen, Commit `ed2f240`)
 - `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste (Rock/Pop/Jazz/Schlager/Latin)
 - Genre-Feld + Gig-Tracking + DB v6
 - Smooth Scroll, Tap-Once-Sync, Sektion-Scroll
@@ -291,16 +291,25 @@ Branch umbenannt zu `main` — das ist ab sofort der einzige Branch.
 
 ## Nächste Aufgabe (für neue Session)
 
-PDF-Import funktioniert noch nicht zuverlässig. Der User hat v0.1.0.102
-(aus dem alten `current-apk-disto-y2wzvi`-Branch) als „perfekt" bewertet —
-dieser Branch ist nun gelöscht, aber sein Code-Stand (SHA `a3527f6`) existiert
-noch in git-History.
+PDF-Import zeigt Akkorde noch nicht an der richtigen Stelle (Live-Ansicht).
+Editor zeigt importierten ChordPro-Text korrekt an — Problem liegt im Renderer.
+
+Bisher portiert (Commits `0890a99`, `ed2f240` auf main):
+- mergeChordOnlyLines ✅
+- toWords Gap-Assignment mit MutableList (wie a3527f6) ✅
+- Leerzeilen-Lookahead parsePlain ✅
+- softWrap=false + hasChord-Guard in LyricLine ✅
+
+Noch nicht gelöst: User sagt v0.1.0.107 zeigt immer noch altes Verhalten.
 
 **Nächste Schritte:**
 1. CI auf `main` prüfen (grün?)
-2. APK an User schicken + fragen: „Bist du zufrieden mit dem PDF-Import?"
-3. Falls nein: ChordPro-Renderer aus `a3527f6` (git show) chirurgisch portieren
-   Betroffene Dateien: `ChordPro.kt`, `LiveScreen.kt` (LyricLine-Renderer)
+2. `git diff a3527f6..HEAD -- app/src/main/java/de/minitraxx/app/util/ChordPro.kt` ausführen
+   und jeden verbleibenden Unterschied prüfen
+3. `git diff a3527f6..HEAD -- app/src/main/java/de/minitraxx/app/ui/screens/LiveScreen.kt`
+   — nur LyricLine-Block vergleichen
+4. Fehlende Teile portieren, APK bauen, User fragen ob zufrieden
+   (PFLICHT: immer zuerst fragen bevor neues Feature!)
 
 Davor (Session 2026-06-14):
 - DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`

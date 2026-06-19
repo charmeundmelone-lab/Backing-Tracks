@@ -53,6 +53,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _scanProgress = MutableStateFlow("")
     val scanProgress: StateFlow<String> = _scanProgress.asStateFlow()
 
+    private val _importStatus = MutableStateFlow("")
+    val importStatus: StateFlow<String> = _importStatus.asStateFlow()
+
     init {
         viewModelScope.launch {
             while (true) {
@@ -79,19 +82,26 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importFolder(context: Context, uri: Uri) {
         Log.d("ImportFolder", "importFolder called, uri=$uri")
-        // Progress-Bar sofort im Main-Thread setzen, BEVOR der IO-Coroutine startet
         _isScanning.value = true
         _scanProgress.value = ""
+        _importStatus.value = ""
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 Log.d("ImportFolder", "Coroutine gestartet auf IO-Dispatcher")
+                var count = 0
                 FolderImporter.import(context, uri, dao) { name ->
                     Log.d("ImportFolder", "Fortschritt: $name")
                     _scanProgress.value = name
+                    count++
                 }
-                Log.d("ImportFolder", "Import erfolgreich abgeschlossen")
+                Log.d("ImportFolder", "Import abgeschlossen: $count Songs")
+                _importStatus.value = if (count == 0)
+                    "Keine Unterordner gefunden – bitte den Elternordner wählen, der die Song-Ordner enthält."
+                else
+                    "$count Songs importiert."
             } catch (e: Exception) {
                 Log.e("ImportFolder", "Import FEHLGESCHLAGEN", e)
+                _importStatus.value = "Fehler: ${e.message}"
             } finally {
                 _isScanning.value = false
                 _scanProgress.value = ""

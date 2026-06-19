@@ -1,5 +1,6 @@
 package de.livegigplayer.pro.ui
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -73,9 +74,18 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
 
     var isLocked by remember { mutableStateOf(false) }
 
+    val importStatus by vm.importStatus.collectAsState()
+
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
-    ) { uri -> uri?.let { vm.importFolder(context, it) } }
+    ) { uri ->
+        if (uri == null) {
+            Toast.makeText(context, "❌ Kein Ordner gewählt (URI=null)", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(context, "✅ Ordner erkannt – starte Import…", Toast.LENGTH_SHORT).show()
+            vm.importFolder(context, uri)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -97,6 +107,14 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
+                if (songs.isEmpty() && importStatus.isNotEmpty()) {
+                    Text(
+                        text = importStatus,
+                        color = Gray,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
                 songs.forEachIndexed { index, song ->
                     SongRow(
                         index    = index + 1,

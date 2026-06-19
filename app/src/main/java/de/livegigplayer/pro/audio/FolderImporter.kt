@@ -13,119 +13,74 @@ private const val TAG = "FolderImporter"
 
 object FolderImporter {
 
-    private val BPM_REGEX = Regex("""(\d+)\s*bpm""", RegexOption.IGNORE_CASE)
-
-    private data class InfoData(val bpm: Int? = null, val key: String = "", val capo: Int = 0)
-
-    suspend fun import(
-        context: Context,
-        rootUri: Uri,
-        dao: SongDao,
-        onProgress: (String) -> Unit
-    ) {
-        Log.d(TAG, "import() gestartet: rootUri=$rootUri")
-
+    suspend fun import(context: Context, rootUri: Uri, dao: SongDao, onProgress: (String) -> Unit) {
+        Log.d(TAG, "import() rootUri=$rootUri")
         try {
-            context.contentResolver.takePersistableUriPermission(
-                rootUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-            Log.d(TAG, "takePersistableUriPermission OK")
-        } catch (e: SecurityException) {
-            Log.w(TAG, "takePersistableUriPermission fehlgeschlagen (evtl. bereits vorhanden): ${e.message}")
-        }
+            context.contentResolver.takePersistableUriPermission(rootUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: SecurityException) { Log.w(TAG, "takePersistableUriPermission: ${e.message}") }
 
-        val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
-        if (rootDoc == null) {
-            Log.e(TAG, "DocumentFile.fromTreeUri() lieferte null")
-            return
-        }
+        val root = DocumentFile.fromTreeUri(context, rootUri) ?: run { Log.e(TAG, "root null"); return }
+        val all = try { root.listFiles() } catch (e: Exception) { Log.e(TAG, "listFiles failed", e); return }
 
-        val allFiles = try { rootDoc.listFiles() } catch (e: Exception) {
-            Log.e(TAG, "listFiles() auf Root fehlgeschlagen", e); return
-        }
+        val folders = all.filter { it.isDirectory }.sortedBy { it.name }
+        val wavs    = all.filter { it.name?.endsWith(".wav", ignoreCase = true) == true }.sortedBy { it.name }
 
-        val folders = allFiles.filter { it.isDirectory }.sortedBy { it.name }
-        Log.d(TAG, "Root hat ${allFiles.size} Einträge, davon ${folders.size} Unterordner")
+        Log.d(TAG, "${folders.size} Unterordner (Modus A), ${wavs.size} WAV-Dateien (Modus B)")
 
-        if (folders.isEmpty()) {
-            Log.w(TAG, "Keine Unterordner gefunden – falscher Ordner? Pfad: $rootUri")
-            return
-        }
-
+        // Modus A: Unterordner = Multi-Stem-Songs
         for (folder in folders) {
-            val name = folder.name
-            if (name == null) { Log.w(TAG, "Ordner ohne Namen übersprungen"); continue }
-
-            Log.d(TAG, "Verarbeite: '$name'")
-            onProgress(name)
-
-            val safPath = "${rootUri}||${name}"
-            val info = parseInfoTxt(context, folder)
-            val bpm = info.bpm ?: BPM_REGEX.find(name)?.groupValues?.get(1)?.toIntOrNull() ?: 120
-
-            val wavs = try {
-                folder.listFiles().filter { it.name?.endsWith(".wav", ignoreCase = true) == true }
-            } catch (e: Exception) {
-                Log.e(TAG, "listFiles() in '$name' fehlgeschlagen", e); emptyList()
-            }
-            Log.d(TAG, "  '$name': ${wavs.size} WAVs, bpm=$bpm, key='${info.key}', capo=${info.capo}")
-
-            val duration = if (wavs.isNotEmpty()) getDuration(context, wavs[0].uri) else "00:00"
-
-            try {
-                val existing = dao.findByPath(safPath)
-                if (existing != null) {
-                    dao.update(existing.copy(
-                        title = name, bpm = bpm, duration = duration,
-                        keySignature = info.key, capoPosition = info.capo
-                    ))
-                } else {
-                    dao.insert(Song(
-                        title = name, bpm = bpm, timeSignature = "4/4",
-                        playlistId = 1, audioFilePath = safPath, duration = duration,
-                        keySignature = info.key, capoPosition = info.capo
-                    ))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "DB-Operation für '$name' fehlgeschlagen", e)
-            }
+            val rawName = folder.name ?: continue
+            onProgress(rawName)
+            val (artist, title) = parseArtistTitle(rawName)
+            val safPath = "${rootUri}||${rawName}"
+            val children = try { folder.listFiles() } catch (e: Exception) { emptyList() }
+            val allWavs = children.filter { it.name?.endsWith(".wav", ignoreCase = true) == true }
+            val clickFile = allWavs.find { it.name?.contains("click", ignoreCase = true) == true }
+            val bpmFromName = bpmFromName(rawName)
+            val bpmExact = if (clickFile != null) BpmAnalyzer.analyze(context, clickFile.uri) else 0f
+            val bpm = bpmFromName ?: if (bpmExact > 0f) bpmExact.toInt() else 120
+            val duration = allWavs.firstOrNull()?.let { getDuration(context, it.uri) } ?: "00:00"
+            Log.d(TAG, "ModeA '$rawName': bpmExact=$bpmExact bpm=$bpm")
+            upsert(dao, safPath, title, artist, bpm, bpmExact, duration)
         }
-        Log.d(TAG, "import() abgeschlossen (${folders.size} Songs)")
-    }
 
-    private fun parseInfoTxt(context: Context, folder: DocumentFile): InfoData {
-        val infoFile = try {
-            folder.listFiles().find { it.name?.equals("info.txt", ignoreCase = true) == true }
-        } catch (e: Exception) { null } ?: return InfoData()
-
-        return try {
-            val text = context.contentResolver.openInputStream(infoFile.uri)
-                ?.bufferedReader()?.use { it.readText() } ?: return InfoData()
-
-            var bpm: Int? = null
-            var key = ""
-            var capo = 0
-
-            // Unterstützt "BPM=147\nKEY=Am\nCAPO=2" und "BPM=147, KEY=Am, CAPO=Kein"
-            for (part in text.split(Regex("[,\n]")).map { it.trim() }.filter { it.isNotEmpty() }) {
-                when {
-                    part.startsWith("BPM=", ignoreCase = true) ->
-                        bpm = part.substringAfter("=").trim().toIntOrNull()
-                    part.startsWith("KEY=", ignoreCase = true) ->
-                        key = part.substringAfter("=").trim()
-                    part.startsWith("CAPO=", ignoreCase = true) -> {
-                        val v = part.substringAfter("=").trim()
-                        capo = if (v.equals("Kein", ignoreCase = true) || v == "0") 0
-                               else v.toIntOrNull() ?: 0
-                    }
-                }
-            }
-            InfoData(bpm, key, capo)
-        } catch (e: Exception) {
-            Log.w(TAG, "info.txt parse error: ${e.message}")
-            InfoData()
+        // Modus B: Einzel-WAV = Stereo-Song (L=Musik, R=Klick)
+        for (wav in wavs) {
+            val rawName = wav.name?.removeSuffix(".wav")?.removeSuffix(".WAV") ?: continue
+            onProgress(rawName)
+            val (artist, title) = parseArtistTitle(rawName)
+            val safPath = wav.uri.toString()
+            val bpmExact = BpmAnalyzer.analyze(context, wav.uri, rightChannelOnly = true)
+            val bpm = bpmFromName(rawName) ?: if (bpmExact > 0f) bpmExact.toInt() else 120
+            val duration = getDuration(context, wav.uri)
+            Log.d(TAG, "ModeB '$rawName': bpmExact=$bpmExact bpm=$bpm")
+            upsert(dao, safPath, title, artist, bpm, bpmExact, duration)
         }
     }
+
+    private suspend fun upsert(dao: SongDao, path: String, title: String, artist: String,
+                               bpm: Int, bpmExact: Float, duration: String) {
+        try {
+            val existing = dao.findByPath(path)
+            if (existing != null) {
+                dao.update(existing.copy(title = title, artist = artist, bpm = bpm,
+                    bpmExact = bpmExact, duration = duration))
+            } else {
+                dao.insert(Song(title = title, artist = artist, bpm = bpm, bpmExact = bpmExact,
+                    timeSignature = "4/4", playlistId = 1, audioFilePath = path, duration = duration))
+            }
+        } catch (e: Exception) { Log.e(TAG, "DB upsert failed for '$title'", e) }
+    }
+
+    private fun parseArtistTitle(name: String): Pair<String, String> {
+        val clean = name.replace(Regex("""[\s\-]*\d+\s*bpm""", RegexOption.IGNORE_CASE), "").trim()
+        val idx = clean.indexOf(" - ")
+        return if (idx > 0) Pair(clean.substring(0, idx).trim(), clean.substring(idx + 3).trim())
+               else Pair("", clean)
+    }
+
+    private fun bpmFromName(name: String): Int? =
+        Regex("""(\d+)\s*bpm""", RegexOption.IGNORE_CASE).find(name)?.groupValues?.get(1)?.toIntOrNull()
 
     private fun getDuration(context: Context, uri: Uri): String {
         val mmr = MediaMetadataRetriever()
@@ -134,11 +89,6 @@ object FolderImporter {
             val ms = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
             val s = ms / 1000
             "%02d:%02d".format(s / 60, s % 60)
-        } catch (e: Exception) {
-            Log.w(TAG, "getDuration fehlgeschlagen für $uri: ${e.message}")
-            "00:00"
-        } finally {
-            mmr.release()
-        }
+        } catch (e: Exception) { "00:00" } finally { mmr.release() }
     }
 }

@@ -7,7 +7,9 @@ import androidx.room.PrimaryKey
 data class Song(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
+    val artist: String = "",
     val bpm: Int,
+    val bpmExact: Float = 0f,
     val timeSignature: String,
     val playlistId: Long,
     val isCompleted: Boolean = false,
@@ -15,7 +17,7 @@ data class Song(
     val duration: String = "00:00",
     val capoPosition: Int = 0,
     val keySignature: String = "",
-    // Mixer-Lautstärken in dB (−3 bis +3), 0.0 = Nullpunkt
+    val genre: String = "",
     val volDrums: Float = 0f,
     val volBass: Float = 0f,
     val volKeys: Float = 0f,

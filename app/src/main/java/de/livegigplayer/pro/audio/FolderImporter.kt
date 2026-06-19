@@ -62,7 +62,8 @@ object FolderImporter {
         }
 
         for (folder in folders) {
-            val name = folder.name ?: run {
+            val name = folder.name
+            if (name == null) {
                 Log.w(TAG, "Ordner ohne Namen übersprungen")
                 continue
             }

@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
@@ -40,7 +43,9 @@ import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.TrackMode
 
-private val MixerBg    = Color(0xF01A1A1A)
+// Vollständig deckend – kein Alpha-Kanal
+private val MixerBg    = Color(0xFF0A0A0A)
+private val MixerCard  = Color(0xFF1E1E1E)
 private val MixerVolt  = Color(0xFFE8FF00)
 private val MixerGray  = Color(0xFF777777)
 private val MixerWhite = Color(0xFFFFFFFF)
@@ -65,14 +70,17 @@ fun MixerOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MixerBg)
+                .background(MixerBg)   // 100% deckend, kein Bleed-through
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
+                    .statusBarsPadding()          // oben: Status-Bar freilassen
+                    .navigationBarsPadding()      // unten: Gesten-/Home-Bar freilassen
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
-                // Header
+
+                // ── Header ─────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -85,39 +93,41 @@ fun MixerOverlay(
                         fontWeight = FontWeight.Bold
                     )
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = MixerWhite)
+                        Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = MixerGray)
                     }
                 }
 
-                // Transport Controls
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // ── Transport Controls ──────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TransportButton(
-                        icon  = Icons.Filled.Stop,
-                        label = "STOP",
-                        tint  = MixerGray,
-                        modifier = Modifier.size(64.dp),
+                        icon    = Icons.Filled.Stop,
+                        label   = "STOP",
+                        tint    = MixerGray,
+                        active  = false,
+                        modifier = Modifier.weight(1f),
                         onClick = onStop
                     )
                     TransportButton(
-                        icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        label    = if (isPlaying) "PAUSE" else "PLAY",
-                        tint     = if (isPlaying) MixerVolt else MixerWhite,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(64.dp),
-                        onClick  = onPlayPause
+                        icon    = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        label   = if (isPlaying) "PAUSE" else "PLAY",
+                        tint    = if (isPlaying) MixerVolt else MixerWhite,
+                        active  = isPlaying,
+                        modifier = Modifier.weight(1f),
+                        onClick = onPlayPause
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(color = Color(0xFF333333))
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFF2A2A2A))
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Sliders
+                // ── Fader ───────────────────────────────────────
                 val mt = trackMode as? TrackMode.Multitrack
                 if (song == null || mt == null) {
                     Spacer(modifier = Modifier.weight(1f))
@@ -129,10 +139,7 @@ fun MixerOverlay(
                     )
                     Spacer(modifier = Modifier.weight(1f))
                 } else {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         MixerSlider("DRUMS",  song.volDrums,  mt.drums  != null) { onVolumeChange("drums",  it) }
                         MixerSlider("BASS",   song.volBass,   mt.bass   != null) { onVolumeChange("bass",   it) }
                         MixerSlider("KEYS",   song.volKeys,   mt.keys   != null) { onVolumeChange("keys",   it) }
@@ -144,12 +151,20 @@ fun MixerOverlay(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // ── Reset ───────────────────────────────────────
                 Button(
                     onClick = onReset,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2A2A))
                 ) {
-                    Text("ALLE ZURÜCKSETZEN", color = MixerVolt, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "ALLE ZURÜCKSETZEN",
+                        color = MixerVolt,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
@@ -161,51 +176,61 @@ private fun TransportButton(
     icon: ImageVector,
     label: String,
     tint: Color,
+    active: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val bg = if (active) Color(0xFF2A2A00) else MixerCard
     Button(
         onClick = onClick,
-        modifier = modifier,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2A2A))
+        modifier = modifier.height(56.dp),
+        shape = CircleShape,
+        colors = ButtonDefaults.buttonColors(containerColor = bg)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(28.dp))
-            Text(label, color = tint, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+            Text(label, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
 private fun MixerSlider(label: String, valueDb: Float, enabled: Boolean, onValueChange: (Float) -> Unit) {
-    val labelColor = if (enabled) MixerWhite else Color(0xFF444444)
-    val valueColor = if (enabled) MixerGray  else Color(0xFF333333)
-    Column {
+    val labelColor = if (enabled) MixerWhite else Color(0xFF3A3A3A)
+    val valueColor = if (enabled) MixerGray  else Color(0xFF2A2A2A)
+    Column(modifier = Modifier.padding(vertical = 2.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(label, color = labelColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = labelColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             Text(
-                text  = if (enabled) "%+.1f dB".format(valueDb) else "n/a",
+                text  = if (enabled) "%+.1f dB".format(valueDb) else "–",
                 color = valueColor,
-                fontSize = 12.sp
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
             )
         }
         Slider(
-            value       = valueDb,
+            value         = valueDb,
             onValueChange = onValueChange,
-            valueRange  = -3f..3f,
-            steps       = 11,   // 0.5 dB Schritte: -3.0 -2.5 ... 0.0 ... +2.5 +3.0 → rastet am Anschlag ein
-            enabled     = enabled,
-            modifier    = Modifier.fillMaxWidth(),
-            colors      = SliderDefaults.colors(
-                thumbColor               = MixerVolt,
-                activeTrackColor         = MixerVolt,
-                inactiveTrackColor       = Color(0xFF444444),
-                disabledThumbColor       = Color(0xFF2A2A2A),
-                disabledActiveTrackColor  = Color(0xFF2A2A2A),
-                disabledInactiveTrackColor = Color(0xFF222222)
+            valueRange    = -3f..3f,
+            steps         = 11,
+            enabled       = enabled,
+            modifier      = Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+            colors = SliderDefaults.colors(
+                thumbColor                = MixerVolt,
+                activeTrackColor          = MixerVolt,
+                inactiveTrackColor        = Color(0xFF333333),
+                disabledThumbColor        = Color(0xFF1E1E1E),
+                disabledActiveTrackColor  = Color(0xFF1E1E1E),
+                disabledInactiveTrackColor = Color(0xFF1A1A1A)
             )
         )
     }

@@ -1,7 +1,9 @@
 package de.livegigplayer.pro.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,16 +17,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,60 +42,83 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import de.livegigplayer.pro.data.Song
 
-private val BgDeep = Color(0xFF0A0A0A)
-private val BgCard = Color(0xFF1A1A1A)
+private val BgDeep  = Color(0xFF0A0A0A)
+private val BgCard  = Color(0xFF1A1A1A)
 private val BgTrack = Color(0xFF2A2A2A)
-private val Volt = Color(0xFFE8FF00)
+private val Volt    = Color(0xFFE8FF00)
 private val VoltDim = Color(0x8CE8FF00)
-private val White = Color(0xFFFFFFFF)
-private val Gray = Color(0xFF777777)
-
-private val dummySongs = listOf(
-    Song(1, "Sultans of Swing", 149, "4/4", 1, false, "", "04:03", 0),
-    Song(2, "Hotel California", 147, "4/4", 1, false, "", "06:31", 0),
-    Song(3, "Nothing Else Matters", 69, "6/8", 1, false, "", "06:28", 0),
-    Song(4, "Sweet Child O' Mine", 125, "4/4", 1, false, "", "05:56", 2),
-    Song(5, "Comfortably Numb", 63, "4/4", 1, false, "", "06:22", 0),
-    Song(6, "Stairway to Heaven", 82, "4/4", 1, false, "", "08:02", 0),
-    Song(7, "Wish You Were Here", 66, "4/4", 1, true, "", "05:34", 3),
-)
+private val White   = Color(0xFFFFFFFF)
+private val Gray    = Color(0xFF777777)
 
 @Composable
-fun MainScreen() {
+fun MainScreen(vm: PlayerViewModel = viewModel()) {
+    val songs       by vm.songs.collectAsState()
+    val currentSong by vm.currentSong.collectAsState()
+    val isPlaying   by vm.isPlaying.collectAsState()
+    val trackMode   by vm.trackMode.collectAsState()
+    val showMixer   by vm.showMixer.collectAsState()
+    val positionMs  by vm.positionMs.collectAsState()
+    val durationMs  by vm.durationMs.collectAsState()
+
     var isLocked by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BgDeep)
-            .systemBarsPadding()
-    ) {
-        TopBar(isLocked = isLocked, onLockToggle = { isLocked = !isLocked })
-
-        // Jede Kachel bekommt weight(1f) → füllt exakt den verfügbaren Raum ohne schwarze Lücke
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
+                .fillMaxSize()
+                .background(BgDeep)
+                .systemBarsPadding()
         ) {
-            dummySongs.forEachIndexed { index, song ->
-                SongRow(
-                    index = index + 1,
-                    song = song,
-                    modifier = Modifier.weight(1f)
-                )
+            TopBar(
+                isLocked   = isLocked,
+                onLockToggle  = { isLocked = !isLocked },
+                onMixerToggle = { vm.toggleMixer() }
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                songs.forEachIndexed { index, song ->
+                    SongRow(
+                        index    = index + 1,
+                        song     = song,
+                        selected = song.id == currentSong?.id,
+                        onClick  = { if (!isLocked) vm.selectSong(song) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
+
+            BottomPlayer(
+                song       = currentSong,
+                isPlaying  = isPlaying,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                onPrevious = { vm.skipPrevious() },
+                onPlayPause = { vm.togglePlayPause() },
+                onNext     = { vm.skipNext() }
+            )
         }
 
-        BottomPlayer()
+        MixerOverlay(
+            visible       = showMixer,
+            song          = currentSong,
+            trackMode     = trackMode,
+            onVolumeChange = { name, db -> vm.updateMixerVolume(name, db) },
+            onReset       = { vm.resetAllMixer() },
+            onClose       = { vm.closeMixer() }
+        )
     }
 }
 
 @Composable
-private fun TopBar(isLocked: Boolean, onLockToggle: () -> Unit) {
+private fun TopBar(isLocked: Boolean, onLockToggle: () -> Unit, onMixerToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -105,6 +133,14 @@ private fun TopBar(isLocked: Boolean, onLockToggle: () -> Unit) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
+        IconButton(onClick = onMixerToggle) {
+            Icon(
+                imageVector = Icons.Filled.Tune,
+                contentDescription = "Mixer",
+                tint = Gray,
+                modifier = Modifier.size(26.dp)
+            )
+        }
         IconButton(onClick = onLockToggle) {
             Icon(
                 imageVector = if (isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
@@ -117,18 +153,26 @@ private fun TopBar(isLocked: Boolean, onLockToggle: () -> Unit) {
 }
 
 @Composable
-private fun SongRow(index: Int, song: Song, modifier: Modifier = Modifier) {
+private fun SongRow(
+    index: Int,
+    song: Song,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val dimmed = song.isCompleted
+    val bg = if (selected) BgTrack else BgCard
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(BgCard, shape = MaterialTheme.shapes.small)
+            .background(bg, shape = MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = index.toString().padStart(2, '0'),
-            color = if (dimmed) VoltDim else Volt,
+            color = if (selected) Volt else if (dimmed) VoltDim else Volt,
             fontSize = 28.sp,
             fontWeight = FontWeight.Black,
             lineHeight = 30.sp,
@@ -145,20 +189,33 @@ private fun SongRow(index: Int, song: Song, modifier: Modifier = Modifier) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val capoText = if (song.capoPosition == 0) "🎸 Kein Kapo" else "🎸 Kapo: ${song.capoPosition}"
+            val capoText = if (song.capoPosition == 0) "Kein Kapo" else "Kapo: ${song.capoPosition}"
             Text(
-                text = "${song.bpm} BPM | ⏱️ ${song.duration} | $capoText",
+                text = "${song.bpm} BPM | ${song.duration} | $capoText",
                 color = Gray,
                 fontSize = 12.sp,
-                lineHeight = 14.sp,
-                fontWeight = FontWeight.Normal
+                lineHeight = 14.sp
             )
         }
     }
 }
 
 @Composable
-private fun BottomPlayer() {
+private fun BottomPlayer(
+    song: Song?,
+    isPlaying: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit
+) {
+    val progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
+    val remainMs = (durationMs - positionMs).coerceAtLeast(0L)
+    val remSec   = remainMs / 1000
+    val timeText = if (song == null) "-00:00"
+                   else "-%02d:%02d".format(remSec / 60, remSec % 60)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -170,7 +227,7 @@ private fun BottomPlayer() {
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
-                text = "-00:00",
+                text = timeText,
                 color = VoltDim,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
@@ -178,7 +235,7 @@ private fun BottomPlayer() {
             )
             Spacer(modifier = Modifier.height(5.dp))
             LinearProgressIndicator(
-                progress = { 0f },
+                progress = { progress },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(3.dp),
@@ -194,27 +251,40 @@ private fun BottomPlayer() {
                 .background(BgCard),
             horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
-            PlayerButton(Icons.Filled.SkipPrevious, "ZURÜCK", Modifier.weight(1f))
-            PlayerButton(Icons.Filled.PlayArrow, "PLAY", Modifier.weight(1f))
-            PlayerButton(Icons.Filled.Repeat, "LOOP", Modifier.weight(1f))
-            PlayerButton(Icons.Filled.SkipNext, "WEITER", Modifier.weight(1f))
+            PlayerButton(Icons.Filled.SkipPrevious, "ZURÜCK", Modifier.weight(1f), onClick = onPrevious)
+            PlayerButton(
+                icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                label    = if (isPlaying) "PAUSE" else "PLAY",
+                modifier = Modifier.weight(1f),
+                tint     = if (isPlaying) Volt else White,
+                onClick  = onPlayPause
+            )
+            PlayerButton(Icons.Filled.Repeat, "LOOP", Modifier.weight(1f), onClick = {})
+            PlayerButton(Icons.Filled.SkipNext, "WEITER", Modifier.weight(1f), onClick = onNext)
         }
     }
 }
 
 @Composable
-private fun PlayerButton(icon: ImageVector, label: String, modifier: Modifier = Modifier) {
+private fun PlayerButton(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    tint: Color = White,
+    onClick: () -> Unit
+) {
     Column(
         modifier = modifier
             .height(110.dp)
-            .background(BgCard),
+            .background(BgCard)
+            .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = White,
+            tint = tint,
             modifier = Modifier.size(42.dp)
         )
         Spacer(modifier = Modifier.height(6.dp))

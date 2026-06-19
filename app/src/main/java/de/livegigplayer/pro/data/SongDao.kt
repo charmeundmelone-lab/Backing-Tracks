@@ -27,4 +27,10 @@ interface SongDao {
 
     @Query("SELECT * FROM songs WHERE playlistId = :playlistId ORDER BY title ASC")
     fun getSongsByPlaylist(playlistId: Long): Flow<List<Song>>
+
+    @Query("UPDATE songs SET volDrums=:d, volBass=:b, volKeys=:k, volVocals=:v, volClick=:c, volCue=:cu WHERE id=:id")
+    suspend fun updateMixerSettings(id: Long, d: Float, b: Float, k: Float, v: Float, c: Float, cu: Float)
+
+    @Query("UPDATE songs SET volDrums=0, volBass=0, volKeys=0, volVocals=0, volClick=0, volCue=0")
+    suspend fun resetAllMixerSettings()
 }

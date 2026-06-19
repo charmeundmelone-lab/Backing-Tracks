@@ -76,8 +76,8 @@ fun MainScreen() {
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             itemsIndexed(dummySongs) { index, song ->
                 SongRow(index = index + 1, song = song)
@@ -94,7 +94,7 @@ private fun TopBar(isLocked: Boolean, onLockToggle: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(BgDeep)
-            .padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -122,23 +122,25 @@ private fun SongRow(index: Int, song: Song) {
         modifier = Modifier
             .fillMaxWidth()
             .background(BgCard, shape = MaterialTheme.shapes.small)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = index.toString().padStart(2, '0'),
             color = if (dimmed) VoltDim else Volt,
-            fontSize = 38.sp,
+            fontSize = 26.sp,
             fontWeight = FontWeight.Black,
-            modifier = Modifier.width(56.dp)
+            lineHeight = 28.sp,
+            modifier = Modifier.width(40.dp)
         )
-        Spacer(modifier = Modifier.width(14.dp))
+        Spacer(modifier = Modifier.width(10.dp))
         Column {
             Text(
                 text = song.title,
                 color = if (dimmed) Gray else White,
-                fontSize = 19.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
+                lineHeight = 18.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -146,7 +148,8 @@ private fun SongRow(index: Int, song: Song) {
             Text(
                 text = "${song.bpm} BPM | ${song.timeSignature} | ⏱️ ${song.duration} | $capoText",
                 color = Gray,
-                fontSize = 13.sp,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
                 fontWeight = FontWeight.Normal
             )
         }
@@ -163,15 +166,16 @@ private fun BottomPlayer() {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 7.dp)
         ) {
             Text(
                 text = "-00:00",
                 color = VoltDim,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 28.sp
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             LinearProgressIndicator(
                 progress = { 0f },
                 modifier = Modifier

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import de.livegigplayer.pro.data.TrackMode
 import kotlin.math.pow
@@ -59,6 +60,7 @@ class AudioEngine(private val context: Context) {
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(), false
             ).build()
+        player.repeatMode = Player.REPEAT_MODE_ONE
         player.setMediaItem(MediaItem.fromUri(Uri.parse(path)))
         tracks.add(Track(name, player))
     }

@@ -96,12 +96,12 @@ fun MixerOverlay(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (mt.drums  != null) MixerSlider("DRUMS",  song.volDrums)  { onVolumeChange("drums",  it) }
-                        if (mt.bass   != null) MixerSlider("BASS",   song.volBass)   { onVolumeChange("bass",   it) }
-                        if (mt.keys   != null) MixerSlider("KEYS",   song.volKeys)   { onVolumeChange("keys",   it) }
-                        if (mt.vocals != null) MixerSlider("VOCALS", song.volVocals) { onVolumeChange("vocals", it) }
-                        if (mt.click  != null) MixerSlider("CLICK",  song.volClick)  { onVolumeChange("click",  it) }
-                        if (mt.cue    != null) MixerSlider("CUE",    song.volCue)    { onVolumeChange("cue",    it) }
+                        MixerSlider("DRUMS",  song.volDrums,  mt.drums  != null) { onVolumeChange("drums",  it) }
+                        MixerSlider("BASS",   song.volBass,   mt.bass   != null) { onVolumeChange("bass",   it) }
+                        MixerSlider("KEYS",   song.volKeys,   mt.keys   != null) { onVolumeChange("keys",   it) }
+                        MixerSlider("VOCALS", song.volVocals, mt.vocals != null) { onVolumeChange("vocals", it) }
+                        MixerSlider("CLICK",  song.volClick,  mt.click  != null) { onVolumeChange("click",  it) }
+                        MixerSlider("CUE",    song.volCue,    mt.cue    != null) { onVolumeChange("cue",    it) }
                     }
                 }
 
@@ -120,24 +120,30 @@ fun MixerOverlay(
 }
 
 @Composable
-private fun MixerSlider(label: String, valueDb: Float, onValueChange: (Float) -> Unit) {
+private fun MixerSlider(label: String, valueDb: Float, enabled: Boolean, onValueChange: (Float) -> Unit) {
+    val labelColor = if (enabled) MixerWhite else Color(0xFF444444)
+    val valueColor = if (enabled) MixerGray  else Color(0xFF333333)
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(label, color = MixerWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text("%.1f dB".format(valueDb), color = MixerGray, fontSize = 12.sp)
+            Text(label, color = labelColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (enabled) "%.1f dB".format(valueDb) else "n/a", color = valueColor, fontSize = 12.sp)
         }
         Slider(
             value = valueDb,
             onValueChange = onValueChange,
             valueRange = -3f..3f,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
                 thumbColor = MixerVolt,
                 activeTrackColor = MixerVolt,
-                inactiveTrackColor = Color(0xFF444444)
+                inactiveTrackColor = Color(0xFF444444),
+                disabledThumbColor = Color(0xFF333333),
+                disabledActiveTrackColor = Color(0xFF333333),
+                disabledInactiveTrackColor = Color(0xFF2A2A2A)
             )
         )
     }

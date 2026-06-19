@@ -33,4 +33,7 @@ interface SongDao {
 
     @Query("UPDATE songs SET volDrums=0, volBass=0, volKeys=0, volVocals=0, volClick=0, volCue=0")
     suspend fun resetAllMixerSettings()
+
+    @Query("SELECT COUNT(*) FROM songs WHERE title IN ('Hotel California', 'Sultans of Swing', 'Comfortably Numb')")
+    suspend fun countDemoSongs(): Int
 }

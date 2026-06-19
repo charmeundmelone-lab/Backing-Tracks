@@ -11,5 +11,7 @@ data class Song(
     val timeSignature: String,
     val playlistId: Long,
     val isCompleted: Boolean = false,
-    val audioFilePath: String
+    val audioFilePath: String,
+    val duration: String = "00:00",
+    val capoPosition: Int = 0
 )

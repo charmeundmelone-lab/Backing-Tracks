@@ -53,13 +53,13 @@ private val White = Color(0xFFFFFFFF)
 private val Gray = Color(0xFF777777)
 
 private val dummySongs = listOf(
-    Song(1, "Sultans of Swing", 149, "4/4", 1, false, ""),
-    Song(2, "Hotel California", 147, "4/4", 1, false, ""),
-    Song(3, "Nothing Else Matters", 69, "6/8", 1, false, ""),
-    Song(4, "Sweet Child O' Mine", 125, "4/4", 1, false, ""),
-    Song(5, "Comfortably Numb", 63, "4/4", 1, false, ""),
-    Song(6, "Stairway to Heaven", 82, "4/4", 1, false, ""),
-    Song(7, "Wish You Were Here", 66, "4/4", 1, true, ""),
+    Song(1, "Sultans of Swing", 149, "4/4", 1, false, "", "04:03", 0),
+    Song(2, "Hotel California", 147, "4/4", 1, false, "", "06:31", 0),
+    Song(3, "Nothing Else Matters", 69, "6/8", 1, false, "", "06:28", 0),
+    Song(4, "Sweet Child O' Mine", 125, "4/4", 1, false, "", "05:56", 2),
+    Song(5, "Comfortably Numb", 63, "4/4", 1, false, "", "06:22", 0),
+    Song(6, "Stairway to Heaven", 82, "4/4", 1, false, "", "08:02", 0),
+    Song(7, "Wish You Were Here", 66, "4/4", 1, true, "", "05:34", 3),
 )
 
 @Composable
@@ -142,8 +142,9 @@ private fun SongRow(index: Int, song: Song) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            val capoText = if (song.capoPosition == 0) "🎸 Kein Kapo" else "🎸 Kapo: ${song.capoPosition}"
             Text(
-                text = "${song.bpm} BPM | ${song.timeSignature}",
+                text = "${song.bpm} BPM | ${song.timeSignature} | ⏱️ ${song.duration} | $capoText",
                 color = Gray,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Normal

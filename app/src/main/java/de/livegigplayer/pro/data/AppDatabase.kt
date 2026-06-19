@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Song::class, Playlist::class], version = 2, exportSchema = false)
+@Database(entities = [Song::class, Playlist::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
     abstract fun playlistDao(): PlaylistDao
@@ -35,6 +35,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "livegig_database"
                 )
                 .addMigrations(MIGRATION_1_2)
+                .fallbackToDestructiveMigration()
                 .build()
                 .also { INSTANCE = it }
             }

@@ -1,13 +1,17 @@
 package de.livegigplayer.pro.ui
 
 import android.app.Application
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.livegigplayer.pro.LiveGigPlayerApp
 import de.livegigplayer.pro.audio.AudioEngine
+import de.livegigplayer.pro.audio.FolderImporter
 import de.livegigplayer.pro.audio.SongScanner
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.TrackMode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -42,6 +46,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _durationMs = MutableStateFlow(0L)
     val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
 
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+
+    private val _scanProgress = MutableStateFlow("")
+    val scanProgress: StateFlow<String> = _scanProgress.asStateFlow()
+
     init {
         viewModelScope.launch {
             while (true) {
@@ -52,8 +62,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun selectSong(song: Song) {
-        val mode = SongScanner.scan(song)
+    fun selectSong(song: Song, context: Context) {
+        val mode = SongScanner.scan(song, context)
         engine.load(mode)
         engine.setVolumeDb("drums",  song.volDrums)
         engine.setVolumeDb("bass",   song.volBass)
@@ -66,29 +76,39 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _isPlaying.value = false
     }
 
-    fun togglePlayPause() {
-        if (engine.isPlaying) {
-            engine.pause()
-            _isPlaying.value = false
-        } else {
-            engine.play()
-            _isPlaying.value = true
+    fun importFolder(context: Context, uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            _scanProgress.value = ""
+            try {
+                FolderImporter.import(context, uri, dao) { name ->
+                    _scanProgress.value = name
+                }
+            } finally {
+                _isScanning.value = false
+                _scanProgress.value = ""
+            }
         }
     }
+
+    fun togglePlayPause() {
+        if (engine.isPlaying) { engine.pause(); _isPlaying.value = false }
+        else                  { engine.play();  _isPlaying.value = true  }
+    }
+
+    fun stopPlayback() { engine.stop(); _isPlaying.value = false }
 
     fun skipPrevious() {
         val list = songs.value
         val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
-        if (idx > 0) selectSong(list[idx - 1]) else engine.seekTo(0L)
+        if (idx > 0) selectSong(list[idx - 1], getApplication()) else engine.seekTo(0L)
     }
 
     fun skipNext() {
         val list = songs.value
         val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
-        if (idx in 0 until list.size - 1) selectSong(list[idx + 1])
+        if (idx in 0 until list.size - 1) selectSong(list[idx + 1], getApplication())
     }
-
-    fun stopPlayback() { engine.stop(); _isPlaying.value = false }
 
     fun toggleMixer() { _showMixer.value = !_showMixer.value }
     fun closeMixer()  { _showMixer.value = false }
@@ -111,19 +131,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetAllMixer() {
         val song = _currentSong.value
-        listOf("drums", "bass", "keys", "vocals", "click", "cue")
-            .forEach { engine.setVolumeDb(it, 0f) }
+        listOf("drums", "bass", "keys", "vocals", "click", "cue").forEach { engine.setVolumeDb(it, 0f) }
         viewModelScope.launch { dao.resetAllMixerSettings() }
-        if (song != null) {
-            _currentSong.value = song.copy(
-                volDrums = 0f, volBass = 0f, volKeys = 0f,
-                volVocals = 0f, volClick = 0f, volCue = 0f
-            )
-        }
+        if (song != null) _currentSong.value = song.copy(
+            volDrums = 0f, volBass = 0f, volKeys = 0f, volVocals = 0f, volClick = 0f, volCue = 0f
+        )
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        engine.release()
-    }
+    override fun onCleared() { super.onCleared(); engine.release() }
 }

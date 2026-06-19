@@ -6,23 +6,26 @@ import java.io.File
 object WavSynth {
     private const val SR = 44100
 
-    fun writeLeftSine(file: File, freqHz: Float, durationSec: Float = 4f) =
-        file.writeBytes(buildWav(sineChannelPcm(freqHz, durationSec, leftChannel = true)))
+    /** Berechnet die Anzahl Samples für N exakte Beats bei gegebenem BPM. */
+    fun beatsToSamples(bpm: Int, beats: Int): Int = beats * 60 * SR / bpm
 
-    fun writeRightSine(file: File, freqHz: Float, durationSec: Float = 4f) =
-        file.writeBytes(buildWav(sineChannelPcm(freqHz, durationSec, leftChannel = false)))
+    fun writeLeftSine(file: File, freqHz: Float, numSamples: Int) =
+        file.writeBytes(buildWav(sinePcm(freqHz, numSamples, leftChannel = true)))
 
-    fun writeClickRight(file: File, bpm: Int, durationSec: Float = 4f) {
-        val n = (SR * durationSec).toInt()
-        val pcm = ShortArray(n * 2)
-        val beatSamples = (SR * 60.0 / bpm).toInt()
-        val tickLen = SR / 40          // 25 ms decaying tick
+    fun writeRightSine(file: File, freqHz: Float, numSamples: Int) =
+        file.writeBytes(buildWav(sinePcm(freqHz, numSamples, leftChannel = false)))
+
+    /** Click-Track auf rechtem Kanal, Loop-Länge = exakt numSamples. */
+    fun writeClickRight(file: File, bpm: Int, numSamples: Int) {
+        val pcm = ShortArray(numSamples * 2)
+        val beatSamples = SR * 60 / bpm
+        val tickLen = SR / 40          // 25 ms Abkling-Tick
         var beat = 0
-        while (beat * beatSamples < n) {
+        while (beat * beatSamples < numSamples) {
             val start = beat * beatSamples
             for (t in 0 until tickLen) {
                 val idx = start + t
-                if (idx >= n) break
+                if (idx >= numSamples) break
                 val angle = 2.0 * Math.PI * 1000.0 * t / SR
                 val decay = 1.0 - t.toDouble() / tickLen
                 pcm[idx * 2 + 1] = (Short.MAX_VALUE * 0.9 * decay * Math.sin(angle)).toInt().toShort()
@@ -32,12 +35,10 @@ object WavSynth {
         file.writeBytes(buildWav(pcm))
     }
 
-    fun writeStereoMix(file: File, durationSec: Float = 4f) {
-        val n = (SR * durationSec).toInt()
-        val pcm = ShortArray(n * 2)
-        // G major chord: G3 B3 D4 G4
-        val freqs = floatArrayOf(196f, 246.94f, 293.66f, 392f)
-        for (i in 0 until n) {
+    fun writeStereoMix(file: File, numSamples: Int) {
+        val pcm = ShortArray(numSamples * 2)
+        val freqs = floatArrayOf(196f, 246.94f, 293.66f, 392f)  // G-Dur-Akkord
+        for (i in 0 until numSamples) {
             var v = 0.0
             freqs.forEach { f -> v += Math.sin(2.0 * Math.PI * f * i / SR) }
             val s = (Short.MAX_VALUE * 0.2 * v).toInt().toShort()
@@ -47,10 +48,9 @@ object WavSynth {
         file.writeBytes(buildWav(pcm))
     }
 
-    private fun sineChannelPcm(freqHz: Float, durationSec: Float, leftChannel: Boolean): ShortArray {
-        val n = (SR * durationSec).toInt()
-        val pcm = ShortArray(n * 2)
-        for (i in 0 until n) {
+    private fun sinePcm(freqHz: Float, numSamples: Int, leftChannel: Boolean): ShortArray {
+        val pcm = ShortArray(numSamples * 2)
+        for (i in 0 until numSamples) {
             val s = (Short.MAX_VALUE * 0.7 * Math.sin(2.0 * Math.PI * freqHz * i / SR)).toInt().toShort()
             if (leftChannel) pcm[i * 2] = s else pcm[i * 2 + 1] = s
         }

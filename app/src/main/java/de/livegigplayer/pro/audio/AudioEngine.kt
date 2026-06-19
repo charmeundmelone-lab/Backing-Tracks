@@ -35,6 +35,7 @@ class AudioEngine(private val context: Context) {
 
     fun play()  { tracks.forEach { it.player.play()  }; isPlaying = true  }
     fun pause() { tracks.forEach { it.player.pause() }; isPlaying = false }
+    fun stop()  { pause(); seekTo(0L) }
 
     fun seekTo(posMs: Long) { tracks.forEach { it.player.seekTo(posMs) } }
 

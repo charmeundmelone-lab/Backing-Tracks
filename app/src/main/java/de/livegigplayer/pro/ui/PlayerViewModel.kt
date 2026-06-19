@@ -88,6 +88,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (idx in 0 until list.size - 1) selectSong(list[idx + 1])
     }
 
+    fun stopPlayback() { engine.stop(); _isPlaying.value = false }
+
     fun toggleMixer() { _showMixer.value = !_showMixer.value }
     fun closeMixer()  { _showMixer.value = false }
 

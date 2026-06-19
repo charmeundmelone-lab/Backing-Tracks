@@ -107,12 +107,15 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
         }
 
         MixerOverlay(
-            visible       = showMixer,
-            song          = currentSong,
-            trackMode     = trackMode,
+            visible        = showMixer,
+            song           = currentSong,
+            trackMode      = trackMode,
+            isPlaying      = isPlaying,
             onVolumeChange = { name, db -> vm.updateMixerVolume(name, db) },
-            onReset       = { vm.resetAllMixer() },
-            onClose       = { vm.closeMixer() }
+            onReset        = { vm.resetAllMixer() },
+            onPlayPause    = { vm.togglePlayPause() },
+            onStop         = { vm.stopPlayback() },
+            onClose        = { vm.closeMixer() }
         )
     }
 }

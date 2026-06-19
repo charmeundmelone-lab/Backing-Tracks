@@ -15,10 +15,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
@@ -28,15 +33,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.TrackMode
 
-private val MixerBg   = Color(0xF01A1A1A)
-private val MixerVolt = Color(0xFFE8FF00)
-private val MixerGray = Color(0xFF777777)
+private val MixerBg    = Color(0xF01A1A1A)
+private val MixerVolt  = Color(0xFFE8FF00)
+private val MixerGray  = Color(0xFF777777)
 private val MixerWhite = Color(0xFFFFFFFF)
 
 @Composable
@@ -44,8 +50,11 @@ fun MixerOverlay(
     visible: Boolean,
     song: Song?,
     trackMode: TrackMode?,
+    isPlaying: Boolean,
     onVolumeChange: (String, Float) -> Unit,
     onReset: () -> Unit,
+    onPlayPause: () -> Unit,
+    onStop: () -> Unit,
     onClose: () -> Unit
 ) {
     AnimatedVisibility(
@@ -63,6 +72,7 @@ fun MixerOverlay(
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
+                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -79,8 +89,35 @@ fun MixerOverlay(
                     }
                 }
 
+                // Transport Controls
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TransportButton(
+                        icon  = Icons.Filled.Stop,
+                        label = "STOP",
+                        tint  = MixerGray,
+                        modifier = Modifier.size(64.dp),
+                        onClick = onStop
+                    )
+                    TransportButton(
+                        icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        label    = if (isPlaying) "PAUSE" else "PLAY",
+                        tint     = if (isPlaying) MixerVolt else MixerWhite,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(64.dp),
+                        onClick  = onPlayPause
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = Color(0xFF333333))
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Sliders
                 val mt = trackMode as? TrackMode.Multitrack
                 if (song == null || mt == null) {
                     Spacer(modifier = Modifier.weight(1f))
@@ -94,7 +131,7 @@ fun MixerOverlay(
                 } else {
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         MixerSlider("DRUMS",  song.volDrums,  mt.drums  != null) { onVolumeChange("drums",  it) }
                         MixerSlider("BASS",   song.volBass,   mt.bass   != null) { onVolumeChange("bass",   it) }
@@ -120,6 +157,26 @@ fun MixerOverlay(
 }
 
 @Composable
+private fun TransportButton(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2A2A))
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(28.dp))
+            Text(label, color = tint, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
 private fun MixerSlider(label: String, valueDb: Float, enabled: Boolean, onValueChange: (Float) -> Unit) {
     val labelColor = if (enabled) MixerWhite else Color(0xFF444444)
     val valueColor = if (enabled) MixerGray  else Color(0xFF333333)
@@ -129,21 +186,26 @@ private fun MixerSlider(label: String, valueDb: Float, enabled: Boolean, onValue
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(label, color = labelColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text(if (enabled) "%.1f dB".format(valueDb) else "n/a", color = valueColor, fontSize = 12.sp)
+            Text(
+                text  = if (enabled) "%+.1f dB".format(valueDb) else "n/a",
+                color = valueColor,
+                fontSize = 12.sp
+            )
         }
         Slider(
-            value = valueDb,
+            value       = valueDb,
             onValueChange = onValueChange,
-            valueRange = -3f..3f,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = MixerVolt,
-                activeTrackColor = MixerVolt,
-                inactiveTrackColor = Color(0xFF444444),
-                disabledThumbColor = Color(0xFF333333),
-                disabledActiveTrackColor = Color(0xFF333333),
-                disabledInactiveTrackColor = Color(0xFF2A2A2A)
+            valueRange  = -3f..3f,
+            steps       = 11,   // 0.5 dB Schritte: -3.0 -2.5 ... 0.0 ... +2.5 +3.0 → rastet am Anschlag ein
+            enabled     = enabled,
+            modifier    = Modifier.fillMaxWidth(),
+            colors      = SliderDefaults.colors(
+                thumbColor               = MixerVolt,
+                activeTrackColor         = MixerVolt,
+                inactiveTrackColor       = Color(0xFF444444),
+                disabledThumbColor       = Color(0xFF2A2A2A),
+                disabledActiveTrackColor  = Color(0xFF2A2A2A),
+                disabledInactiveTrackColor = Color(0xFF222222)
             )
         )
     }

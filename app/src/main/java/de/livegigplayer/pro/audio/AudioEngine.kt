@@ -2,6 +2,7 @@ package de.livegigplayer.pro.audio
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -10,27 +11,36 @@ import androidx.media3.exoplayer.ExoPlayer
 import de.livegigplayer.pro.data.TrackMode
 import kotlin.math.pow
 
+private const val TAG = "AudioEngine"
+
 class AudioEngine(private val context: Context) {
 
     private data class Track(val name: String, val player: ExoPlayer)
 
-    private val tracks = mutableListOf<Track>()
+    private val tracks     = mutableListOf<Track>()
+    private val nextTracks = mutableListOf<Track>()
+    private var nextSongId = -1L
+
     var isPlaying = false; private set
 
+    // ── Aktueller Song ──────────────────────────────────────────────────────
+
     fun load(mode: TrackMode) {
-        release()
-        when (mode) {
-            is TrackMode.Legacy -> if (mode.filePath.isNotEmpty()) addTrack("main", mode.filePath)
-            is TrackMode.Multitrack -> {
-                mode.drums?.let  { addTrack("drums",  it) }
-                mode.bass?.let   { addTrack("bass",   it) }
-                mode.keys?.let   { addTrack("keys",   it) }
-                mode.vocals?.let { addTrack("vocals", it) }
-                mode.click?.let  { addTrack("click",  it) }
-                mode.cue?.let    { addTrack("cue",    it) }
-            }
-        }
+        releaseCurrent()
+        buildTracks(mode, tracks)
         tracks.forEach { it.player.prepare() }
+        Log.d(TAG, "load() abgeschlossen: ${tracks.size} Tracks")
+    }
+
+    fun activatePreloaded(songId: Long): Boolean {
+        if (songId != nextSongId || nextTracks.isEmpty()) return false
+        releaseCurrent()
+        tracks.addAll(nextTracks)
+        nextTracks.clear()
+        nextSongId = -1L
+        isPlaying = false
+        Log.d(TAG, "activatePreloaded() songId=$songId – Swap erfolgreich")
+        return true
     }
 
     fun play()  { tracks.forEach { it.player.play()  }; isPlaying = true  }
@@ -47,13 +57,54 @@ class AudioEngine(private val context: Context) {
     val positionMs: Long get() = tracks.firstOrNull()?.player?.currentPosition ?: 0L
     val durationMs: Long get() = tracks.firstOrNull()?.player?.duration?.takeIf { it > 0 } ?: 0L
 
+    // ── Nächster Song vorbereiten ────────────────────────────────────────────
+
+    fun preload(songId: Long, mode: TrackMode) {
+        if (songId == nextSongId) return  // Bereits vorgeladen
+        releaseNext()
+        buildTracks(mode, nextTracks)
+        nextTracks.forEach { it.player.prepare() }
+        nextSongId = songId
+        Log.d(TAG, "preload() songId=$songId – ${nextTracks.size} Tracks gepuffert")
+    }
+
+    // ── Aufräumen ────────────────────────────────────────────────────────────
+
     fun release() {
+        releaseCurrent()
+        releaseNext()
+    }
+
+    private fun releaseCurrent() {
         tracks.forEach { it.player.release() }
         tracks.clear()
         isPlaying = false
     }
 
-    private fun addTrack(name: String, path: String) {
+    private fun releaseNext() {
+        nextTracks.forEach { it.player.release() }
+        nextTracks.clear()
+        nextSongId = -1L
+    }
+
+    // ── Interne Hilfsfunktionen ───────────────────────────────────────────────
+
+    private fun buildTracks(mode: TrackMode, target: MutableList<Track>) {
+        when (mode) {
+            is TrackMode.Legacy ->
+                if (mode.filePath.isNotEmpty()) target.add(makeTrack("main", mode.filePath))
+            is TrackMode.Multitrack -> {
+                mode.drums?.let  { target.add(makeTrack("drums",  it)) }
+                mode.bass?.let   { target.add(makeTrack("bass",   it)) }
+                mode.keys?.let   { target.add(makeTrack("keys",   it)) }
+                mode.vocals?.let { target.add(makeTrack("vocals", it)) }
+                mode.click?.let  { target.add(makeTrack("click",  it)) }
+                mode.cue?.let    { target.add(makeTrack("cue",    it)) }
+            }
+        }
+    }
+
+    private fun makeTrack(name: String, path: String): Track {
         val player = ExoPlayer.Builder(context)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -63,6 +114,6 @@ class AudioEngine(private val context: Context) {
             ).build()
         player.repeatMode = Player.REPEAT_MODE_ONE
         player.setMediaItem(MediaItem.fromUri(Uri.parse(path)))
-        tracks.add(Track(name, player))
+        return Track(name, player)
     }
 }

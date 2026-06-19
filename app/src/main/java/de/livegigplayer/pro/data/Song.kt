@@ -14,6 +14,7 @@ data class Song(
     val audioFilePath: String,
     val duration: String = "00:00",
     val capoPosition: Int = 0,
+    val keySignature: String = "",
     // Mixer-Lautstärken in dB (−3 bis +3), 0.0 = Nullpunkt
     val volDrums: Float = 0f,
     val volBass: Float = 0f,

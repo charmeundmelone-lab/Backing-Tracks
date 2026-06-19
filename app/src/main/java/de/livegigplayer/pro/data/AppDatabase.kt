@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Song::class, Playlist::class], version = 5, exportSchema = false)
+@Database(entities = [Song::class, Playlist::class], version = 6, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
     abstract fun playlistDao(): PlaylistDao
@@ -27,6 +27,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE songs ADD COLUMN keySignature TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -34,7 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "livegig_database"
                 )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { INSTANCE = it }

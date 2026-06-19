@@ -17,13 +17,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
@@ -33,7 +37,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +48,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -61,20 +70,21 @@ private val Gray    = Color(0xFF777777)
 
 @Composable
 fun MainScreen(vm: PlayerViewModel = viewModel()) {
-    val context     = LocalContext.current
-    val songs       by vm.songs.collectAsState()
-    val currentSong by vm.currentSong.collectAsState()
-    val isPlaying   by vm.isPlaying.collectAsState()
-    val trackMode   by vm.trackMode.collectAsState()
-    val showMixer   by vm.showMixer.collectAsState()
-    val positionMs  by vm.positionMs.collectAsState()
-    val durationMs  by vm.durationMs.collectAsState()
-    val isScanning  by vm.isScanning.collectAsState()
+    val context      = LocalContext.current
+    val songs        by vm.filteredSongs.collectAsState()
+    val currentSong  by vm.currentSong.collectAsState()
+    val isPlaying    by vm.isPlaying.collectAsState()
+    val trackMode    by vm.trackMode.collectAsState()
+    val showMixer    by vm.showMixer.collectAsState()
+    val positionMs   by vm.positionMs.collectAsState()
+    val durationMs   by vm.durationMs.collectAsState()
+    val isScanning   by vm.isScanning.collectAsState()
     val scanProgress by vm.scanProgress.collectAsState()
-
-    var isLocked by remember { mutableStateOf(false) }
-
     val importStatus by vm.importStatus.collectAsState()
+    val searchQuery  by vm.searchQuery.collectAsState()
+
+    var isLocked     by remember { mutableStateOf(false) }
+    var searchActive by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -98,30 +108,38 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                 isLocked      = isLocked,
                 onLockToggle  = { isLocked = !isLocked },
                 onMixerToggle = { vm.toggleMixer() },
-                onImport      = { importLauncher.launch(null) }
+                onImport      = { importLauncher.launch(null) },
+                searchActive  = searchActive,
+                onSearchToggle = {
+                    searchActive = !searchActive
+                    if (!searchActive) vm.setSearchQuery("")
+                },
+                searchQuery   = searchQuery,
+                onSearchChange = { vm.setSearchQuery(it) }
             )
 
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 if (songs.isEmpty() && importStatus.isNotEmpty()) {
-                    Text(
-                        text = importStatus,
-                        color = Gray,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(16.dp)
-                    )
+                    item {
+                        Text(
+                            text = importStatus,
+                            color = Gray,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
                 }
-                songs.forEachIndexed { index, song ->
+                itemsIndexed(songs) { index, song ->
                     SongRow(
                         index    = index + 1,
                         song     = song,
                         selected = song.id == currentSong?.id,
-                        onClick  = { if (!isLocked) vm.selectSong(song, context) },
-                        modifier = Modifier.weight(1f)
+                        onClick  = { if (!isLocked) vm.selectSong(song, context) }
                     )
                 }
             }
@@ -149,7 +167,6 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             onClose        = { vm.closeMixer() }
         )
 
-        // Scanning-Overlay
         if (isScanning) {
             Box(
                 modifier = Modifier
@@ -183,55 +200,92 @@ private fun TopBar(
     isLocked: Boolean,
     onLockToggle: () -> Unit,
     onMixerToggle: () -> Unit,
-    onImport: () -> Unit
+    onImport: () -> Unit,
+    searchActive: Boolean,
+    onSearchToggle: () -> Unit,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(BgDeep)
-            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "Live-Gig-Player Pro",
-            color = White,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f)
-        )
-        IconButton(onClick = onImport) {
-            Icon(
-                imageVector = Icons.Filled.AddCircleOutline,
-                contentDescription = "Ordner importieren",
-                tint = Gray,
-                modifier = Modifier.size(26.dp)
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(searchActive) {
+        if (searchActive) focusRequester.requestFocus()
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().background(BgDeep)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Live-Gig-Player Pro",
+                color = White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = onSearchToggle) {
+                Icon(
+                    imageVector = if (searchActive) Icons.Filled.Close else Icons.Filled.Search,
+                    contentDescription = "Suchen",
+                    tint = if (searchActive) Volt else Gray,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            IconButton(onClick = onImport) {
+                Icon(Icons.Filled.AddCircleOutline, contentDescription = "Ordner importieren",
+                    tint = Gray, modifier = Modifier.size(26.dp))
+            }
+            IconButton(onClick = onMixerToggle) {
+                Icon(Icons.Filled.Tune, contentDescription = "Mixer",
+                    tint = Gray, modifier = Modifier.size(26.dp))
+            }
+            IconButton(onClick = onLockToggle) {
+                Icon(
+                    imageVector = if (isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                    contentDescription = if (isLocked) "Gesperrt" else "Entsperrt",
+                    tint = if (isLocked) Volt else Gray,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
         }
-        IconButton(onClick = onMixerToggle) {
-            Icon(Icons.Filled.Tune, contentDescription = "Mixer", tint = Gray, modifier = Modifier.size(26.dp))
-        }
-        IconButton(onClick = onLockToggle) {
-            Icon(
-                imageVector = if (isLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                contentDescription = if (isLocked) "Gesperrt" else "Entsperrt",
-                tint = if (isLocked) Volt else Gray,
-                modifier = Modifier.size(26.dp)
+
+        if (searchActive) {
+            TextField(
+                value = searchQuery,
+                onValueChange = onSearchChange,
+                placeholder = { Text("Titel, BPM, Tonart…", color = Gray, fontSize = 14.sp) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 8.dp)
+                    .focusRequester(focusRequester),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor   = BgCard,
+                    unfocusedContainerColor = BgCard,
+                    focusedTextColor        = White,
+                    unfocusedTextColor      = White,
+                    focusedIndicatorColor   = Volt,
+                    unfocusedIndicatorColor = Gray,
+                    cursorColor             = Volt
+                )
             )
         }
     }
 }
 
 @Composable
-private fun SongRow(
-    index: Int, song: Song, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier
-) {
+private fun SongRow(index: Int, song: Song, selected: Boolean, onClick: () -> Unit) {
     val dimmed = song.isCompleted
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
+            .height(68.dp)
             .background(if (selected) BgTrack else BgCard, shape = MaterialTheme.shapes.small)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 0.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -249,7 +303,11 @@ private fun SongRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             val capoText = if (song.capoPosition == 0) "Kein Kapo" else "Kapo: ${song.capoPosition}"
-            Text("${song.bpm} BPM | ${song.duration} | $capoText", color = Gray, fontSize = 12.sp, lineHeight = 14.sp)
+            val keyText  = if (song.keySignature.isNotEmpty()) " | ${song.keySignature}" else ""
+            Text(
+                "${song.bpm} BPM | ${song.duration} | $capoText$keyText",
+                color = Gray, fontSize = 12.sp, lineHeight = 14.sp
+            )
         }
     }
 }
@@ -278,16 +336,16 @@ private fun BottomPlayer(
             modifier = Modifier.fillMaxWidth().background(BgCard),
             horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
-            PlayerButton(Icons.Filled.SkipPrevious, "ZURÜCK", Modifier.weight(1f), onClick = onPrevious)
+            PlayerButton(Icons.Filled.SkipPrevious, "ZURÜCK",  Modifier.weight(1f), onClick = onPrevious)
             PlayerButton(
-                icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                label = if (isPlaying) "PAUSE" else "PLAY",
+                icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                label    = if (isPlaying) "PAUSE" else "PLAY",
                 modifier = Modifier.weight(1f),
-                tint = if (isPlaying) Volt else White,
-                onClick = onPlayPause
+                tint     = if (isPlaying) Volt else White,
+                onClick  = onPlayPause
             )
-            PlayerButton(Icons.Filled.Repeat, "LOOP", Modifier.weight(1f), onClick = {})
-            PlayerButton(Icons.Filled.SkipNext, "WEITER", Modifier.weight(1f), onClick = onNext)
+            PlayerButton(Icons.Filled.Repeat,   "LOOP",  Modifier.weight(1f), onClick = {})
+            PlayerButton(Icons.Filled.SkipNext,  "WEITER", Modifier.weight(1f), onClick = onNext)
         }
     }
 }

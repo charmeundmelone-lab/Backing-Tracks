@@ -18,16 +18,31 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val dao = (app as LiveGigPlayerApp).database.songDao()
+    private val dao    = (app as LiveGigPlayerApp).database.songDao()
     private val engine = AudioEngine(app)
 
     val songs: StateFlow<List<Song>> = dao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val filteredSongs: StateFlow<List<Song>> = songs
+        .combine(_searchQuery) { list, q ->
+            if (q.isBlank()) list
+            else list.filter { s ->
+                s.title.contains(q, ignoreCase = true) ||
+                s.bpm.toString().contains(q) ||
+                s.keySignature.contains(q, ignoreCase = true)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -66,9 +81,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setSearchQuery(q: String) { _searchQuery.value = q }
+
     fun selectSong(song: Song, context: Context) {
         val mode = SongScanner.scan(song, context)
-        engine.load(mode)
+        if (!engine.activatePreloaded(song.id)) {
+            engine.load(mode)
+        }
         engine.setVolumeDb("drums",  song.volDrums)
         engine.setVolumeDb("bass",   song.volBass)
         engine.setVolumeDb("keys",   song.volKeys)
@@ -76,36 +95,44 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         engine.setVolumeDb("click",  song.volClick)
         engine.setVolumeDb("cue",    song.volCue)
         _currentSong.value = song
-        _trackMode.value = mode
-        _isPlaying.value = false
+        _trackMode.value   = mode
+        _isPlaying.value   = false
+        preloadNext(context)
+    }
+
+    private fun preloadNext(context: Context) {
+        val list = songs.value
+        val idx  = list.indexOfFirst { it.id == _currentSong.value?.id }
+        if (idx in 0 until list.size - 1) {
+            val next = list[idx + 1]
+            viewModelScope.launch {
+                val nextMode = withContext(Dispatchers.IO) { SongScanner.scan(next, context) }
+                engine.preload(next.id, nextMode)
+            }
+        }
     }
 
     fun importFolder(context: Context, uri: Uri) {
         Log.d("ImportFolder", "importFolder called, uri=$uri")
-        _isScanning.value = true
-        _scanProgress.value = ""
-        _importStatus.value = ""
+        _isScanning.value    = true
+        _scanProgress.value  = ""
+        _importStatus.value  = ""
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                Log.d("ImportFolder", "Coroutine gestartet auf IO-Dispatcher")
                 var count = 0
                 FolderImporter.import(context, uri, dao) { name ->
-                    Log.d("ImportFolder", "Fortschritt: $name")
                     _scanProgress.value = name
                     count++
                 }
-                Log.d("ImportFolder", "Import abgeschlossen: $count Songs")
                 _importStatus.value = if (count == 0)
-                    "Keine Unterordner gefunden – bitte den Elternordner wählen, der die Song-Ordner enthält."
-                else
-                    "$count Songs importiert."
+                    "Keine Unterordner gefunden – bitte den Elternordner wählen."
+                else "$count Songs importiert."
             } catch (e: Exception) {
                 Log.e("ImportFolder", "Import FEHLGESCHLAGEN", e)
                 _importStatus.value = "Fehler: ${e.message}"
             } finally {
-                _isScanning.value = false
+                _isScanning.value   = false
                 _scanProgress.value = ""
-                Log.d("ImportFolder", "Scanning-Overlay ausgeblendet")
             }
         }
     }
@@ -119,13 +146,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun skipPrevious() {
         val list = songs.value
-        val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
+        val idx  = list.indexOfFirst { it.id == _currentSong.value?.id }
         if (idx > 0) selectSong(list[idx - 1], getApplication()) else engine.seekTo(0L)
     }
 
     fun skipNext() {
         val list = songs.value
-        val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
+        val idx  = list.indexOfFirst { it.id == _currentSong.value?.id }
         if (idx in 0 until list.size - 1) selectSong(list[idx + 1], getApplication())
     }
 
@@ -150,10 +177,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetAllMixer() {
         val song = _currentSong.value
-        listOf("drums", "bass", "keys", "vocals", "click", "cue").forEach { engine.setVolumeDb(it, 0f) }
+        listOf("drums","bass","keys","vocals","click","cue").forEach { engine.setVolumeDb(it, 0f) }
         viewModelScope.launch { dao.resetAllMixerSettings() }
         if (song != null) _currentSong.value = song.copy(
-            volDrums = 0f, volBass = 0f, volKeys = 0f, volVocals = 0f, volClick = 0f, volCue = 0f
+            volDrums=0f, volBass=0f, volKeys=0f, volVocals=0f, volClick=0f, volCue=0f
         )
     }
 

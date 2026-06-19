@@ -3,6 +3,7 @@ package de.livegigplayer.pro.ui
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.livegigplayer.pro.LiveGigPlayerApp
@@ -77,16 +78,24 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun importFolder(context: Context, uri: Uri) {
+        Log.d("ImportFolder", "importFolder called, uri=$uri")
+        // Progress-Bar sofort im Main-Thread setzen, BEVOR der IO-Coroutine startet
+        _isScanning.value = true
+        _scanProgress.value = ""
         viewModelScope.launch(Dispatchers.IO) {
-            _isScanning.value = true
-            _scanProgress.value = ""
             try {
+                Log.d("ImportFolder", "Coroutine gestartet auf IO-Dispatcher")
                 FolderImporter.import(context, uri, dao) { name ->
+                    Log.d("ImportFolder", "Fortschritt: $name")
                     _scanProgress.value = name
                 }
+                Log.d("ImportFolder", "Import erfolgreich abgeschlossen")
+            } catch (e: Exception) {
+                Log.e("ImportFolder", "Import FEHLGESCHLAGEN", e)
             } finally {
                 _isScanning.value = false
                 _scanProgress.value = ""
+                Log.d("ImportFolder", "Scanning-Overlay ausgeblendet")
             }
         }
     }

@@ -33,7 +33,7 @@ object FolderImporter {
             onProgress(rawName)
             val (artist, title) = parseArtistTitle(rawName)
             val safPath = "${rootUri}||${rawName}"
-            val children = try { folder.listFiles() } catch (e: Exception) { emptyList() }
+            val children: List<DocumentFile> = try { folder.listFiles().toList() } catch (e: Exception) { emptyList() }
             val allWavs = children.filter { it.name?.endsWith(".wav", ignoreCase = true) == true }
             val clickFile = allWavs.find { it.name?.contains("click", ignoreCase = true) == true }
             val bpmFromName = bpmFromName(rawName)

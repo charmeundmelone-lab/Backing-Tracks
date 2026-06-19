@@ -2,12 +2,9 @@ package de.livegigplayer.pro.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,8 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -74,13 +69,19 @@ fun MainScreen() {
     ) {
         TopBar(isLocked = isLocked, onLockToggle = { isLocked = !isLocked })
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        // Jede Kachel bekommt weight(1f) → füllt exakt den verfügbaren Raum ohne schwarze Lücke
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            itemsIndexed(dummySongs) { index, song ->
-                SongRow(index = index + 1, song = song)
+            dummySongs.forEachIndexed { index, song ->
+                SongRow(
+                    index = index + 1,
+                    song = song,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
 
@@ -116,31 +117,31 @@ private fun TopBar(isLocked: Boolean, onLockToggle: () -> Unit) {
 }
 
 @Composable
-private fun SongRow(index: Int, song: Song) {
+private fun SongRow(index: Int, song: Song, modifier: Modifier = Modifier) {
     val dimmed = song.isCompleted
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(BgCard, shape = MaterialTheme.shapes.small)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 14.dp, vertical = 0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = index.toString().padStart(2, '0'),
             color = if (dimmed) VoltDim else Volt,
-            fontSize = 26.sp,
+            fontSize = 28.sp,
             fontWeight = FontWeight.Black,
-            lineHeight = 28.sp,
-            modifier = Modifier.width(40.dp)
+            lineHeight = 30.sp,
+            modifier = Modifier.width(44.dp)
         )
         Spacer(modifier = Modifier.width(10.dp))
         Column {
             Text(
                 text = song.title,
                 color = if (dimmed) Gray else White,
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = 18.sp,
+                lineHeight = 19.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -148,7 +149,7 @@ private fun SongRow(index: Int, song: Song) {
             Text(
                 text = "${song.bpm} BPM | ${song.timeSignature} | ⏱️ ${song.duration} | $capoText",
                 color = Gray,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 lineHeight = 14.sp,
                 fontWeight = FontWeight.Normal
             )
@@ -166,16 +167,16 @@ private fun BottomPlayer() {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 7.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
                 text = "-00:00",
                 color = VoltDim,
-                fontSize = 26.sp,
+                fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = 28.sp
+                lineHeight = 30.sp
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(5.dp))
             LinearProgressIndicator(
                 progress = { 0f },
                 modifier = Modifier
@@ -205,7 +206,7 @@ private fun BottomPlayer() {
 private fun PlayerButton(icon: ImageVector, label: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .aspectRatio(1f)
+            .height(110.dp)
             .background(BgCard),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -214,14 +215,14 @@ private fun PlayerButton(icon: ImageVector, label: String, modifier: Modifier = 
             imageVector = icon,
             contentDescription = label,
             tint = White,
-            modifier = Modifier.size(34.dp)
+            modifier = Modifier.size(42.dp)
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = label,
             color = Gray,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }

@@ -147,7 +147,7 @@ private fun SongRow(index: Int, song: Song, modifier: Modifier = Modifier) {
             )
             val capoText = if (song.capoPosition == 0) "🎸 Kein Kapo" else "🎸 Kapo: ${song.capoPosition}"
             Text(
-                text = "${song.bpm} BPM | ${song.timeSignature} | ⏱️ ${song.duration} | $capoText",
+                text = "${song.bpm} BPM | ⏱️ ${song.duration} | $capoText",
                 color = Gray,
                 fontSize = 12.sp,
                 lineHeight = 14.sp,

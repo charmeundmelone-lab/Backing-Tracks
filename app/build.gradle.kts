@@ -6,33 +6,17 @@ plugins {
 }
 
 android {
-    namespace = "de.minitraxx.app"
+    namespace = "de.livegigplayer.pro"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "de.minitraxx.app"
+        applicationId = "de.livegigplayer.pro"
         minSdk = 26
         targetSdk = 35
-        // versionCode steigt mit jedem CI-Build (per -PversionCode=<run_number>),
-        // damit jede neue APK sich auf dem Gerät auch als Update installiert.
-        // Lokaler Build ohne Property → 1.
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
-        versionName = "0.1.0." + ((project.findProperty("versionCode") as String?) ?: "0")
-
-        externalNativeBuild {
-            cmake {
-                cppFlags += "-std=c++17"
-                arguments += "-DANDROID_STL=c++_shared"
-            }
-        }
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-        }
+        versionName = "1.0"
     }
 
-    // Fester Debug-Keystore im Repo: ohne ihn signiert jeder CI-Lauf mit
-    // einem frisch generierten Schlüssel, und Updates über eine installierte
-    // App schlagen mit Signatur-Konflikt fehl.
     signingConfigs {
         getByName("debug") {
             storeFile = file("debug.keystore")
@@ -51,28 +35,23 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
+
     buildFeatures {
         compose = true
-        prefab = true
     }
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // PDFBox-Android bringt Apache-Lizenz-/Notice-Dateien mit.
-            excludes += "/META-INF/{DEPENDENCIES,LICENSE,LICENSE.txt,NOTICE,NOTICE.txt}"
         }
     }
 }
@@ -87,12 +66,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons)
-    implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
-    implementation(libs.oboe)
-    implementation(libs.reorderable)
-    implementation(libs.pdfbox.android)
+
+    debugImplementation(libs.androidx.compose.ui.tooling)
 }

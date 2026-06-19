@@ -1,339 +1,92 @@
-# MiniTraxx — Projektkontext für Claude
+# Live-Gig-Player Pro — Projektkontext für Claude
 
-## CLAUDE.md pflegen — PFLICHT bei jeder Session
+## Branch-Regel (WICHTIG)
 
-**Wenn du „Letzter Stand" aktualisierst, MUSST du diese vier Felder synchron halten:**
+**Einziger erlaubter Branch: `main`**
 
-| Feld | Wo | Aktueller Wert |
-|---|---|---|
-| Aktiver Branch | Überblick + Session-Übergang + **`.claude/active-branch`** | `main` |
-| DB-Version | Architektur-Kommentar + Gotcha #4 | Version 6 |
-| Letzter Commit | Letzter Stand | `03c3159` |
-| Nächste Migration | Gotcha #4 | nächste wäre 6→7 |
+Kein Feature-Branching. Alle Commits direkt auf `main`.
 
-**Hinweis:** `android-build.yml` ist seit 2026-06-15 branch-agnostisch (`if: github.ref != 'refs/heads/apk-dist'`).
-Bei Branch-Wechseln muss der Workflow **nicht mehr** angepasst werden.
-
-**⛔ KEIN Branch-Wechsel erlaubt.** Es gibt nur `main`. Niemals einen neuen Branch erstellen.
-
-**Regel:** Vor dem Commit von CLAUDE.md immer alle vier Zeilen prüfen.
-Diese Tabelle ist die einzige Quelle der Wahrheit — sie schlägt alle anderen Stellen.
-
-## ⛔ ABSOLUT VERBINDLICHE BRANCH-REGEL — ALLERERSTER SCHRITT
-
-**Es gibt genau EINEN erlaubten Branch: `main`**
-
-```
-Erwarteter Branch: main
+Vor dem Start immer prüfen:
+```bash
+git branch   # muss "* main" zeigen
 ```
 
-- Stimmt der Branch? → Weiter mit CI-Check
-- Falscher Branch? → `git checkout main` ausführen, dann weiter
-- Branch existiert nicht lokal? → `git fetch origin && git checkout main`
-
-**Niemals Code committen oder pushen ohne diesen Check. Niemals.**
-
-> **ABSOLUTES VERBOT:** Kein neuer Branch darf erstellt werden — niemals, unter keinen Umständen.
-> Alle `claude/*`-Branches auf Remote sind Altlasten aus früheren Sessions und dürfen NICHT verwendet werden.
-> Code ausschließlich auf `main` committen und pushen. Immer. Ohne Ausnahme.
-
-## ⛔ APK-LIEFERUNG — PFLICHTWORKFLOW
-
-**Jedes Mal wenn du eine APK lieferst, MUSST du danach sofort fragen:**
-
-> „Bist du zufrieden mit dieser APK?"
-> - **Ja, alles gut** → weiter mit dem nächsten Feature
-> - **Nein, muss noch bearbeitet werden** → direkt hier im Chat fixen, keine neue Session
-
-Kein neues Feature beginnen, bevor der User die APK bestätigt hat.
+Falls falscher Branch: `git checkout main`
 
 ## CI-Check — PFLICHT vor jedem Weitermachen
 
-**Jede neue Session MUSS zuerst den letzten CI-Build prüfen, bevor Code geschrieben wird.**
+Vor neuem Code immer den letzten GitHub-Actions-Build prüfen.
+Grüner Build → weiter. Roter Build → zuerst fixen.
 
-Ablauf:
-1. GitHub Actions für Branch `main` abfragen
-2. Ist der letzte Build **grün** → weiter wie geplant
-3. Ist der letzte Build **rot** → zuerst den Fehler aus den Logs lesen, fixen, pushen, warten bis grün — erst dann das eigentliche Feature anfangen
+## Kontext-Monitoring
 
-Kein grünes Licht = kein neuer Code.
-
----
-
-## Kontext-Monitoring (WICHTIG — immer beachten)
-
-Du siehst in deinem System-Prompt wie viele Tokens noch übrig sind
-(`totalTokensReminder: countdown`). Handle danach:
-
-- **< 40.000 Tokens übrig:** Sag dem User aktiv: "Kontext läuft voll —
-  bitte starte nach diesem Task eine neue Session. CLAUDE.md enthält alles
-  was du brauchst."
-- **< 20.000 Tokens übrig:** Sofort stoppen, nichts mehr implementieren.
-  Stattdessen: aktuellen Stand committen & pushen, dann dem User sagen er
-  soll jetzt eine neue Session starten.
-
-**Nahtloser Session-Übergang:**
-1. Alle Änderungen committen & auf `main` pushen
-2. User sagt Claude in neuer Session: *"Lies CLAUDE.md und mach weiter."*
-3. Neue Claude-Instanz liest CLAUDE.md → hat vollen Kontext → kein Warmup nötig
-
----
+- **< 40.000 Tokens übrig:** User informieren, neue Session starten
+- **< 20.000 Tokens übrig:** Sofort stoppen, alles committen & pushen
 
 ## Überblick
 
-Android-App für Musiker: spielt mehrkanalige Backing-Tracks (Stems) ab,
-zeigt ChordPro-Lyrics mit automatischem Scroll (Tap-Once-Sync), verwaltet
-Setlisten und Songs mit Room-Datenbank.
+Android-App für Live-Musiker: spielt Backing-Tracks ab, verwaltet Songs
+und Playlists mit Room-Datenbank. Smartphone-First, dunkles UI für die Bühne.
 
 **Repo:** `charmeundmelone-lab/Backing-Tracks`
-**Aktiver Branch:** `main`
-**APK-Dist Branch:** `apk-dist` (wird per CI bei jedem Push gebaut)
+**Branch:** `main`
+**Package:** `de.livegigplayer.pro`
 
 ## Architektur
 
 ```
-app/src/main/java/de/minitraxx/app/
-├── audio/
-│   ├── NativeEngine.kt        — Kotlin-Singleton, JNI-Brücke zum C++-Audio-Engine
-│   ├── PlaybackController.kt  — Setlist-Queue, Songwechsel-Logik, State (StateFlow)
-│   └── PlaybackService.kt     — Foreground-Service für Hintergrundwiedergabe
+app/src/main/java/de/livegigplayer/pro/
 ├── data/
-│   ├── AppDatabase.kt         — Room DB (Version 6)
-│   ├── GigRepository.kt       — Gig starten/beenden, Play aufzeichnen, Flows
-│   ├── SettingsStore.kt       — DataStore: mainGain, cueGain, swapSides, lyricsFontSp, syncOffsetMs
-│   ├── SongRepository.kt      — Zugriff auf Songs, Stems, Setlisten
-│   └── Slots.kt               — Stem-Slot-Konstanten (TOTAL = 8)
-├── ui/screens/
-│   ├── LiveScreen.kt          — Live-Ansicht (der hauptsächlich bearbeitete Screen)
-│   └── ...                    — weitere Screens (Setup, Song-Editor, etc.)
-└── util/
-    ├── ChordPro.kt            — Parser für ChordPro-Format ({section:}, {c:}, Lyrics)
-    └── formatFrames.kt        — Zeitformatierung
+│   ├── Song.kt           — Room-Entity (id, title, bpm, timeSignature, playlistId, isCompleted, audioFilePath)
+│   ├── SongDao.kt        — CRUD: insert, update, delete, getAllSongs, getSongById, getSongsByPlaylist
+│   └── AppDatabase.kt    — RoomDatabase v1, Singleton
+├── ui/theme/
+│   └── Theme.kt          — LiveGigPlayerTheme (dark/light)
+├── LiveGigPlayerApp.kt   — Application-Klasse, DB-Singleton
+└── MainActivity.kt       — Entry Point, Compose-Setup
 ```
 
-## NativeEngine API (wichtig)
+## Datenmodell Song
 
-```kotlin
-object NativeEngine {
-    fun positionFrames(): Long   // aktuelle Position in Audio-Frames (48 kHz)
-    fun isPlaying(): Boolean
-    fun isFinished(): Boolean
-    fun clearFinished()
-    fun hadStreamError(): Boolean
-    fun play()
-    fun pause()
-    fun stop()
-    fun seek(frame: Long)
-    fun start()                  // Stream (neu) öffnen
-    fun loadSong(paths: Array<String?>, gains: FloatArray): Long  // → durationFrames
-    fun unloadSong()
-    fun setBusGains(main: Float, cue: Float)
-    fun setSwapSides(swap: Boolean)
-    const val SAMPLE_RATE = 48_000
-}
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| id | Long (PK) | Auto-generiert |
+| title | String | Songtitel |
+| bpm | Int | Tempo |
+| timeSignature | String | "4/4" oder "6/8" |
+| playlistId | Long | Zugehörige Playlist |
+| isCompleted | Boolean | Abgehakt (Default: false) |
+| audioFilePath | String | Pfad zur Audio-Datei |
+
+## Build-Setup
+
+```bash
+./build_apk.sh          # Debug-APK bauen
+# APK liegt dann unter: app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## PlayerState / PlaybackController
-
-```kotlin
-data class PlayerState(
-    val setlistId: Long,
-    val setlistName: String,
-    val queue: List<QueueSong>,
-    val currentIndex: Int,
-    val positionFrames: Long,   // aktualisiert alle 100ms per Tick
-    val durationFrames: Long,
-    val isPlaying: Boolean,
-    val isLoading: Boolean,
-    val error: String?,
-)
-data class QueueSong(
-    val songId: Long, val title: String, val artist: String,
-    val durationFrames: Long, val endAction: Int, val notes: String,
-    val chordPro: String,
-    val syncData: String,  // leerzeichen-getrennte ms-Timestamps; "" wenn kein Sync
-    val genre: String,     // Genre / Motto-Preset-Tag; "" wenn nicht gesetzt
-)
-```
-
-PlaybackController ist ein Singleton (`PlaybackController.get(context)`).
-Der Tick-Job läuft alle 100 ms und aktualisiert `_state.positionFrames`.
-
-## Tap-Once-Sync — Feature-Beschreibung
-
-Der Nutzer tippt beim ersten Durchlauf des Songs einmal pro Sektion auf
-einen Button. Die Timestamps (ms) werden als `syncData = "1234 5678 ..."` in
-der DB gespeichert (Song-Feld).
-
-Im Live-Betrieb scrollt die LyricsPane automatisch:
-- **Mit Sync-Daten:** Sektionsbasiert + Innerhalb-Sektion interpoliert
-- **Ohne Sync-Daten oder im Sync-Modus:** Lineare Position (Fallback)
-
-## LyricsPane — aktueller Scroll-Code (LiveScreen.kt ~692)
-
-```kotlin
-// Lineare Positionskopplung (Fallback ohne Sync oder im Sync-Modus).
-LaunchedEffect(positionFrames, durationFrames, isPlaying) {
-    if (isPlaying && durationFrames > 0 && (syncTimestamps.isEmpty() || isSyncMode)) {
-        val targetIdx = ((positionFrames.toDouble() / durationFrames) * lines.size)
-            .toInt().coerceIn(0, lines.size)
-        lazyState.scrollToItem(targetIdx)
-    }
-}
-
-// Sektionsbasiertes Scrollen mit Innerhalb-Sektion-Interpolation.
-// isPlaying ist KEIN Key — kurzes Flackern würde lastTargetItem resetten.
-LaunchedEffect(syncTimestamps, syncOffsetMs, sectionToItemIndex, isSyncMode, durationFrames) {
-    if (syncTimestamps.isEmpty() || isSyncMode || durationFrames <= 0) return@LaunchedEffect
-    val durationMs = durationFrames * 1000L / 48_000L
-    var lastTargetItem = -1
-    while (true) {
-        delay(100)
-        val posMs = NativeEngine.positionFrames() * 1000L / 48_000L
-        val sec = syncTimestamps.indexOfLast { ts -> posMs >= ts - syncOffsetMs }
-        val targetItem = if (sec < 0) {
-            0
-        } else {
-            val secStart = syncTimestamps[sec]
-            val secEnd = syncTimestamps.getOrNull(sec + 1) ?: durationMs
-            val firstItem = sectionToItemIndex[sec] ?: 0
-            val nextFirst = sectionToItemIndex[sec + 1] ?: (lines.size + 1)
-            val t = if (secEnd > secStart)
-                ((posMs - secStart).toDouble() / (secEnd - secStart)).coerceIn(0.0, 1.0)
-            else 0.0
-            (firstItem + (nextFirst - firstItem) * t).toInt()
-        }
-        if (targetItem != lastTargetItem) {
-            lastTargetItem = targetItem
-            lazyState.scrollToItem(targetItem)
-        }
-    }
-}
-```
-
-**Warum `isPlaying` KEIN Key ist:**
-`NativeEngine.isPlaying()` kann im PlaybackController-Tick kurz `false` melden
-(Race-Condition), was den LaunchedEffect neu startet, `lastTargetItem` resettet
-und die Schleife immer bei Sektion 0 festhält. Deshalb pollen wir NativeEngine
-direkt im `while(true)`-Loop ohne `isPlaying` als Key.
-
-## SyncButton-Verhalten
-
-- **Kurz-Tap ohne Sync-Daten:** Startet Sync-Modus
-- **Kurz-Tap mit Sync-Daten:** Nichts (kein Re-Sync durch Versehen)
-- **Lang-Tap ohne Sync-Modus:** Startet Re-Sync (Daten überschreiben)
-- **Lang-Tap im Sync-Modus:** Öffnet Offset-Sheet (syncOffsetMs)
-- **Im Sync-Modus Kurz-Tap:** Bricht Sync ab
-- Sync-Modus endet automatisch beim Songwechsel
-
-## CI / APK-Dist
-
-GitHub Actions baut bei jedem Push (außer auf `apk-dist` selbst) eine
-Debug-APK und pusht sie auf den Branch `apk-dist` als `MiniTraxx-debug.apk`.
-
-So APK holen:
+CI baut automatisch bei jedem Push auf `main` und legt APK auf `apk-dist`:
 ```bash
 git fetch origin apk-dist
-git show origin/apk-dist:MiniTraxx-debug.apk > /tmp/MiniTraxx.apk
+git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ```
 
 ## Wichtige Gotchas
 
-1. **`delay` muss importiert werden:** `import kotlinx.coroutines.delay`
-   (andernfalls Compile-Fehler; `kotlinx.coroutines.delay(...)` fully-qualified geht auch)
+1. **Room-Version 1** — nächste Migration wäre 1→2. Migrationen NIE doppelt anlegen.
+2. **timeSignature** ist ein String ("4/4"/"6/8"), kein Enum — Flexibilität für spätere Werte.
+3. **versionCode** kommt aus der CI-Build-Nummer (`-PversionCode=${{ github.run_number }}`). Lokaler Build → 1.
 
-2. **LazyColumn-Item-Indizes:** Item 0 = führender Spacer, Items 1..N = Lines, Item N+1 = Spacer.
-   `sectionToItemIndex[s] = lineIndex + 1` (wegen Spacer).
+## Offene / geplante Features (Roadmap)
 
-3. **`sectionToItemIndex`** ist `Map<Int, Int>` (sectionIndex → lazyColumnItemIndex).
-   Zugriff mit `[key]` gibt `null` zurück wenn nicht vorhanden — immer `?: fallback` nutzen.
+- **Sprint 1 DONE:** Room DB, Gradle-Setup, build_apk.sh
+- **Sprint 2:** Playlist-Entity + DAO, Playlist-Verwaltungs-UI
+- **Sprint 3:** Song-Editor-UI (Felder eingeben, Audio-Datei wählen)
+- **Sprint 4:** Player-Screen (Audio abspielen, Fortschritt, BPM-Anzeige)
+- **Sprint 5:** Live-Ansicht (Bühnen-optimiertes Dark UI, blind bedienbar)
 
-4. **Room DB Version 6** — nächste Migration wäre 6→7. Migrationen 1→2 bis 5→6 existieren bereits in `AppDatabase.kt` — nie doppelt anlegen.
+## Letzter Stand
 
-5. **Stems-Slots:** `Slots.TOTAL = 8`. Stems werden per Slot-Index den Audio-Engine-Kanälen zugeordnet.
-
-6. **syncOffsetMs** (Standard 200 ms): Reaktionszeit-Korrektur — Timestamps werden um diesen
-   Wert nach vorne verschoben, damit der Scroll die gefühlte Tipp-Verzögerung ausgleicht.
-
-7. **versionCode kommt aus der CI-Build-Nummer** (`-PversionCode=${{ github.run_number }}`).
-   NIE wieder fest auf 1 setzen — sonst installiert sich eine neue APK auf dem Gerät NICHT
-   als Update und der User sieht „keine neuen Features", obwohl sie gebaut sind.
-   Lokaler Build ohne Property → versionCode 1.
-
-8. **Flüssiges Auto-Scroll:** `smoothScrollTo()` nutzt `scrollToItem(index, offsetPx)` mit
-   Sub-Item-Pixel-Offset (Nachkommaanteil der Item-Position → Pixel). NIE nur `.toInt()`
-   auf den Item-Index — das lässt die Liste zeilenweise springen (ruckelig). Polling ~30 fps
-   (`SCROLL_FRAME_MS = 32`), `isPlaying` im Loop pollen statt als LaunchedEffect-Key.
-
-9. **APK vor dem Ausliefern verifizieren:** APK ist ein ZIP — Roh-`grep` auf der `.apk`
-   findet Strings NICHT. Stattdessen `classes*.dex` entpacken und `strings classes*.dex
-   | grep <Feature>`. So sicherstellen, dass das gewünschte Feature wirklich im Build ist.
-
-## Offene / geplante Features
-
-- **Freeform-Sync:** Sektions-Buttons in beliebiger Reihenfolge antippen während Sync
-- **Quick-Add-Section:** Neue Sektion während Sync hinzufügen (nicht im ChordPro vorhanden)
-- **Zoom während Sync-Wiedergabe:** Scroll-Geschwindigkeit anpassen
-- **PDF-Import:** Akkorde über Text korrekt positionieren
-
-## Letzter Stand (Session vom 2026-06-15)
-
-**Was bisher in main ist:**
-- Butterweicher frame-sync Scroll (withFrameNanos, EMA-geglättet, nur vorwärts)
-- `/start` und `/ende` Slash-Commands in `.claude/commands/`
-- `PdfChordImporter.kt`: 5 Fixes aus dieser Session:
-  1. Linksdirektionales Akkord-Snapping (halfChar-Toleranz, Commit `b624f13`)
-  2. Koordinatenbasiertes Spacing bei Chord-Only-Zeilen (Intro etc.)
-  3. Dangling Chords ans Zeilenende statt ans letzte Wort
-  4. Metadaten-Zeilen (Capo, Strumming...) als Text durchreichen
-  5. **Leerzeichen-Glyphen verwerfen** (`03c3159`) — behob das fehlende-Klammern-Problem
-- `SongEditorScreen.kt`: Genre-Dropdown mit fester Liste
-- Genre-Feld + Gig-Tracking + DB v6
-- Tap-Once-Sync, Sektion-Scroll
-
-**Aktiver Branch:** `main`
-**Letzter Commit:** `03c3159`
-
-## Nächste Aufgabe (für neue Session) — PDF-Bug GELÖST, Bestätigung offen
-
-**Root-Cause gefunden & gefixt (Commit `03c3159`):** Monospace-PDFs (Ultimate
-Guitar) betten echte Leerzeichen-Glyphen ein, die alle X-Lücken lückenlos
-auffüllen. `collectGlyphs` filterte nur `\n\r\t`, nicht Space. Folge:
-`tokenize()` konnte nicht mehr an Lücken splitten → `Em7          G` wurde EIN
-Token statt `["Em7","G"]` → `isChordTokens` false → Akkordzeile fiel in den
-Plain-Text-Zweig → KEINE Klammern.
-
-**Fix:** `collectGlyphs()` überspringt jetzt `' '` und `' '` (U+00A0). Der
-Importer rekonstruiert Abstände ohnehin koordinatenbasiert aus den X-Lücken.
-Mit echten Wonderwall-Koordinaten verifiziert (pdfplumber-Simulation):
-Output ist jetzt `[Em7]Today is [G]gonna be the day`. APK an User geliefert.
-
-**Verlauf der PDF-Fixes dieser Session (alle in main, alle korrekt):**
-- `b624f13` linksdirektionales Akkord-Snapping (halfChar-Toleranz)
-- `6de8da7` koordinatenbasiertes Chord-Only-Spacing + Dangling Chords + Metadaten
-- `0543635` character-index Snapping (statt word-start)
-- `03c3159` **Leerzeichen-Glyphen verwerfen — DER eigentliche Bug**
-
-**Nächste Session:**
-1. CI auf `main` prüfen (grün?)
-2. User fragen: "Bist du zufrieden?" — Wonderwall NEU importieren, Klammern prüfen
-3. Falls Akkorde mitten im Wort stehen (`g[Dsus4]onna`): char-index-Snapping
-   ist absichtlich pixel-genau zum PDF. Bei Bedarf wieder auf word-start
-   umstellen (siehe `mergeChordLyric`, `lyric.indices` → `wordStarts`).
-4. Falls OK: PDF-Import-Feature abgeschlossen.
-
-**Debug-Werkzeug:** PDF-Koordinaten lassen sich offline mit `pdfplumber`
-(Python) extrahieren — Leerzeichen-Glyphen sichtbar via `c['text']==' '`.
-So lässt sich die Importer-Pipeline ohne Gerät simulieren.
-
-Davor (Session 2026-06-14):
-- DB Version 6: `genre`-Feld an Songs, neue Tabellen `gigs` + `gig_plays`
-- `GigRepository`: Gig starten/beenden, Play aufzeichnen, reaktive Flows
-- `PlaybackController`: 60-Sek-akkumuliertes-Tracking per Songwechsel-reset
-- `SongEditorScreen`: Genre-Feld mit Autocomplete
-- `LiveScreen` Bottom Sheet: morphender Gig-Button (2s Long-Press beendet),
-  Genre-FilterChips, ausgegraute Songs mit ✓/2×-Badge
-
-Davor (Session 2026-06-13):
-- Innerhalb-Sektion-Scroll (Commit `ca97612`)
-- SyncButton Re-Sync-Schutz, Auto-Save Sync-Daten
+**Sprint 1 abgeschlossen** — Room DB, Gradle, build_apk.sh, CI eingerichtet.
+**Branch:** `main`

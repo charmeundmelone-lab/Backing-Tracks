@@ -2,6 +2,40 @@
 
 ---
 
+## [Sprint 5.2 — Security Audit Tab B] — Bühnen-Schutz verifiziert
+
+**Datum:** 2026-06-20
+**Branch:** main
+**CI:** grün
+
+### Sicherheits-Audit Tab B (Playlist) — Code-Verifikation
+
+Alle 4 Sicherheits-Anforderungen wurden im Kotlin-Code verifiziert.
+Kein Code-Eingriff nötig — Implementierung war korrekt.
+
+#### 1. Swipe-Navigation vollständig deaktiviert
+Nachweis: MainScreen.kt — Tab-Switching via `when (selectedTab)`.
+Kein `HorizontalPager`, kein `ViewPager2`, keine `detectHorizontalDragGestures`
+auf Tab-Ebene. Navigation nur über Tab-Buttons (64dp).
+
+#### 2. Set-Akkordeon korrekt implementiert
+Nachweis: `PlaylistTab()` mit `expandedId: Long?`-State.
+`SetHeader()` mit `ExpandMore/ExpandLess`-Icon.
+Nur ein Set gleichzeitig geöffnet (expand-one-Logik).
+
+#### 3. 7-Song-Limit + 72dp Zeilenhöhe erzwungen
+Nachweis (Zeile 569): `setSongs.take(7).forEachIndexed { ... }`
+Nachweis (Zeile 588): `Modifier.fillMaxWidth().height(72.dp)`
+Überzählige Songs: Hinweistext "+N weitere Songs" (kein Scroll).
+
+#### 4. Strikter Edit-Schutz — keine Tastatur möglich
+Nachweis `StageSongRow()`: ausschließlich `clickable {}` — kein
+`BasicTextField`, kein `KeyboardOptions`, kein `ImeAction`, kein `FocusRequester`.
+Kapo-Wert: statischer Text `"Capo $n"` bzw. `"Kein Capo"` (Zeile 601).
+`BasicTextField` + `ImeAction` existieren NUR in `ArchivSongRow` (Tab A).
+
+---
+
 ## [Sprint 5.2] — Stabiler Startpunkt (ExoPlayer 1.3.1)
 
 **Datum:** 2026-06-20

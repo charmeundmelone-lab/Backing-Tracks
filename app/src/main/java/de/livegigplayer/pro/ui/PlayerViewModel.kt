@@ -106,15 +106,55 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val playlists = playlistDao.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Loop
+    private val _loopActive = MutableStateFlow(false)
+    val loopActive: StateFlow<Boolean> = _loopActive.asStateFlow()
+
+    private var _prevPositionMs = 0L  // für Auto-Stop-Erkennung (ExoPlayer REPEAT_MODE_ONE)
+
     init {
         viewModelScope.launch {
-            while (true) { _positionMs.value = engine.positionMs; _durationMs.value = engine.durationMs; delay(200L) }
+            while (true) {
+                val pos = engine.positionMs
+                val dur = engine.durationMs
+                engine.tickLoop()
+                // Auto-Stop: ExoPlayer hat geloopt (pos sprang von nahe-Ende zurück zu ~0)
+                if (_prevPositionMs > 1000 && pos < _prevPositionMs - 1000
+                    && _currentSong.value?.autoStop == true && engine.isPlaying) {
+                    Log.d("PlayerViewModel", "Auto-Stop: Song-Ende erkannt, stoppe.")
+                    engine.pause(); engine.seekTo(0L)
+                    _isPlaying.value = false
+                    engine.deactivateLoop(); _loopActive.value = false
+                }
+                _prevPositionMs = pos
+                _positionMs.value = pos
+                _durationMs.value = dur
+                delay(200L)
+            }
         }
+    }
+
+    fun toggleLoop() {
+        if (_loopActive.value) {
+            engine.deactivateLoop(); _loopActive.value = false
+        } else {
+            val bpm = _currentSong.value?.bpmExact?.takeIf { it > 0f }
+                ?: _currentSong.value?.bpm?.toFloat() ?: 120f
+            engine.activateLoop(bpm)
+            _loopActive.value = true
+        }
+    }
+
+    fun updateAutoStop(song: Song, enabled: Boolean) {
+        val u = song.copy(autoStop = enabled)
+        viewModelScope.launch { dao.update(u) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = u
     }
 
     fun setSearchQuery(q: String) { _searchQuery.value = q }
 
     fun selectSong(song: Song, context: Context) {
+        engine.deactivateLoop(); _loopActive.value = false
         val mode = SongScanner.scan(song, context)
         if (!engine.activatePreloaded(song.id)) engine.load(mode)
         engine.setVolumeDb("drums", song.volDrums); engine.setVolumeDb("bass",   song.volBass)

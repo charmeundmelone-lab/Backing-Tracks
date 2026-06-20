@@ -54,6 +54,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -115,6 +117,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
     val isScanning    by vm.isScanning.collectAsState()
     val scanProgress  by vm.scanProgress.collectAsState()
     val nextSong      by vm.nextSong.collectAsState()
+    val loopActive    by vm.loopActive.collectAsState()
 
     var selectedTab   by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
     var isLocked      by remember { mutableStateOf(false) }
@@ -142,7 +145,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
                     0 -> ArchivTab(vm = vm, isLocked = isLocked)
-                    1 -> PlaylistTab(vm = vm, isLocked = isLocked)
+                    1 -> PlaylistTab(vm = vm, isLocked = isLocked, loopActive = loopActive)
                 }
             }
 
@@ -319,14 +322,15 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
             containerColor   = BgCard
         ) {
             SongEditorSheet(
-                song     = editSheet!!,
-                onSave   = { t, ar, bpmStr ->
+                song             = editSheet!!,
+                onSave           = { t, ar, bpmStr ->
                     val bpm = bpmStr.toIntOrNull() ?: editSheet!!.bpm
                     vm.updateTitle(editSheet!!, t)
                     vm.updateArtist(editSheet!!, ar)
                     scope.launch { sheetState.hide(); editSheet = null }
                 },
-                onDismiss = { scope.launch { sheetState.hide(); editSheet = null } }
+                onAutoStopChange = { enabled -> vm.updateAutoStop(editSheet!!, enabled) },
+                onDismiss        = { scope.launch { sheetState.hide(); editSheet = null } }
             )
         }
     }
@@ -442,10 +446,16 @@ private fun ArchivSongRow(
 
 // ── Song Editor Bottom Sheet ───────────────────────────────────────────────────
 @Composable
-private fun SongEditorSheet(song: Song, onSave: (String, String, String) -> Unit, onDismiss: () -> Unit) {
-    var title  by remember(song.id) { mutableStateOf(song.title) }
-    var artist by remember(song.id) { mutableStateOf(song.artist) }
-    var bpm    by remember(song.id) { mutableStateOf(song.bpm.toString()) }
+private fun SongEditorSheet(
+    song: Song,
+    onSave: (String, String, String) -> Unit,
+    onAutoStopChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title    by remember(song.id) { mutableStateOf(song.title) }
+    var artist   by remember(song.id) { mutableStateOf(song.artist) }
+    var bpm      by remember(song.id) { mutableStateOf(song.bpm.toString()) }
+    var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         Text("Song bearbeiten", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
@@ -455,6 +465,27 @@ private fun SongEditorSheet(song: Song, onSave: (String, String, String) -> Unit
         SheetField("Künstler", artist) { artist = it }
         Spacer(modifier = Modifier.height(12.dp))
         SheetField("BPM", bpm) { bpm = it }
+        Spacer(modifier = Modifier.height(16.dp))
+        // Auto-Stop toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Auto-Stop", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Song stoppt automatisch am Ende", color = Gray, fontSize = 11.sp)
+            }
+            Switch(
+                checked = autoStop,
+                onCheckedChange = { autoStop = it; onAutoStopChange(it) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.Black,
+                    checkedTrackColor = Volt,
+                    uncheckedThumbColor = Gray,
+                    uncheckedTrackColor = BgTrack
+                )
+            )
+        }
         Spacer(modifier = Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onDismiss, modifier = Modifier.weight(1f),
@@ -485,7 +516,7 @@ private fun SheetField(label: String, value: String, onChange: (String) -> Unit)
 
 // ── Tab B: Playlist ───────────────────────────────────────────────────────────
 @Composable
-private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean) {
+private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean, loopActive: Boolean) {
     val context     = LocalContext.current
     val playlists   by vm.playlists.collectAsState()
     val currentSong by vm.currentSong.collectAsState()
@@ -531,11 +562,13 @@ private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean) {
 
         // Stage transport controls
         StageTransport(
-            isPlaying  = isPlaying,
-            isLocked   = isLocked,
-            onPrevious = { vm.skipPrevious() },
-            onPlayPause = { vm.togglePlayPause() },
-            onNext     = { vm.skipNext() }
+            isPlaying    = isPlaying,
+            isLocked     = isLocked,
+            loopActive   = loopActive,
+            onPrevious   = { vm.skipPrevious() },
+            onPlayPause  = { vm.togglePlayPause() },
+            onToggleLoop = { vm.toggleLoop() },
+            onNext       = { vm.skipNext() }
         )
     }
 }
@@ -609,8 +642,9 @@ private fun StageSongRow(index: Int, song: Song, selected: Boolean, onClick: () 
 // ── Stage Transport ────────────────────────────────────────────────────────────
 @Composable
 private fun StageTransport(
-    isPlaying: Boolean, isLocked: Boolean,
-    onPrevious: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit
+    isPlaying: Boolean, isLocked: Boolean, loopActive: Boolean,
+    onPrevious: () -> Unit, onPlayPause: () -> Unit,
+    onToggleLoop: () -> Unit, onNext: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().background(BgCard),
@@ -619,13 +653,19 @@ private fun StageTransport(
         TransportButton(Icons.Filled.SkipPrevious, "ZURÜCK",
             Modifier.weight(1f), enabled = !isLocked, onClick = onPrevious)
         TransportButton(
-            icon    = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            label   = if (isPlaying) "PAUSE" else "PLAY",
+            icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            label    = if (isPlaying) "PAUSE" else "PLAY",
             modifier = Modifier.weight(1f),
-            tint    = if (isPlaying) Volt else White,
-            onClick = onPlayPause
+            tint     = if (isPlaying) Volt else White,
+            onClick  = onPlayPause
         )
-        TransportButton(Icons.Filled.Repeat, "LOOP", Modifier.weight(1f), onClick = {})
+        TransportButton(
+            icon     = Icons.Filled.Repeat,
+            label    = "LOOP",
+            modifier = Modifier.weight(1f),
+            tint     = if (loopActive) Volt else White,
+            onClick  = onToggleLoop
+        )
         TransportButton(Icons.Filled.SkipNext, "WEITER",
             Modifier.weight(1f), enabled = !isLocked, onClick = onNext)
     }

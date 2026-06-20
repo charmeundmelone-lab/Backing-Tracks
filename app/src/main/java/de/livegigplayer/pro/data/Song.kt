@@ -23,5 +23,6 @@ data class Song(
     val volKeys: Float = 0f,
     val volVocals: Float = 0f,
     val volClick: Float = 0f,
-    val volCue: Float = 0f
+    val volCue: Float = 0f,
+    val autoStop: Boolean = false
 )

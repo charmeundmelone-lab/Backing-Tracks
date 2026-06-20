@@ -2,6 +2,33 @@
 
 ---
 
+## [Sprint 5.3 — Loop + Auto-Stop]
+
+**Datum:** 2026-06-20
+**Branch:** main
+**CI:** grün
+
+### A/B Loop (taktsynchron)
+
+- `AudioEngine.kt`: `activateLoop(bpmExact, bars=8)` berechnet `loopStartMs` via snap-to-beat (floor-Division), `loopEndMs = loopStart + beatMs*4*bars`
+- `AudioEngine.kt`: `tickLoop()` wird alle 200ms aus dem ViewModel-Polling aufgerufen — bei Überschreiten von `loopEndMs` → `seekTo(loopStartMs)` auf ALLEN aktiven ExoPlayern synchron
+- `AudioEngine.kt`: `deactivateLoop()` setzt `loopActive = false`
+
+### Auto-Stop
+
+- `Song.kt`: neues Feld `autoStop: Boolean = false`
+- `AppDatabase.kt`: Version 7 → 8, `MIGRATION_7_8` (`ALTER TABLE songs ADD COLUMN autoStop INTEGER NOT NULL DEFAULT 0`)
+- `PlayerViewModel.kt`: Polling-Loop erkennt Rückwärtssprung der Position (ExoPlayer REPEAT_MODE_ONE) → automatisches Pause + Seek-to-0 wenn `autoStop == true`
+
+### UI
+
+- `PlayerViewModel.kt`: `_loopActive: MutableStateFlow<Boolean>`, `toggleLoop()`, `updateAutoStop()`
+- `MainScreen.kt`: LOOP-Button in `StageTransport` leuchtet Volt wenn `loopActive`, ansonsten Weiß
+- `MainScreen.kt`: Auto-Stop Switch im `SongEditorSheet` (Switch mit Volt-Track, direkte Callback-Weitergabe)
+- Loop wird bei `selectSong()` / `skipNext()` / Song-Ende automatisch deaktiviert
+
+---
+
 ## [Sprint 5.2 — Security Audit Tab B] — Bühnen-Schutz verifiziert
 
 **Datum:** 2026-06-20

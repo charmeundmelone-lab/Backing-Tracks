@@ -57,6 +57,40 @@ class AudioEngine(private val context: Context) {
     val positionMs: Long get() = tracks.firstOrNull()?.player?.currentPosition ?: 0L
     val durationMs: Long get() = tracks.firstOrNull()?.player?.duration?.takeIf { it > 0 } ?: 0L
 
+    // ── A/B-Loop (taktsynchron) ───────────────────────────────────────────────
+
+    var loopActive  = false; private set
+    private var loopStartMs = 0L
+    private var loopEndMs   = 0L
+
+    fun activateLoop(bpmExact: Float, bars: Int = 8) {
+        val bpm = bpmExact.takeIf { it > 0f } ?: 120f
+        val beatMs  = (60_000.0 / bpm).toLong()
+        val barMs   = beatMs * 4                          // 4/4 Takt
+        val pos     = positionMs
+        loopStartMs = (pos / beatMs) * beatMs             // snap-to-beat (floor)
+        loopEndMs   = loopStartMs + barMs * bars
+        loopActive  = true
+        Log.d(TAG, "Loop aktiviert: start=${loopStartMs}ms end=${loopEndMs}ms (${bars} Takte @ ${bpm}BPM)")
+    }
+
+    fun deactivateLoop() {
+        loopActive = false
+        Log.d(TAG, "Loop deaktiviert")
+    }
+
+    // Wird vom ViewModel-Polling-Loop alle 200ms aufgerufen.
+    // Gibt true zurück wenn ein Loop-Sprung ausgeführt wurde.
+    fun tickLoop(): Boolean {
+        if (!loopActive || loopEndMs <= loopStartMs) return false
+        if (positionMs >= loopEndMs) {
+            seekTo(loopStartMs)
+            Log.d(TAG, "Loop-Sprung: zurück zu ${loopStartMs}ms")
+            return true
+        }
+        return false
+    }
+
     // ── Nächster Song vorbereiten ────────────────────────────────────────────
 
     fun preload(songId: Long, mode: TrackMode) {

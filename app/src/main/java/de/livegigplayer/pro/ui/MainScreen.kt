@@ -759,25 +759,41 @@ private fun GlobalPlayer(
             modifier = Modifier.fillMaxWidth().height(3.dp),
             color = Volt, trackColor = BgTrack, drawStopIndicator = {}
         )
-        // Song-Info
-        Column(modifier = Modifier.fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp)) {
+        // Links: Countdown | Rechts: Aktueller + Nächster Song
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Countdown links (groß, Volt)
             Text(
-                text = song?.title ?: "Kein Song geladen",
-                color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
+                text = timeStr,
+                color = Volt, fontSize = 38.sp, fontWeight = FontWeight.Bold,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.padding(end = 16.dp)
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(timeStr, color = Volt, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                if (nextSong != null) {
-                    Spacer(modifier = Modifier.width(12.dp))
+            // Song-Infos rechts
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song?.title ?: "Kein Song geladen",
+                    color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.SkipNext, contentDescription = null,
-                        tint = Gray, modifier = Modifier.size(14.dp))
+                        tint = White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    val capo = if (nextSong.capoPosition > 0) " · Capo ${nextSong.capoPosition}" else ""
-                    Text("${nextSong.title}$capo", color = Gray, fontSize = 12.sp,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val nextText = if (nextSong != null) {
+                        val capo = if (nextSong.capoPosition > 0) " · Capo ${nextSong.capoPosition}" else ""
+                        "${nextSong.title}$capo"
+                    } else "—"
+                    Text(
+                        text = nextText,
+                        color = if (nextSong != null) White else Gray,
+                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

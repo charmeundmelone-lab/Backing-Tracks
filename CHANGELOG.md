@@ -2,6 +2,20 @@
 
 ---
 
+## [Sprint 5.7 — Player Layout: Countdown links, Songs rechts]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### GlobalPlayer Layout-Überarbeitung
+- Countdown links: 38sp, Volt, Monospace, FontWeight.Bold — dominantes Element
+- Songtitel rechts: 18sp, FontWeight.Bold, White — klar lesbar
+- Nächster Song: 14sp, FontWeight.SemiBold, White (statt Gray 12sp) — deutlich lesbarer
+- SkipNext-Icon neben "Nächster Song"-Text in Weiß
+- Buttons (PLAY/PAUSE, STOP, LOOP) unverändert: 72dp, breite Touch-Flächen
+
+---
+
 ## [Sprint 5.6 — Globaler Player: Einheitlicher Bottom-Player in beiden Tabs]
 
 **Datum:** 2026-06-20

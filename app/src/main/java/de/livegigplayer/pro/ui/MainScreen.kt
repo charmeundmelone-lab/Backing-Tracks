@@ -41,7 +41,7 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
@@ -156,18 +156,21 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
                     0 -> ArchivTab(vm = vm, isLocked = isLocked)
-                    1 -> PlaylistTab(vm = vm, isLocked = isLocked, loopActive = loopActive)
+                    1 -> PlaylistTab(vm = vm, isLocked = isLocked)
                 }
             }
 
-            // Mini-Player (96dp, always visible)
-            MiniPlayer(
-                song       = currentSong,
-                nextSong   = nextSong,
-                isPlaying  = isPlaying,
-                positionMs = positionMs,
-                durationMs = durationMs,
-                onPause    = { vm.togglePlayPause() }
+            // Global Player — fest verankert, in beiden Tabs sichtbar
+            GlobalPlayer(
+                song          = currentSong,
+                nextSong      = nextSong,
+                isPlaying     = isPlaying,
+                loopActive    = loopActive,
+                positionMs    = positionMs,
+                durationMs    = durationMs,
+                onPlayPause   = { vm.togglePlayPause() },
+                onStop        = { vm.stopPlayback() },
+                onToggleLoop  = { vm.toggleLoop() }
             )
         }
 
@@ -630,60 +633,43 @@ private fun SheetField(label: String, value: String, onChange: (String) -> Unit)
 
 // ── Tab B: Playlist ───────────────────────────────────────────────────────────
 @Composable
-private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean, loopActive: Boolean) {
+private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean) {
     val context     = LocalContext.current
     val playlists   by vm.playlists.collectAsState()
     val currentSong by vm.currentSong.collectAsState()
-    val isPlaying   by vm.isPlaying.collectAsState()
-    val positionMs  by vm.positionMs.collectAsState()
-    val durationMs  by vm.durationMs.collectAsState()
 
     var expandedId  by remember { mutableStateOf<Long?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Accordion list
-        LazyColumn(
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            if (playlists.isEmpty()) {
-                item {
-                    Text("Keine Sets vorhanden.\nSongs importieren und im Archiv Sets zuweisen.",
-                        color = Gray, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
-                }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        if (playlists.isEmpty()) {
+            item {
+                Text("Keine Sets vorhanden.\nSongs importieren und im Archiv Sets zuweisen.",
+                    color = Gray, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
             }
-            playlists.forEach { playlist ->
-                item(key = playlist.id) {
-                    SetHeader(
-                        playlist  = playlist,
-                        expanded  = expandedId == playlist.id,
-                        onToggle  = { expandedId = if (expandedId == playlist.id) null else playlist.id }
+        }
+        playlists.forEach { playlist ->
+            item(key = playlist.id) {
+                SetHeader(
+                    playlist  = playlist,
+                    expanded  = expandedId == playlist.id,
+                    onToggle  = { expandedId = if (expandedId == playlist.id) null else playlist.id }
+                )
+            }
+            if (expandedId == playlist.id) {
+                item(key = "songs_${playlist.id}") {
+                    SetSongList(
+                        vm          = vm,
+                        playlistId  = playlist.id,
+                        currentSong = currentSong,
+                        isLocked    = isLocked,
+                        context     = context
                     )
-                }
-                if (expandedId == playlist.id) {
-                    item(key = "songs_${playlist.id}") {
-                        SetSongList(
-                            vm          = vm,
-                            playlistId  = playlist.id,
-                            currentSong = currentSong,
-                            isLocked    = isLocked,
-                            context     = context
-                        )
-                    }
                 }
             }
         }
-
-        // Stage transport controls
-        StageTransport(
-            isPlaying    = isPlaying,
-            isLocked     = isLocked,
-            loopActive   = loopActive,
-            onPrevious   = { vm.skipPrevious() },
-            onPlayPause  = { vm.togglePlayPause() },
-            onToggleLoop = { vm.toggleLoop() },
-            onNext       = { vm.skipNext() }
-        )
     }
 }
 
@@ -753,116 +739,93 @@ private fun StageSongRow(index: Int, song: Song, selected: Boolean, onClick: () 
     }
 }
 
-// ── Stage Transport ────────────────────────────────────────────────────────────
+// ── Global Player ──────────────────────────────────────────────────────────────
 @Composable
-private fun StageTransport(
-    isPlaying: Boolean, isLocked: Boolean, loopActive: Boolean,
-    onPrevious: () -> Unit, onPlayPause: () -> Unit,
-    onToggleLoop: () -> Unit, onNext: () -> Unit
+private fun GlobalPlayer(
+    song: Song?, nextSong: Song?,
+    isPlaying: Boolean, loopActive: Boolean,
+    positionMs: Long, durationMs: Long,
+    onPlayPause: () -> Unit, onStop: () -> Unit, onToggleLoop: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().background(BgCard),
-        horizontalArrangement = Arrangement.spacedBy(1.dp)
-    ) {
-        TransportButton(Icons.Filled.SkipPrevious, "ZURÜCK",
-            Modifier.weight(1f), enabled = !isLocked, onClick = onPrevious)
-        TransportButton(
-            icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            label    = if (isPlaying) "PAUSE" else "PLAY",
-            modifier = Modifier.weight(1f),
-            tint     = if (isPlaying) Volt else White,
-            onClick  = onPlayPause
+    val progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
+    val remainMs = (durationMs - positionMs).coerceAtLeast(0L)
+    val remSec   = remainMs / 1000
+    val timeStr  = if (song == null) "--:--" else "-%02d:%02d".format(remSec / 60, remSec % 60)
+
+    Column(modifier = Modifier.fillMaxWidth().background(BgPlayer)) {
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(3.dp),
+            color = Volt, trackColor = BgTrack, drawStopIndicator = {}
         )
-        TransportButton(
-            icon     = Icons.Filled.Repeat,
-            label    = "LOOP",
-            modifier = Modifier.weight(1f),
-            tint     = if (loopActive) Volt else White,
-            onClick  = onToggleLoop
-        )
-        TransportButton(Icons.Filled.SkipNext, "WEITER",
-            Modifier.weight(1f), enabled = !isLocked, onClick = onNext)
+        // Song-Info
+        Column(modifier = Modifier.fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp)) {
+            Text(
+                text = song?.title ?: "Kein Song geladen",
+                color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(timeStr, color = Volt, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                if (nextSong != null) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(Icons.Filled.SkipNext, contentDescription = null,
+                        tint = Gray, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    val capo = if (nextSong.capoPosition > 0) " · Capo ${nextSong.capoPosition}" else ""
+                    Text("${nextSong.title}$capo", color = Gray, fontSize = 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        // Transport: PLAY/PAUSE (2x) | STOP | LOOP
+        Row(
+            modifier = Modifier.fillMaxWidth().height(72.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            PlayerBtn(
+                modifier = Modifier.weight(2f),
+                icon     = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                label    = if (isPlaying) "PAUSE" else "PLAY",
+                tint     = if (isPlaying) Volt else White,
+                bgColor  = if (isPlaying) Color(0xFF0F2010) else BgCard,
+                onClick  = onPlayPause
+            )
+            PlayerBtn(
+                modifier = Modifier.weight(1f),
+                icon     = Icons.Filled.Stop,
+                label    = "STOP",
+                tint     = RedStop,
+                bgColor  = BgCard,
+                onClick  = onStop
+            )
+            PlayerBtn(
+                modifier = Modifier.weight(1f),
+                icon     = Icons.Filled.Repeat,
+                label    = "LOOP",
+                tint     = if (loopActive) Volt else White,
+                bgColor  = if (loopActive) Color(0xFF1A1A00) else BgCard,
+                onClick  = onToggleLoop
+            )
+        }
     }
 }
 
 @Composable
-private fun TransportButton(
-    icon: ImageVector, label: String, modifier: Modifier = Modifier,
-    tint: Color = White, enabled: Boolean = true, onClick: () -> Unit
+private fun PlayerBtn(
+    modifier: Modifier, icon: ImageVector, label: String,
+    tint: Color, bgColor: Color, onClick: () -> Unit
 ) {
     Column(
-        modifier = modifier.height(100.dp).background(BgCard)
-            .clickable(enabled = enabled, onClick = onClick),
+        modifier = modifier.fillMaxHeight().background(bgColor).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(icon, contentDescription = label,
-            tint = if (enabled) tint else Gray, modifier = Modifier.size(42.dp))
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(label, color = if (enabled) Gray else Color(0xFF444444),
-            fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-// ── Mini-Player (96dp) ─────────────────────────────────────────────────────────
-@Composable
-private fun MiniPlayer(
-    song: Song?, nextSong: Song?,
-    isPlaying: Boolean, positionMs: Long, durationMs: Long,
-    onPause: () -> Unit
-) {
-    val progress  = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
-    val remainMs  = (durationMs - positionMs).coerceAtLeast(0L)
-    val remSec    = remainMs / 1000
-    val timeText  = if (song == null) "--:--" else "-%02d:%02d".format(remSec / 60, remSec % 60)
-    val titleText = song?.title ?: "Kein Song geladen"
-
-    Column(modifier = Modifier.fillMaxWidth().height(96.dp).background(BgPlayer)) {
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(2.dp),
-            color = Volt, trackColor = BgTrack, drawStopIndicator = {}
-        )
-        // Row 1: title + countdown + PAUSE button
-        Row(
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(titleText, color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(timeText, color = VoltDim, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-            }
-            // Red emergency PAUSE button (48×48)
-            Box(
-                modifier = Modifier.size(48.dp)
-                    .background(RedStop, shape = MaterialTheme.shapes.small)
-                    .clickable(onClick = onPause),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = "Pause",
-                    tint = White, modifier = Modifier.size(28.dp)
-                )
-            }
-        }
-        // Row 2: next song preview
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val nextText = if (nextSong != null) {
-                val capo = if (nextSong.capoPosition > 0) " (Capo ${nextSong.capoPosition})" else ""
-                "Weiter: ${nextSong.title}$capo"
-            } else "—"
-            Icon(Icons.Filled.SkipNext, contentDescription = null,
-                tint = Gray, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(nextText, color = Gray, fontSize = 11.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(34.dp))
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(label, color = tint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 

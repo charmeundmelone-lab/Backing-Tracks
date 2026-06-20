@@ -2,6 +2,34 @@
 
 ---
 
+## [Sprint 5.6 — Globaler Player: Einheitlicher Bottom-Player in beiden Tabs]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### Globaler Player (GlobalPlayer)
+- `MiniPlayer` (96dp) → `GlobalPlayer` ersetzt; in BEIDEN Tabs fest am unteren Rand
+- Songtitel: 22sp, `FontWeight.Bold` — Headline-Style für Bühnensichtbarkeit
+- Countdown: 15sp Volt Monospace direkt unter dem Titel
+- Nächster Song: Icon + Titel + optionales Capo in derselben Zeile wie Countdown
+- Fortschrittsbalken: 3dp Volt am oberen Rand des Players
+
+### Transport-Buttons (3 statt 4)
+- `PLAY/PAUSE` (Toggle, weight=2f): Hintergrund grün bei Play, Icon/Label wechseln
+- `STOP`: roter Icon (RedStop), stoppt + seekTo(0)
+- `LOOP`: leuchtet Volt wenn aktiv, dunkler Hintergrund zur Bestätigung
+- ZURÜCK + WEITER vollständig entfernt
+- Touch-Targets: 72dp Höhe, breite Fläche (weight statt fixer Breite)
+
+### Code-Cleanup
+- `StageTransport`-Composable entfernt
+- `TransportButton`-Composable entfernt
+- `PlaylistTab`: `loopActive`-Parameter entfernt, `isPlaying`/`positionMs`/`durationMs` State entfernt
+- `PlaylistTab`: äußere `Column` entfernt, direkt `LazyColumn` zurückgegeben
+- Import `SkipPrevious` → `Stop` ausgetauscht
+
+---
+
 ## [Sprint 5.5 — Bildschirmoptimierung: Kompakte TopBar]
 
 **Datum:** 2026-06-20

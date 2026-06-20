@@ -237,6 +237,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _currentSong.value = u; viewModelScope.launch { dao.update(u) }
     }
 
+    fun deleteSong(song: Song) {
+        viewModelScope.launch { dao.delete(song) }
+        if (_currentSong.value?.id == song.id) {
+            engine.stop(); _currentSong.value = null; _isPlaying.value = false
+        }
+    }
+
+    fun deleteAllSongs() {
+        viewModelScope.launch { dao.deleteAll() }
+        engine.stop(); _currentSong.value = null; _isPlaying.value = false
+    }
+
     fun resetAllMixer() {
         val s = _currentSong.value
         listOf("drums","bass","keys","vocals","click","cue").forEach { engine.setVolumeDb(it, 0f) }

@@ -2,6 +2,41 @@
 
 ---
 
+## [Sprint 5.4 — Archiv-Management]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### Row-Actions (Tab A)
+- `ArchivSongRow`: Stift-Icon (Bearbeiten) + Mülleimer-Icon (Löschen) am rechten Rand jeder Zeile
+- Icons werden im Batch-/Selektionsmodus ausgeblendet (kein Konflikt mit Mehrfachauswahl)
+- Langer Druck aktiviert weiterhin den Batch-Modus (unverändert)
+
+### Einzel-Löschen
+- Klick auf Mülleimer öffnet `AlertDialog` ("Song wirklich löschen?")
+- Bei Bestätigung: `SongDao.delete()` + reaktive DB-Aktualisierung via Flow
+- Wenn gelöschter Song aktuell spielt: Wiedergabe stoppt automatisch
+
+### Editor-Navigation
+- `SongEditorSheet`: Vor/Zurück-Buttons (`ChevronLeft`/`ChevronRight`) im Header
+- Positionsanzeige "X / N" (z.B. "3 / 12")
+- Navigation innerhalb der gefilterten Song-Liste — keine ungespeicherten Änderungen werden übertragen
+- Doppel-Long-Press zum Öffnen des Editors entfernt; Editor öffnet sich ausschließlich via Stift-Icon
+
+### Hamburger-Menü (nur Tab A)
+- Neues Hamburger-Icon (`Icons.Filled.Menu`) in der Kopfzeile
+- **Sicherheitsregel eingehalten:** Icon nur sichtbar wenn `selectedTab == 0` (Tab A)
+- In Tab B vollständig ausgeblendet — kein Code-Pfad erreichbar
+- `DropdownMenu` mit Option "Alle Songs löschen"
+
+### Alle Songs löschen
+- `SongDao.deleteAll()` (neues Query)
+- `PlayerViewModel.deleteAllSongs()`: DB leeren + Wiedergabe stoppen
+- Strenger `AlertDialog`: "Wirklich ALLE Songs aus dem Archiv löschen? Diese Aktion kann nicht rückgängig gemacht werden."
+- Nur über Hamburger-Menü → Tab A erreichbar
+
+---
+
 ## [Sprint 5.3 — Loop + Auto-Stop]
 
 **Datum:** 2026-06-20

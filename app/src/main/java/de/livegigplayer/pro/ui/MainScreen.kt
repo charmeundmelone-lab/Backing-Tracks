@@ -42,7 +42,13 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,9 +60,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -135,10 +144,12 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
         ) {
             // Top bar
             TopBar(
-                isLocked       = isLocked,
-                onLockToggle   = { isLocked = !isLocked },
-                onMixerToggle  = { vm.toggleMixer() },
-                onImport       = { importLauncher.launch(null) }
+                isLocked      = isLocked,
+                onLockToggle  = { isLocked = !isLocked },
+                onMixerToggle = { vm.toggleMixer() },
+                onImport      = { importLauncher.launch(null) },
+                showHamburger = selectedTab == 0,
+                onDeleteAll   = { vm.deleteAllSongs() }
             )
 
             // Tab content
@@ -220,8 +231,12 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
 @Composable
 private fun TopBar(
     isLocked: Boolean, onLockToggle: () -> Unit,
-    onMixerToggle: () -> Unit, onImport: () -> Unit
+    onMixerToggle: () -> Unit, onImport: () -> Unit,
+    showHamburger: Boolean, onDeleteAll: () -> Unit
 ) {
+    var menuExpanded       by remember { mutableStateOf(false) }
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth().background(BgDeep)
             .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
@@ -245,6 +260,46 @@ private fun TopBar(
                 modifier = Modifier.size(26.dp)
             )
         }
+        if (showHamburger) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Filled.Menu, contentDescription = "Menü",
+                        tint = Gray, modifier = Modifier.size(26.dp))
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    containerColor = BgCard
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Alle Songs löschen", color = RedStop) },
+                        onClick = { menuExpanded = false; showDeleteAllDialog = true }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            containerColor   = BgCard,
+            title = { Text("Alle Songs löschen?", color = White, fontWeight = FontWeight.Bold) },
+            text  = { Text(
+                "Wirklich ALLE Songs aus dem Archiv löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+                color = Gray, fontSize = 13.sp
+            ) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteAllDialog = false; onDeleteAll() }) {
+                    Text("Alle löschen", color = RedStop, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllDialog = false }) {
+                    Text("Abbrechen", color = Gray)
+                }
+            }
+        )
     }
 }
 
@@ -284,22 +339,23 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
             }
             itemsIndexed(songs) { index, song ->
                 ArchivSongRow(
-                    index          = index + 1,
-                    song           = song,
-                    selected       = song.id == currentSong?.id,
+                    index           = index + 1,
+                    song            = song,
+                    selected        = song.id == currentSong?.id,
                     isBatchSelected = song.id in selectedIds,
-                    isEditing      = song.id == editingSongId,
-                    isLocked       = isLocked,
-                    selectionMode  = selectionMode,
-                    onPlay         = { if (!isLocked) vm.selectSong(song, context) },
-                    onToggleSelect = { vm.toggleSelect(song.id) },
+                    isEditing       = song.id == editingSongId,
+                    isLocked        = isLocked,
+                    selectionMode   = selectionMode,
+                    onPlay          = { if (!isLocked) vm.selectSong(song, context) },
+                    onToggleSelect  = { vm.toggleSelect(song.id) },
                     onActivateBatch = { vm.toggleSelect(song.id) },
-                    onCapoChange   = { delta -> vm.updateCapo(song, delta) },
-                    onTitleSave    = { newTitle -> vm.updateTitle(song, newTitle) },
-                    onEditStart    = { vm.startEditing(song.id) },
-                    onOpenSheet    = { editSheet = song },
-                    onQueueNext    = { vm.addToQueueNext(song) },
-                    onQueueEnd     = { vm.addToQueueEnd(song) }
+                    onCapoChange    = { delta -> vm.updateCapo(song, delta) },
+                    onTitleSave     = { newTitle -> vm.updateTitle(song, newTitle) },
+                    onEditStart     = { vm.startEditing(song.id) },
+                    onOpenSheet     = { editSheet = song },
+                    onDelete        = { vm.deleteSong(song) },
+                    onQueueNext     = { vm.addToQueueNext(song) },
+                    onQueueEnd      = { vm.addToQueueEnd(song) }
                 )
             }
         }
@@ -323,6 +379,7 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
         ) {
             SongEditorSheet(
                 song             = editSheet!!,
+                songs            = songs,
                 onSave           = { t, ar, bpmStr ->
                     val bpm = bpmStr.toIntOrNull() ?: editSheet!!.bpm
                     vm.updateTitle(editSheet!!, t)
@@ -330,6 +387,7 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
                     scope.launch { sheetState.hide(); editSheet = null }
                 },
                 onAutoStopChange = { enabled -> vm.updateAutoStop(editSheet!!, enabled) },
+                onNavigate       = { newSong -> editSheet = newSong },
                 onDismiss        = { scope.launch { sheetState.hide(); editSheet = null } }
             )
         }
@@ -345,17 +403,39 @@ private fun ArchivSongRow(
     isLocked: Boolean, selectionMode: Boolean,
     onPlay: () -> Unit, onToggleSelect: () -> Unit, onActivateBatch: () -> Unit,
     onCapoChange: (Int) -> Unit, onTitleSave: (String) -> Unit, onEditStart: () -> Unit,
-    onOpenSheet: () -> Unit, onQueueNext: () -> Unit, onQueueEnd: () -> Unit
+    onOpenSheet: () -> Unit, onDelete: () -> Unit,
+    onQueueNext: () -> Unit, onQueueEnd: () -> Unit
 ) {
     val editFR = remember { FocusRequester() }
     LaunchedEffect(isEditing) { if (isEditing) editFR.requestFocus() }
 
-    var dragX by remember { mutableStateOf(0f) }
+    var dragX            by remember { mutableStateOf(0f) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     val bgColor = when {
         isBatchSelected -> BgBatch
         selected        -> BgTrack
         else            -> BgCard
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            containerColor   = BgCard,
+            title = { Text("Song löschen?", color = White, fontWeight = FontWeight.Bold) },
+            text  = { Text("\"${song.title}\" wirklich aus dem Archiv löschen?",
+                color = Gray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteDialog = false; onDelete() }) {
+                    Text("Löschen", color = RedStop, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Abbrechen", color = Gray)
+                }
+            }
+        )
     }
 
     Row(
@@ -410,9 +490,7 @@ private fun ArchivSongRow(
                             if (selectionMode) onToggleSelect()
                             else if (!isLocked) { if (selected) onEditStart() else onPlay() }
                         },
-                        onLongClick = {
-                            if (!isLocked) { if (!selectionMode) onActivateBatch() else onOpenSheet() }
-                        }
+                        onLongClick = { if (!isLocked && !selectionMode) onActivateBatch() }
                     )
                 )
             }
@@ -423,7 +501,7 @@ private fun ArchivSongRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
-        Spacer(modifier = Modifier.width(6.dp))
+        Spacer(modifier = Modifier.width(4.dp))
 
         // Capo stepper
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -441,6 +519,25 @@ private fun ArchivSongRow(
             }
             Text("Kapo", color = Gray, fontSize = 9.sp)
         }
+
+        // Edit + Delete icons (hidden in batch/selection mode)
+        if (!selectionMode) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Column(
+                modifier = Modifier.width(24.dp).height(72.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Icon(
+                    Icons.Filled.Edit, contentDescription = "Bearbeiten",
+                    tint = Gray, modifier = Modifier.size(18.dp).clickable { onOpenSheet() }
+                )
+                Icon(
+                    Icons.Filled.Delete, contentDescription = "Löschen",
+                    tint = RedStop, modifier = Modifier.size(18.dp).clickable { showDeleteDialog = true }
+                )
+            }
+        }
     }
 }
 
@@ -448,8 +545,10 @@ private fun ArchivSongRow(
 @Composable
 private fun SongEditorSheet(
     song: Song,
+    songs: List<Song>,
     onSave: (String, String, String) -> Unit,
     onAutoStopChange: (Boolean) -> Unit,
+    onNavigate: (Song) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title    by remember(song.id) { mutableStateOf(song.title) }
@@ -457,9 +556,32 @@ private fun SongEditorSheet(
     var bpm      by remember(song.id) { mutableStateOf(song.bpm.toString()) }
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
 
+    val idx     = songs.indexOfFirst { it.id == song.id }
+    val hasPrev = idx > 0
+    val hasNext = idx in 0 until songs.size - 1
+
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+        // Navigation header
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(enabled = hasPrev, onClick = { onNavigate(songs[idx - 1]) }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Zurück",
+                    tint = if (hasPrev) Volt else Gray, modifier = Modifier.size(28.dp))
+            }
+            Text(
+                text = if (idx >= 0) "${idx + 1} / ${songs.size}" else "—",
+                color = Gray, fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(enabled = hasNext, onClick = { onNavigate(songs[idx + 1]) }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Weiter",
+                    tint = if (hasNext) Volt else Gray, modifier = Modifier.size(28.dp))
+            }
+        }
         Text("Song bearbeiten", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(vertical = 16.dp))
+            modifier = Modifier.padding(bottom = 12.dp))
         SheetField("Titel", title) { title = it }
         Spacer(modifier = Modifier.height(12.dp))
         SheetField("Künstler", artist) { artist = it }

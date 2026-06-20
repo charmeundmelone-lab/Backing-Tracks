@@ -25,23 +25,28 @@ object FolderImporter {
         val folders = all.filter { it.isDirectory }.sortedBy { it.name }
         val wavs    = all.filter { it.name?.endsWith(".wav", ignoreCase = true) == true }.sortedBy { it.name }
 
-        Log.d(TAG, "${folders.size} Unterordner (Modus A), ${wavs.size} WAV-Dateien (Modus B)")
+        Log.d(TAG, "${folders.size} Unterordner (Modus A), ${wavs.size} WAV-Dateien direkt (Modus B)")
+
+        // Bug-Fix: Kein Unterordner, aber mehrere WAVs → Root selbst ist ein Song-Ordner (Modus A)
+        if (folders.isEmpty() && wavs.size > 1) {
+            val rootName = root.name ?: ""
+            if (rootName.isNotBlank()) {
+                Log.d(TAG, "Kein Unterordner, Root '$rootName' wird als Modus-A-Song behandelt")
+                onProgress(rootName)
+                importModeAWavs(context, dao, rootUri.toString(), rootName, wavs)
+                return
+            }
+        }
 
         // Modus A: Unterordner = Multi-Stem-Songs
         for (folder in folders) {
             val rawName = folder.name ?: continue
             onProgress(rawName)
-            val (artist, title) = parseArtistTitle(rawName)
-            val safPath = "${rootUri}||${rawName}"
             val children: List<DocumentFile> = try { folder.listFiles().toList() } catch (e: Exception) { emptyList() }
-            val allWavs = children.filter { it.name?.endsWith(".wav", ignoreCase = true) == true }
-            val clickFile = allWavs.find { it.name?.contains("click", ignoreCase = true) == true }
-            val bpmFromName = bpmFromName(rawName)
-            val bpmExact = if (clickFile != null) BpmAnalyzer.analyze(context, clickFile.uri) else 0f
-            val bpm = bpmFromName ?: if (bpmExact > 0f) bpmExact.toInt() else 120
-            val duration = allWavs.firstOrNull()?.let { getDuration(context, it.uri) } ?: "00:00"
-            Log.d(TAG, "ModeA '$rawName': bpmExact=$bpmExact bpm=$bpm")
-            upsert(dao, safPath, title, artist, bpm, bpmExact, duration)
+            val stems = children.filter { it.name?.endsWith(".wav", ignoreCase = true) == true }
+            val safPath = "${rootUri}||${rawName}"
+            Log.d(TAG, "ModeA '$rawName': ${stems.size} WAVs gefunden")
+            importModeAWavs(context, dao, safPath, rawName, stems)
         }
 
         // Modus B: Einzel-WAV = Stereo-Song (L=Musik, R=Klick)
@@ -56,6 +61,27 @@ object FolderImporter {
             Log.d(TAG, "ModeB '$rawName': bpmExact=$bpmExact bpm=$bpm")
             upsert(dao, safPath, title, artist, bpm, bpmExact, duration)
         }
+    }
+
+    private suspend fun importModeAWavs(
+        context: Context, dao: SongDao,
+        safPath: String, rawName: String,
+        wavs: List<DocumentFile>
+    ) {
+        val (artist, title) = parseArtistTitle(rawName)
+        // Bug-Fix 2: case-insensitive, auch "klick" (deutsch)
+        val clickFile = wavs.find { f ->
+            val n = f.name?.lowercase() ?: ""
+            "click" in n || "klick" in n
+        }
+        Log.d(TAG, "ModeA '$rawName': clickFile=${clickFile?.name}")
+        val bpmFromName = bpmFromName(rawName)
+        val bpmExact = if (clickFile != null) BpmAnalyzer.analyze(context, clickFile.uri) else 0f
+        val bpm = bpmFromName ?: if (bpmExact > 0f) bpmExact.toInt() else 120
+        val nonClick = wavs.firstOrNull { it != clickFile }
+        val duration = nonClick?.let { getDuration(context, it.uri) } ?: "00:00"
+        Log.d(TAG, "ModeA '$rawName': bpmExact=$bpmExact bpm=$bpm duration=$duration")
+        upsert(dao, safPath, title, artist, bpm, bpmExact, duration)
     }
 
     private suspend fun upsert(dao: SongDao, path: String, title: String, artist: String,

@@ -73,6 +73,39 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _editingSongId = MutableStateFlow<Long?>(null)
     val editingSongId: StateFlow<Long?> = _editingSongId.asStateFlow()
 
+    // StageTraxx-Queue
+    private val _queue = MutableStateFlow<List<Song>>(emptyList())
+    val queue: StateFlow<List<Song>> = _queue.asStateFlow()
+
+    val nextSong: StateFlow<Song?> = _queue
+        .combine(songs) { q, list ->
+            if (q.isNotEmpty()) q.first()
+            else {
+                val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
+                if (idx in 0 until list.size - 1) list[idx + 1] else null
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun addToQueueNext(song: Song) {
+        Log.d("PlayerViewModel", "addToQueueNext: ${song.title}")
+        _queue.value = listOf(song) + _queue.value.filter { it.id != song.id }
+    }
+    fun addToQueueEnd(song: Song) {
+        Log.d("PlayerViewModel", "addToQueueEnd: ${song.title}")
+        _queue.value = _queue.value.filter { it.id != song.id } + listOf(song)
+    }
+    fun clearQueue() { _queue.value = emptyList() }
+    private fun dequeueFirst(): Song? {
+        val first = _queue.value.firstOrNull() ?: return null
+        _queue.value = _queue.value.drop(1)
+        return first
+    }
+
+    // Playlists
+    private val playlistDao = (app as LiveGigPlayerApp).database.playlistDao()
+    val playlists = playlistDao.getAllPlaylists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         viewModelScope.launch {
             while (true) { _positionMs.value = engine.positionMs; _durationMs.value = engine.durationMs; delay(200L) }
@@ -115,7 +148,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun togglePlayPause() { if (engine.isPlaying) { engine.pause(); _isPlaying.value = false } else { engine.play(); _isPlaying.value = true } }
     fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
     fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication()) else engine.seekTo(0L) }
-    fun skipNext()        { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i in 0 until l.size-1) selectSong(l[i+1], getApplication()) }
+    fun skipNext() {
+        val queued = dequeueFirst()
+        if (queued != null) { selectSong(queued, getApplication()); return }
+        val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }
+        if (i in 0 until l.size - 1) selectSong(l[i + 1], getApplication())
+    }
     fun toggleMixer()     { _showMixer.value = !_showMixer.value }
     fun closeMixer()      { _showMixer.value = false }
 

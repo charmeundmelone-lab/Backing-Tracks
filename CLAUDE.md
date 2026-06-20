@@ -36,27 +36,45 @@ und Playlists mit Room-Datenbank. Smartphone-First, dunkles UI für die Bühne.
 
 ```
 app/src/main/java/de/livegigplayer/pro/
+├── audio/
+│   ├── AudioEngine.kt    — ExoPlayer-Wrapper: load, play, pause, seekTo, loop, preload
+│   ├── FolderImporter.kt — SAF-Import: Modus A (WAV-Stems), Modus B (Legacy)
+│   └── SongScanner.kt    — erkennt TrackMode aus DocumentFile-Struktur
 ├── data/
-│   ├── Song.kt           — Room-Entity (id, title, bpm, timeSignature, playlistId, isCompleted, audioFilePath)
-│   ├── SongDao.kt        — CRUD: insert, update, delete, getAllSongs, getSongById, getSongsByPlaylist
-│   └── AppDatabase.kt    — RoomDatabase v1, Singleton
+│   ├── Song.kt           — Room-Entity v8 (id, title, artist, bpm, bpmExact, keySignature,
+│   │                        genre, capoPosition, volDrums/Bass/Keys/Vocals/Click/Cue,
+│   │                        autoStop, playlistId, audioFilePath, duration)
+│   ├── SongDao.kt        — CRUD + resetAllMixerSettings
+│   ├── Playlist.kt       — Room-Entity (id, name, isLiveLocked)
+│   ├── PlaylistDao.kt    — getAllPlaylists
+│   ├── AppDatabase.kt    — RoomDatabase v8, Migrationen 1→2, 5→6, 6→7, 7→8
+│   └── TrackMode.kt      — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
+├── ui/
+│   ├── MainScreen.kt     — Compose-UI: zwei Tabs (Archiv / Playlist), Mini-Player, Mixer
+│   └── PlayerViewModel.kt — AndroidViewModel: StateFlow, Queue, Loop, AutoStop
 ├── ui/theme/
-│   └── Theme.kt          — LiveGigPlayerTheme (dark/light)
+│   └── Theme.kt          — LiveGigPlayerTheme (dark)
 ├── LiveGigPlayerApp.kt   — Application-Klasse, DB-Singleton
 └── MainActivity.kt       — Entry Point, Compose-Setup
 ```
 
-## Datenmodell Song
+## Datenmodell Song (Room v8)
 
 | Feld | Typ | Bedeutung |
 |---|---|---|
 | id | Long (PK) | Auto-generiert |
 | title | String | Songtitel |
-| bpm | Int | Tempo |
-| timeSignature | String | "4/4" oder "6/8" |
-| playlistId | Long | Zugehörige Playlist |
-| isCompleted | Boolean | Abgehakt (Default: false) |
-| audioFilePath | String | Pfad zur Audio-Datei |
+| artist | String | Künstler |
+| bpm | Int | Tempo (ganzzahlig) |
+| bpmExact | Float | Tempo (präzise, 0 = nicht gesetzt) |
+| keySignature | String | Tonart |
+| genre | String | Genre |
+| capoPosition | Int | Kapo 0–11 |
+| volDrums/Bass/Keys/Vocals/Click/Cue | Float | Mixer-Lautstärke in dB |
+| autoStop | Boolean | Song stoppt automatisch am Ende |
+| playlistId | Long | Zugehöriges Set (0 = keins) |
+| audioFilePath | String | SAF-Pfad (treeUri||folderName) |
+| duration | String | Anzeigedauer (z.B. "3:42") |
 
 ## Build-Setup
 
@@ -74,19 +92,27 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room-Version 1** — nächste Migration wäre 1→2. Migrationen NIE doppelt anlegen.
-2. **timeSignature** ist ein String ("4/4"/"6/8"), kein Enum — Flexibilität für spätere Werte.
-3. **versionCode** kommt aus der CI-Build-Nummer (`-PversionCode=${{ github.run_number }}`). Lokaler Build → 1.
-
-## Offene / geplante Features (Roadmap)
-
-- **Sprint 1 DONE:** Room DB, Gradle-Setup, build_apk.sh
-- **Sprint 2:** Playlist-Entity + DAO, Playlist-Verwaltungs-UI
-- **Sprint 3:** Song-Editor-UI (Felder eingeben, Audio-Datei wählen)
-- **Sprint 4:** Player-Screen (Audio abspielen, Fortschritt, BPM-Anzeige)
-- **Sprint 5:** Live-Ansicht (Bühnen-optimiertes Dark UI, blind bedienbar)
+1. **Room v8** — nächste Migration wäre 8→9. Migrationen NIE doppelt anlegen.
+2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
+3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
+4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
+5. **versionCode** kommt aus der CI-Build-Nummer (`-PversionCode=${{ github.run_number }}`). Lokaler Build → 1.
 
 ## Letzter Stand
 
-**Sprint 1 abgeschlossen** — Room DB, Gradle, build_apk.sh, CI eingerichtet.
-**Branch:** `main`
+**Datum:** 2026-06-20
+**CI Build:** #147 — grün
+**Commit:** `d269031` — Sprint 5.3 Loop + Auto-Stop
+
+### Abgeschlossene Sprints
+
+- **Sprint 5.3 DONE:** A/B-Loop (snap-to-beat, 8 Takte, alle Stems synchron), Auto-Stop (DB v8, Switch im Editor), LOOP-Button leuchtet Volt wenn aktiv
+- **Sprint 5.2 DONE:** Zwei-Tab-Layout (Archiv/Playlist), Mini-Player 96dp, Set-Akkordeon, StageTraxx-Queue, Import-Bugfixes (Modus A Einzel-Eintrag, Click case-insensitiv), Tab-B-Sicherheits-Audit
+- **Sprint 5.1 DONE:** ArchivSongRow (combinedClickable, Kapo-Stepper, Inline-Edit, Batch-Modus, GenreBar)
+- **Sprint 5 DONE:** ExoPlayer 1.3.1, Multitrack-Support, Mixer, Preload
+
+### Offene TODOs (nächste Session)
+
+- Set-Verwaltung UI: Sets anlegen / umbenennen
+- Song-zu-Set-Zuweisung im UI (aktuell nur per Import)
+- Playlist-Tab: Queue-Swipe (Swipe rechts/links auf Stage-Songs)

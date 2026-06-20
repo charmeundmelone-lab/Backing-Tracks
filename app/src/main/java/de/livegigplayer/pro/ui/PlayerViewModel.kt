@@ -120,7 +120,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 engine.tickLoop()
                 // Auto-Stop: ExoPlayer hat geloopt (pos sprang von nahe-Ende zurück zu ~0)
                 if (_prevPositionMs > 1000 && pos < _prevPositionMs - 1000
-                    && _currentSong.value?.autoStop == true && engine.isPlaying) {
+                    && _currentSong.value?.autoStop == true && engine.isPlaying
+                    && !_loopActive.value) {
                     Log.d("PlayerViewModel", "Auto-Stop: Song-Ende erkannt, stoppe.")
                     engine.pause(); engine.seekTo(0L)
                     _isPlaying.value = false

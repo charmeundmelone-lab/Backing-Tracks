@@ -160,16 +160,6 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                 }
             }
 
-            // Mini-Player (96dp, always visible)
-            MiniPlayer(
-                song       = currentSong,
-                nextSong   = nextSong,
-                isPlaying  = isPlaying,
-                positionMs = positionMs,
-                durationMs = durationMs,
-                onPause    = { vm.togglePlayPause() }
-            )
-
             // Bottom Tab Bar (64dp)
             Row(
                 modifier = Modifier.fillMaxWidth().height(64.dp).background(BgCard),
@@ -190,6 +180,16 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                     onClick  = { selectedTab = 1 }
                 )
             }
+
+            // Mini-Player (96dp, always visible, below tab bar)
+            MiniPlayer(
+                song       = currentSong,
+                nextSong   = nextSong,
+                isPlaying  = isPlaying,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                onPause    = { vm.togglePlayPause() }
+            )
         }
 
         // Mixer overlay
@@ -349,7 +349,6 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
                     onPlay          = { if (!isLocked) vm.selectSong(song, context) },
                     onToggleSelect  = { vm.toggleSelect(song.id) },
                     onActivateBatch = { vm.toggleSelect(song.id) },
-                    onCapoChange    = { delta -> vm.updateCapo(song, delta) },
                     onTitleSave     = { newTitle -> vm.updateTitle(song, newTitle) },
                     onEditStart     = { vm.startEditing(song.id) },
                     onOpenSheet     = { editSheet = song },
@@ -387,6 +386,7 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
                     scope.launch { sheetState.hide(); editSheet = null }
                 },
                 onAutoStopChange = { enabled -> vm.updateAutoStop(editSheet!!, enabled) },
+                onCapoChange     = { delta -> vm.updateCapo(editSheet!!, delta) },
                 onNavigate       = { newSong -> editSheet = newSong },
                 onDismiss        = { scope.launch { sheetState.hide(); editSheet = null } }
             )
@@ -402,7 +402,7 @@ private fun ArchivSongRow(
     selected: Boolean, isBatchSelected: Boolean, isEditing: Boolean,
     isLocked: Boolean, selectionMode: Boolean,
     onPlay: () -> Unit, onToggleSelect: () -> Unit, onActivateBatch: () -> Unit,
-    onCapoChange: (Int) -> Unit, onTitleSave: (String) -> Unit, onEditStart: () -> Unit,
+    onTitleSave: (String) -> Unit, onEditStart: () -> Unit,
     onOpenSheet: () -> Unit, onDelete: () -> Unit,
     onQueueNext: () -> Unit, onQueueEnd: () -> Unit
 ) {
@@ -501,25 +501,6 @@ private fun ArchivSongRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Capo stepper
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("−", color = if (isLocked) Gray else Volt, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable(enabled = !isLocked) { onCapoChange(-1) }
-                        .padding(horizontal = 7.dp, vertical = 4.dp))
-                Text(song.capoPosition.toString(),
-                    color = if (song.capoPosition > 0) Volt else Gray,
-                    fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                    modifier = Modifier.width(16.dp))
-                Text("+", color = if (isLocked) Gray else Volt, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable(enabled = !isLocked) { onCapoChange(1) }
-                        .padding(horizontal = 7.dp, vertical = 4.dp))
-            }
-            Text("Kapo", color = Gray, fontSize = 9.sp)
-        }
-
         // Edit + Delete icons (hidden in batch/selection mode)
         if (!selectionMode) {
             Spacer(modifier = Modifier.width(6.dp))
@@ -548,12 +529,14 @@ private fun SongEditorSheet(
     songs: List<Song>,
     onSave: (String, String, String) -> Unit,
     onAutoStopChange: (Boolean) -> Unit,
+    onCapoChange: (Int) -> Unit,
     onNavigate: (Song) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title    by remember(song.id) { mutableStateOf(song.title) }
     var artist   by remember(song.id) { mutableStateOf(song.artist) }
     var bpm      by remember(song.id) { mutableStateOf(song.bpm.toString()) }
+    var capo     by remember(song.id) { mutableStateOf(song.capoPosition) }
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
 
     val idx     = songs.indexOfFirst { it.id == song.id }
@@ -587,6 +570,22 @@ private fun SongEditorSheet(
         SheetField("Künstler", artist) { artist = it }
         Spacer(modifier = Modifier.height(12.dp))
         SheetField("BPM", bpm) { bpm = it }
+        Spacer(modifier = Modifier.height(12.dp))
+        // Capo stepper
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Capo", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("−", color = if (capo > 0) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(enabled = capo > 0) { capo--; onCapoChange(-1) }
+                    .padding(horizontal = 14.dp, vertical = 4.dp))
+            Text(capo.toString(), color = if (capo > 0) Volt else Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, modifier = Modifier.width(30.dp))
+            Text("+", color = if (capo < 11) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(enabled = capo < 11) { capo++; onCapoChange(1) }
+                    .padding(horizontal = 14.dp, vertical = 4.dp))
+        }
         Spacer(modifier = Modifier.height(16.dp))
         // Auto-Stop toggle
         Row(

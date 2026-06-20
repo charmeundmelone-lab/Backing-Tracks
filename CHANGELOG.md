@@ -2,6 +2,36 @@
 
 ---
 
+## [Sprint 5.4 — Korrekturen: Capo, Mini-Player, Gapless Loop]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### UI-Korrektur Tab A (Capo)
+- Capo-Stepper ("− 0 + Kapo") vollständig aus `ArchivSongRow` entfernt
+- `onCapoChange`-Parameter aus `ArchivSongRow` und Aufruf-Stelle entfernt
+- Capo-Stepper jetzt im `SongEditorSheet` (BottomSheet): "Capo" Label links, "−" / Wert / "+" rechts
+- Tipp auf `−`/`+` ruft `vm.updateCapo()` auf — sofortige DB-Persistierung
+
+### UI-Korrektur Mini-Player
+- Mini-Player verschoben: liegt jetzt zwingend UNTERHALB der Tab-Navigation
+- Reihenfolge in `MainScreen`: TopBar → Box(TabContent) → Row(TabBar) → MiniPlayer
+
+### Loop-Bugfix: Gapless (AudioEngine.kt)
+- `activateLoop()`: ClippingConfiguration + 64 geketttete MediaItems + `REPEAT_MODE_ALL`
+- ExoPlayer puffert nächsten Playlist-Item während Wiedergabe → keine hörbaren Lücken
+- BPM-Präzision: `beatMs = 60_000.0 / bpm` (Double), `floor(pos / beatMs).toLong()`, `roundToLong()` für Start/End
+- `positionMs`: bei aktivem Loop wird `loopStartMs + raw` zurückgegeben (Mini-Player Countdown korrekt)
+- `durationMs`: gibt `originalDurationMs` zurück wenn Loop aktiv
+- `deactivateLoop()`: stellt Original-MediaItem wieder her, setzt `seekTo(loopStartMs + currentClipPos)`
+- `tickLoop()`: no-op (Playlist übernimmt Übergänge)
+
+### Auto-Stop Bugfix
+- `PlayerViewModel`: Auto-Stop-Erkennung bekommt Guard `&& !_loopActive.value`
+- Verhindert Fehlauslösung wenn Loop aktiv ist und Position bei jedem Clip-Wechsel zurückspringt
+
+---
+
 ## [Sprint 5.4 — Archiv-Management]
 
 **Datum:** 2026-06-20

@@ -9,13 +9,15 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import de.livegigplayer.pro.data.TrackMode
+import kotlin.math.floor
 import kotlin.math.pow
+import kotlin.math.roundToLong
 
 private const val TAG = "AudioEngine"
 
 class AudioEngine(private val context: Context) {
 
-    private data class Track(val name: String, val player: ExoPlayer)
+    private data class Track(val name: String, val player: ExoPlayer, val uri: String)
 
     private val tracks     = mutableListOf<Track>()
     private val nextTracks = mutableListOf<Track>()
@@ -54,47 +56,73 @@ class AudioEngine(private val context: Context) {
         tracks.find { it.name == trackName }?.player?.volume = linear
     }
 
-    val positionMs: Long get() = tracks.firstOrNull()?.player?.currentPosition ?: 0L
-    val durationMs: Long get() = tracks.firstOrNull()?.player?.duration?.takeIf { it > 0 } ?: 0L
+    private var originalDurationMs = 0L
 
-    // ── A/B-Loop (taktsynchron) ───────────────────────────────────────────────
+    // When looping, currentPosition is relative to clip start → add loopStartMs for absolute position
+    val positionMs: Long get() {
+        val raw = tracks.firstOrNull()?.player?.currentPosition ?: 0L
+        return if (loopActive) loopStartMs + raw else raw
+    }
+    val durationMs: Long get() =
+        if (loopActive) originalDurationMs
+        else tracks.firstOrNull()?.player?.duration?.takeIf { it > 0 } ?: 0L
+
+    // ── A/B-Loop — gapless via ClippingConfiguration-Playlist ────────────────
 
     var loopActive  = false; private set
     private var loopStartMs = 0L
     private var loopEndMs   = 0L
 
     fun activateLoop(bpmExact: Float, bars: Int = 8) {
-        val bpm = bpmExact.takeIf { it > 0f } ?: 120f
-        val beatMs  = (60_000.0 / bpm).toLong()
-        val barMs   = beatMs * 4                          // 4/4 Takt
-        val pos     = positionMs
-        loopStartMs = (pos / beatMs) * beatMs             // snap-to-beat (floor)
-        loopEndMs   = loopStartMs + barMs * bars
-        loopActive  = true
-        Log.d(TAG, "Loop aktiviert: start=${loopStartMs}ms end=${loopEndMs}ms (${bars} Takte @ ${bpm}BPM)")
+        val bpm    = bpmExact.takeIf { it > 0f } ?: 120f
+        val beatMs = 60_000.0 / bpm                              // Double for sample precision
+        val pos    = (tracks.firstOrNull()?.player?.currentPosition ?: 0L).toDouble()
+        val beatIdx = floor(pos / beatMs).toLong()               // snap-to-beat (floor)
+        loopStartMs = (beatIdx * beatMs).roundToLong()
+        loopEndMs   = loopStartMs + (beatMs * 4.0 * bars).roundToLong()
+        originalDurationMs = tracks.firstOrNull()?.player?.duration?.takeIf { it > 0 } ?: 0L
+        loopActive = true
+
+        // Replace each player's media with 64 gapless-chained clipped copies.
+        // ExoPlayer handles playlist item transitions without buffer flush → no audible gap.
+        tracks.forEach { track ->
+            val clipped = MediaItem.Builder()
+                .setUri(Uri.parse(track.uri))
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(loopStartMs)
+                        .setEndPositionMs(loopEndMs)
+                        .build()
+                ).build()
+            track.player.setMediaItems(List(64) { clipped })
+            track.player.repeatMode = Player.REPEAT_MODE_ALL
+            track.player.prepare()
+            if (isPlaying) track.player.play()
+        }
+        Log.d(TAG, "Loop aktiviert: start=${loopStartMs}ms end=${loopEndMs}ms ($bars Takte @ ${bpm}BPM)")
     }
 
     fun deactivateLoop() {
+        val resumeAt = loopStartMs + (tracks.firstOrNull()?.player?.currentPosition ?: 0L)
         loopActive = false
-        Log.d(TAG, "Loop deaktiviert")
+        tracks.forEach { track ->
+            val item = MediaItem.fromUri(Uri.parse(track.uri))
+            track.player.setMediaItem(item)
+            track.player.repeatMode = Player.REPEAT_MODE_ONE
+            track.player.prepare()
+            track.player.seekTo(resumeAt)
+            if (isPlaying) track.player.play()
+        }
+        Log.d(TAG, "Loop deaktiviert, fortgesetzt bei ${resumeAt}ms")
     }
 
-    // Wird vom ViewModel-Polling-Loop alle 200ms aufgerufen.
-    // Gibt true zurück wenn ein Loop-Sprung ausgeführt wurde.
-    fun tickLoop(): Boolean {
-        if (!loopActive || loopEndMs <= loopStartMs) return false
-        if (positionMs >= loopEndMs) {
-            seekTo(loopStartMs)
-            Log.d(TAG, "Loop-Sprung: zurück zu ${loopStartMs}ms")
-            return true
-        }
-        return false
-    }
+    // Playlist übernimmt gapless transitions — tickLoop ist kein aktiver Eingriff mehr
+    fun tickLoop(): Boolean = false
 
     // ── Nächster Song vorbereiten ────────────────────────────────────────────
 
     fun preload(songId: Long, mode: TrackMode) {
-        if (songId == nextSongId) return  // Bereits vorgeladen
+        if (songId == nextSongId) return
         releaseNext()
         buildTracks(mode, nextTracks)
         nextTracks.forEach { it.player.prepare() }
@@ -104,22 +132,10 @@ class AudioEngine(private val context: Context) {
 
     // ── Aufräumen ────────────────────────────────────────────────────────────
 
-    fun release() {
-        releaseCurrent()
-        releaseNext()
-    }
+    fun release() { releaseCurrent(); releaseNext() }
 
-    private fun releaseCurrent() {
-        tracks.forEach { it.player.release() }
-        tracks.clear()
-        isPlaying = false
-    }
-
-    private fun releaseNext() {
-        nextTracks.forEach { it.player.release() }
-        nextTracks.clear()
-        nextSongId = -1L
-    }
+    private fun releaseCurrent() { tracks.forEach { it.player.release() }; tracks.clear(); isPlaying = false }
+    private fun releaseNext()    { nextTracks.forEach { it.player.release() }; nextTracks.clear(); nextSongId = -1L }
 
     // ── Interne Hilfsfunktionen ───────────────────────────────────────────────
 
@@ -148,6 +164,6 @@ class AudioEngine(private val context: Context) {
             ).build()
         player.repeatMode = Player.REPEAT_MODE_ONE
         player.setMediaItem(MediaItem.fromUri(Uri.parse(path)))
-        return Track(name, player)
+        return Track(name, player, path)
     }
 }

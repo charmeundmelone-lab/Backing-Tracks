@@ -765,14 +765,14 @@ private fun GlobalPlayer(
                 .padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Countdown links (groß, Volt)
+            // Countdown links — nur so breit wie nötig
             Text(
                 text = timeStr,
-                color = Volt, fontSize = 38.sp, fontWeight = FontWeight.Bold,
+                color = Volt, fontSize = 20.sp, fontWeight = FontWeight.Bold,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                modifier = Modifier.padding(end = 16.dp)
+                modifier = Modifier.wrapContentWidth().padding(end = 14.dp)
             )
-            // Song-Infos rechts
+            // Song-Infos — bekommt den gesamten restlichen Platz
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = song?.title ?: "Kein Song geladen",

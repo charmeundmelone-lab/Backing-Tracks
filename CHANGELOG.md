@@ -2,6 +2,26 @@
 
 ---
 
+## [Sprint 5.5 — Bildschirmoptimierung: Kompakte TopBar]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### TopBar-Umbau
+- App-Titel "Live-Gig-Player Pro" entfernt — spart ca. 40dp vertikale Höhe
+- Untere Tab-Leiste (64dp) vollständig entfernt
+- Tab-Navigation als zwei große Icons (30dp) in die TopBar integriert:
+  - `LibraryMusic` → Tab A (Archiv), leuchtet Volt wenn aktiv
+  - `QueueMusic` → Tab B (Playlist), leuchtet Volt wenn aktiv
+- Tab-Icons stehen linksbündig, Aktions-Icons (Import/Mixer/Lock/Menü) rechtsbündig
+- Hamburger-Menü bleibt auf Tab A beschränkt (Sicherheitsregel eingehalten)
+- `TabButton`-Composable und `TabActive`/`TabInactive`-Konstanten entfernt
+
+### Gewinn
+- 64dp Bildschirmraum freigegeben → Song-Liste zeigt mehr Einträge
+
+---
+
 ## [Sprint 5.4 — Korrekturen: Capo, Mini-Player, Gapless Loop]
 
 **Datum:** 2026-06-20

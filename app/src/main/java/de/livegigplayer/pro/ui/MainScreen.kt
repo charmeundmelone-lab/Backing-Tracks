@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -110,8 +111,6 @@ private val VoltDim     = Color(0x8CE8FF00)
 private val White       = Color(0xFFFFFFFF)
 private val Gray        = Color(0xFF777777)
 private val RedStop     = Color(0xFFDC2626)
-private val TabActive   = Volt
-private val TabInactive = Gray
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 @Composable
@@ -142,13 +141,14 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
         Column(
             modifier = Modifier.fillMaxSize().background(BgDeep).systemBarsPadding()
         ) {
-            // Top bar
+            // Top bar (enthält Tab-Navigation)
             TopBar(
+                selectedTab   = selectedTab,
+                onTabSelect   = { selectedTab = it },
                 isLocked      = isLocked,
                 onLockToggle  = { isLocked = !isLocked },
                 onMixerToggle = { vm.toggleMixer() },
                 onImport      = { importLauncher.launch(null) },
-                showHamburger = selectedTab == 0,
                 onDeleteAll   = { vm.deleteAllSongs() }
             )
 
@@ -160,28 +160,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                 }
             }
 
-            // Bottom Tab Bar (64dp)
-            Row(
-                modifier = Modifier.fillMaxWidth().height(64.dp).background(BgCard),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TabButton(
-                    icon     = Icons.Filled.Search,
-                    label    = "Archiv",
-                    active   = selectedTab == 0,
-                    modifier = Modifier.weight(1f),
-                    onClick  = { selectedTab = 0 }
-                )
-                TabButton(
-                    icon     = Icons.Filled.QueueMusic,
-                    label    = "Playlist",
-                    active   = selectedTab == 1,
-                    modifier = Modifier.weight(1f),
-                    onClick  = { selectedTab = 1 }
-                )
-            }
-
-            // Mini-Player (96dp, always visible, below tab bar)
+            // Mini-Player (96dp, always visible)
             MiniPlayer(
                 song       = currentSong,
                 nextSong   = nextSong,
@@ -230,20 +209,34 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
 // ── Top Bar ───────────────────────────────────────────────────────────────────
 @Composable
 private fun TopBar(
+    selectedTab: Int, onTabSelect: (Int) -> Unit,
     isLocked: Boolean, onLockToggle: () -> Unit,
     onMixerToggle: () -> Unit, onImport: () -> Unit,
-    showHamburger: Boolean, onDeleteAll: () -> Unit
+    onDeleteAll: () -> Unit
 ) {
-    var menuExpanded       by remember { mutableStateOf(false) }
+    var menuExpanded        by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth().background(BgDeep)
-            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Live-Gig-Player Pro", color = White, fontSize = 20.sp,
-            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        // Tab-Icons links
+        IconButton(onClick = { onTabSelect(0) }, modifier = Modifier.size(52.dp)) {
+            Icon(Icons.Filled.LibraryMusic, contentDescription = "Archiv",
+                tint = if (selectedTab == 0) Volt else Gray,
+                modifier = Modifier.size(30.dp))
+        }
+        IconButton(onClick = { onTabSelect(1) }, modifier = Modifier.size(52.dp)) {
+            Icon(Icons.Filled.QueueMusic, contentDescription = "Playlist",
+                tint = if (selectedTab == 1) Volt else Gray,
+                modifier = Modifier.size(30.dp))
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Aktions-Icons rechts
         IconButton(onClick = onImport) {
             Icon(Icons.Filled.AddCircleOutline, contentDescription = "Import",
                 tint = Gray, modifier = Modifier.size(26.dp))
@@ -260,7 +253,7 @@ private fun TopBar(
                 modifier = Modifier.size(26.dp)
             )
         }
-        if (showHamburger) {
+        if (selectedTab == 0) {
             Box {
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Filled.Menu, contentDescription = "Menü",
@@ -875,23 +868,6 @@ private fun MiniPlayer(
 
 // ── Tab Buttons ────────────────────────────────────────────────────────────────
 @Composable
-private fun TabButton(
-    icon: ImageVector, label: String, active: Boolean,
-    modifier: Modifier = Modifier, onClick: () -> Unit
-) {
-    Column(
-        modifier = modifier.height(64.dp).background(BgCard).clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(icon, contentDescription = label,
-            tint = if (active) TabActive else TabInactive,
-            modifier = Modifier.size(24.dp))
-        Spacer(modifier = Modifier.height(3.dp))
-        Text(label, color = if (active) TabActive else TabInactive, fontSize = 10.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
-    }
-}
 
 // ── Search Bar ─────────────────────────────────────────────────────────────────
 @Composable

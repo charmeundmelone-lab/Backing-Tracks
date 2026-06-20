@@ -866,9 +866,6 @@ private fun MiniPlayer(
     }
 }
 
-// ── Tab Buttons ────────────────────────────────────────────────────────────────
-@Composable
-
 // ── Search Bar ─────────────────────────────────────────────────────────────────
 @Composable
 private fun SearchBar(active: Boolean, query: String, onToggle: () -> Unit, onChange: (String) -> Unit) {

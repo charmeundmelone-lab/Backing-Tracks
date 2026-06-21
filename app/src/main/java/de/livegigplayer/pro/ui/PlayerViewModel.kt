@@ -121,11 +121,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var _prevPositionMs = 0L
 
     init {
+        // 200ms position/auto-stop poll
         viewModelScope.launch {
             while (true) {
                 val pos = engine.positionMs
                 val dur = engine.durationMs
-                engine.tickLoop()
                 if (_prevPositionMs > 1000 && pos < _prevPositionMs - 1000
                     && _currentSong.value?.autoStop == true && engine.isPlaying
                     && _loopState.value != LoopState.LOOPING) {
@@ -141,6 +141,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 delay(200L)
             }
         }
+        // 5ms crossfade monitor — only active during LOOPING
+        viewModelScope.launch {
+            while (true) {
+                if (_loopState.value == LoopState.LOOPING && engine.isPlaying) {
+                    if (engine.shouldCrossfade()) engine.performCrossfade()
+                }
+                delay(5L)
+            }
+        }
     }
 
     fun onLoopButtonPressed(currentPosMs: Long) {
@@ -150,6 +159,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 _loopEndMs.value   = null
                 _loopState.value   = LoopState.A_SET
                 _isLoopModified.value = true
+                engine.preloadLoopStart(currentPosMs)
             }
             LoopState.A_SET -> {
                 val start = _loopStartMs.value ?: return

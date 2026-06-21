@@ -977,16 +977,20 @@ private fun LoopPanel(
             if (loopState == LoopState.LOOPING && durationMs > 0L) {
                 val dur = durationMs.toFloat()
                 var sliderRange by remember(startMs, endMs) {
-                    mutableStateOf(startMs.toFloat()..endMs.toFloat())
+                    val safeEnd = endMs.coerceAtLeast(startMs + 500L).coerceAtMost(durationMs.coerceAtLeast(startMs + 500L))
+                    mutableStateOf(startMs.toFloat()..safeEnd.toFloat())
                 }
                 Spacer(Modifier.height(4.dp))
                 RangeSlider(
-                    value          = sliderRange,
-                    onValueChange  = { sliderRange = it },
+                    value         = sliderRange,
+                    onValueChange = { range ->
+                        val clamped = range.start..range.endInclusive.coerceAtLeast(range.start + 500f)
+                        sliderRange = clamped
+                    },
                     valueRange     = 0f..dur,
                     onValueChangeFinished = {
-                        val newStart = sliderRange.start.toLong()
-                        val newEnd   = sliderRange.endInclusive.toLong()
+                        val newStart = sliderRange.start.toLong().coerceIn(0L, durationMs)
+                        val newEnd   = sliderRange.endInclusive.toLong().coerceIn(newStart + 500L, durationMs)
                         if (newEnd - newStart >= 500L) onRangeChanged(newStart, newEnd)
                     },
                     colors = SliderDefaults.colors(

@@ -35,16 +35,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -65,8 +67,6 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
-private const val MIN_LOOP_MS = 100L
-
 // ── Palette ───────────────────────────────────────────────────────────────────
 private val LeBg      = Color(0xFF0A0A0A)
 private val LeCard    = Color(0xFF1A1A1A)
@@ -76,10 +76,12 @@ private val LeWhite   = Color(0xFFFFFFFF)
 private val LeGray    = Color(0xFF777777)
 private val LeGreen   = Color(0xFF00FF88)
 private val LeRed     = Color(0xFFFF4444)
-private val LeWave    = Color(0xFF3A6EA8)
-private val LeOverlay = Color(0x3300FF88)
-private val LeOnset   = Color(0x50E8FF00)
+private val LeWave    = Color(0xFF4A80C0)
+private val LeOverlay = Color(0x2200FF88)
+private val LeOnset   = Color(0x60E8FF00)
 private val LeBgTrack = Color(0xFF2A2A2A)
+
+private enum class DragTarget { NONE, START, END, LOOP }
 
 @Composable
 fun LoopEditorScreen(
@@ -93,19 +95,16 @@ fun LoopEditorScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val isAuditioning by vm.isAuditioning.collectAsState()
+    val loopStartMs   by vm.leStartMs.collectAsState()
+    val loopEndMs     by vm.leEndMs.collectAsState()
+    val firstTapMs    by vm.leFirstTapMs.collectAsState()
 
     var waveformData by remember { mutableStateOf<WaveformAnalyzer.WaveformData?>(null) }
     var isLoading    by remember { mutableStateOf(true) }
     var auditionUri  by remember { mutableStateOf("") }
 
-    var loopStartMs by remember(song.id) { mutableLongStateOf(song.loopStartMs) }
-    var loopEndMs   by remember(song.id) { mutableLongStateOf(song.loopEndMs) }
-
-    // Tap-to-create: -1 = waiting for first tap, >= 0 = first tap set (waiting for second)
-    var firstTapMs by remember { mutableLongStateOf(-1L) }
-
-    // ── Zoom / pan state ─────────────────────────────────────────────────────
-    var scale   by remember { mutableFloatStateOf(1f) }
+    // Pure UI state — zoom / pan
+    var scale   by remember { mutableFloatStateOf(5f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
 
     DisposableEffect(Unit) { onDispose { vm.stopAudition() } }
@@ -116,9 +115,11 @@ fun LoopEditorScreen(
         vm.refreshAuditionLoop(loopStartMs, loopEndMs)
     }
 
+    // Init VM state + load waveform
     LaunchedEffect(song.id) {
-        isLoading  = true
-        firstTapMs = -1L
+        isLoading = true
+        vm.initLoopEditor(song)
+
         val mode = withContext(Dispatchers.IO) { SongScanner.scan(song, context) }
         val uri = when (mode) {
             is TrackMode.Multitrack ->
@@ -127,37 +128,38 @@ fun LoopEditorScreen(
         }
         auditionUri = uri
 
-        // Cache-first: load saved waveform or analyse and save
         val cached = withContext(Dispatchers.IO) { WaveformAnalyzer.loadCache(context, song.id) }
-        val data = if (cached != null) {
-            cached
-        } else if (uri.isNotEmpty()) {
+        val data = cached ?: run {
             val analyzed = withContext(Dispatchers.IO) { WaveformAnalyzer.analyze(context, uri) }
-            if (analyzed != null) withContext(Dispatchers.IO) { WaveformAnalyzer.saveCache(context, song.id, analyzed) }
+            if (analyzed != null) withContext(Dispatchers.IO) {
+                WaveformAnalyzer.saveCache(context, song.id, analyzed)
+            }
             analyzed
-        } else null
+        }
         waveformData = data
 
         val dur = data?.durationMs ?: 0L
-        // Initial zoom: show ~12 seconds
-        if (dur > 0) {
-            scale   = (dur.toFloat() / 12_000f).coerceIn(1f, 100f)
+        if (dur > 0L) {
+            // Initial zoom: show ~12 s so transients are sharp
+            scale   = (dur.toFloat() / 12_000f).coerceIn(3f, 100f)
             offsetX = 0f
         }
-        // Default loop if none set: 8 bars
-        if (loopEndMs <= loopStartMs + MIN_LOOP_MS) {
+        // Default 8-bar loop if none is stored
+        if (loopEndMs <= loopStartMs + PlayerViewModel.LE_MIN_MS && dur > 0L) {
             val bpm = song.bpmExact.takeIf { it > 0f } ?: song.bpm.toFloat().coerceAtLeast(1f)
             val eightBarsMs = (8.0 * 4.0 * 60_000.0 / bpm).roundToLong()
-            loopEndMs = eightBarsMs.coerceAtMost(dur.coerceAtLeast(10_000L))
+            vm.leSetBoth(0L, eightBarsMs.coerceAtMost(dur), dur)
         }
         isLoading = false
     }
 
     val effectiveDuration = (waveformData?.durationMs ?: 0L).coerceAtLeast(1L)
+    val hasLoop           = loopEndMs > loopStartMs + PlayerViewModel.LE_MIN_MS
+    val tapToCreate       = !hasLoop || firstTapMs >= 0L
 
     Scaffold(
-        snackbarHost    = { SnackbarHost(snackbarHostState) },
-        containerColor  = LeBg
+        snackbarHost   = { SnackbarHost(snackbarHostState) },
+        containerColor = LeBg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -167,7 +169,7 @@ fun LoopEditorScreen(
                 .padding(innerPadding)
         ) {
 
-            // ── Header ────────────────────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────────────
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -179,24 +181,27 @@ fun LoopEditorScreen(
                     Icon(Icons.Filled.Close, contentDescription = "Abbrechen", tint = LeGray)
                 }
                 Text(
-                    text = "Loop-Editor: ${song.title}",
+                    text = "Loop: ${song.title}",
                     color = LeWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 IconButton(onClick = {
+                    if (!hasLoop) return@IconButton
                     vm.stopAudition()
-                    vm.updateLoopPoints(song, loopStartMs, loopEndMs)
+                    vm.saveLoopEditor(song)
                     scope.launch {
                         snackbarHostState.showSnackbar("Loop gespeichert", duration = SnackbarDuration.Short)
+                        delay(700)
                         onClose()
                     }
                 }) {
-                    Icon(Icons.Filled.Check, contentDescription = "Speichern", tint = LeVolt)
+                    Icon(Icons.Filled.Check, contentDescription = "Speichern",
+                        tint = if (hasLoop) LeVolt else LeGray)
                 }
             }
 
-            // ── Waveform area ─────────────────────────────────────────────────────
+            // ── Waveform ──────────────────────────────────────────────────────
             if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxWidth().weight(1f),
@@ -212,9 +217,8 @@ fun LoopEditorScreen(
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     val canvasW      = constraints.maxWidth.toFloat()
                     val canvasH      = constraints.maxHeight.toFloat()
-                    val handleZonePx = with(density) { 48.dp.toPx() }
-                    val knobR        = with(density) { 11.dp.toPx() }
-                    val stroke       = with(density) { 3.dp.toPx() }
+                    val handleZonePx = with(density) { 44.dp.toPx() }
+                    val knobR        = with(density) { 10.dp.toPx() }
                     val tapThreshPx  = with(density) { 8.dp.toPx() }
 
                     fun naturalX(ms: Long) = ms.toFloat() / effectiveDuration * canvasW
@@ -222,85 +226,133 @@ fun LoopEditorScreen(
                     fun screenToMs(x: Float) =
                         ((x - offsetX) / scale.coerceAtLeast(0.001f) / canvasW * effectiveDuration)
                             .roundToLong().coerceIn(0L, effectiveDuration)
-                    fun clampOffset(s: Float = scale, dx: Float = offsetX) =
+                    fun clampOffset(s: Float = scale, dx: Float) =
                         dx.coerceIn(canvasW * (1f - s), 0f)
                     fun snapToOnset(ms: Long): Long {
                         val threshMs = (effectiveDuration / scale / canvasW * handleZonePx)
                             .roundToLong().coerceAtLeast(50L)
-                        return waveformData?.onsets?.minByOrNull { abs(it - ms) }
+                        return waveformData?.onsets
+                            ?.minByOrNull { abs(it - ms) }
                             ?.takeIf { abs(it - ms) <= threshMs } ?: ms
                     }
 
-                    val tapToCreate = loopEndMs <= loopStartMs + MIN_LOOP_MS || firstTapMs >= 0L
+                    // Keep rememberUpdatedState for stable closure reads in pointerInput
+                    val latestTapToCreate  by rememberUpdatedState(tapToCreate)
+                    val latestLoopStartMs  by rememberUpdatedState(loopStartMs)
+                    val latestLoopEndMs    by rememberUpdatedState(loopEndMs)
 
                     Box(modifier = Modifier.fillMaxSize()) {
 
-                        // ── Canvas: waveform + overlay + handles ──────────────────
+                        // ── Canvas ────────────────────────────────────────────
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val mid = canvasH / 2f
+
                             drawRect(LeBg, size = size)
 
-                            // Waveform bars
+                            // ── Waveform: filled Path + top/bottom stroke ─────
                             val samples = waveformData?.samples
                             if (samples != null && samples.isNotEmpty()) {
-                                val n  = samples.size
-                                val bw = (canvasW / n * scale).coerceAtLeast(1f)
+                                val n = samples.size
+
+                                // Build closed shape (top L→R, bottom R→L)
+                                val closedPath = Path()
+                                val topPath    = Path()
+                                val botPath    = Path()
+
                                 for (i in samples.indices) {
                                     val sx = msToScreen(i.toLong() * effectiveDuration / n)
-                                    if (sx < -bw || sx > canvasW + bw) continue
-                                    val lineH = samples[i] * mid * 0.85f
-                                    drawLine(LeWave, Offset(sx, mid - lineH), Offset(sx, mid + lineH), bw)
+                                    val h  = samples[i] * mid * 0.80f
+                                    if (i == 0) {
+                                        closedPath.moveTo(sx, mid - h)
+                                        topPath.moveTo(sx, mid - h)
+                                        botPath.moveTo(sx, mid + h)
+                                    } else {
+                                        closedPath.lineTo(sx, mid - h)
+                                        topPath.lineTo(sx, mid - h)
+                                        botPath.lineTo(sx, mid + h)
+                                    }
                                 }
+                                for (i in samples.indices.reversed()) {
+                                    val sx = msToScreen(i.toLong() * effectiveDuration / n)
+                                    val h  = samples[i] * mid * 0.80f
+                                    closedPath.lineTo(sx, mid + h)
+                                }
+                                closedPath.close()
+
+                                drawPath(closedPath, LeWave.copy(alpha = 0.28f))
+                                drawPath(topPath, LeWave, style = Stroke(width = 1.5f))
+                                drawPath(botPath, LeWave.copy(alpha = 0.55f), style = Stroke(width = 1f))
                             } else {
                                 drawLine(LeGray, Offset(0f, mid), Offset(canvasW, mid), 1f)
-                                drawRect(Color(0x22777777), size = size)
                             }
 
-                            // Onset markers
+                            // Center line
+                            drawLine(LeGray.copy(alpha = 0.20f), Offset(0f, mid), Offset(canvasW, mid), 1f)
+
+                            // Onset flickers (top + bottom third only, not full height)
                             waveformData?.onsets?.forEach { ms ->
                                 val x = msToScreen(ms)
                                 if (x < 0f || x > canvasW) return@forEach
-                                drawLine(LeOnset, Offset(x, 0f), Offset(x, canvasH), 1.5f)
+                                drawLine(LeOnset, Offset(x, 0f), Offset(x, canvasH * 0.28f), 1.5f)
+                                drawLine(LeOnset, Offset(x, canvasH * 0.72f), Offset(x, canvasH), 1.5f)
                             }
 
-                            if (tapToCreate) {
-                                // Show pending start marker if first tap is set
-                                if (firstTapMs >= 0L) {
-                                    val ftX = msToScreen(firstTapMs)
-                                    if (ftX in 0f..canvasW) {
-                                        drawLine(LeGreen, Offset(ftX, 0f), Offset(ftX, canvasH), stroke)
-                                        drawCircle(LeGreen, knobR, Offset(ftX, mid))
-                                        drawCircle(LeBg, knobR * 0.5f, Offset(ftX, mid))
-                                    }
+                            // ── Markers ───────────────────────────────────────
+                            if (firstTapMs >= 0L) {
+                                val ftX = msToScreen(firstTapMs)
+                                drawLine(LeGreen.copy(alpha = 0.75f), Offset(ftX, 0f), Offset(ftX, canvasH), 2f)
+                                if (ftX in 0f..canvasW) {
+                                    drawCircle(LeGreen, knobR, Offset(ftX, mid))
+                                    drawCircle(LeBg, knobR * 0.45f, Offset(ftX, mid))
                                 }
-                            } else {
-                                // Loop overlay
+                            } else if (hasLoop) {
                                 val lsx = msToScreen(loopStartMs)
                                 val lex = msToScreen(loopEndMs)
-                                val ox  = lsx.coerceAtLeast(0f)
-                                val ow  = (lex - ox).coerceIn(0f, canvasW - ox)
-                                if (ow > 0f) drawRect(LeOverlay, topLeft = Offset(ox, 0f), size = Size(ow, canvasH))
+
+                                // Filled loop region
+                                val ox = lsx.coerceAtLeast(0f)
+                                val ow = (lex.coerceAtMost(canvasW) - ox).coerceAtLeast(0f)
+                                if (ow > 0f) {
+                                    drawRect(LeOverlay, topLeft = Offset(ox, 0f), size = Size(ow, canvasH))
+                                }
 
                                 // Start handle (green)
-                                val sxC = lsx.coerceIn(-knobR, canvasW + knobR)
-                                drawLine(LeGreen, Offset(sxC, 0f), Offset(sxC, canvasH), stroke)
-                                drawCircle(LeGreen, knobR, Offset(sxC, mid))
-                                drawCircle(LeBg, knobR * 0.5f, Offset(sxC, mid))
+                                drawLine(LeGreen, Offset(lsx, 0f), Offset(lsx, canvasH), 2.5f)
+                                val sKnobX = lsx.coerceIn(knobR, canvasW - knobR)
+                                if (lsx > -knobR && lsx < canvasW + knobR) {
+                                    drawCircle(LeGreen, knobR, Offset(sKnobX, mid))
+                                    drawCircle(LeBg, knobR * 0.42f, Offset(sKnobX, mid))
+                                }
+                                // Off-screen left edge pill
+                                if (lsx < 0f) {
+                                    drawRect(LeGreen.copy(alpha = 0.7f),
+                                        topLeft = Offset(0f, mid - 18f), size = Size(5f, 36f))
+                                }
 
                                 // End handle (red)
-                                val exC = lex.coerceIn(-knobR, canvasW + knobR)
-                                drawLine(LeRed, Offset(exC, 0f), Offset(exC, canvasH), stroke)
-                                drawCircle(LeRed, knobR, Offset(exC, mid))
-                                drawCircle(LeBg, knobR * 0.5f, Offset(exC, mid))
+                                drawLine(LeRed, Offset(lex, 0f), Offset(lex, canvasH), 2.5f)
+                                val eKnobX = lex.coerceIn(knobR, canvasW - knobR)
+                                if (lex > -knobR && lex < canvasW + knobR) {
+                                    drawCircle(LeRed, knobR, Offset(eKnobX, mid))
+                                    drawCircle(LeBg, knobR * 0.42f, Offset(eKnobX, mid))
+                                }
+                                // Off-screen right edge pill
+                                if (lex > canvasW) {
+                                    drawRect(LeRed.copy(alpha = 0.7f),
+                                        topLeft = Offset(canvasW - 5f, mid - 18f), size = Size(5f, 36f))
+                                }
                             }
                         }
 
-                        // ── Tap-to-create instruction overlay ─────────────────────
+                        // ── Tap-to-create hint ────────────────────────────────
                         if (tapToCreate) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = if (firstTapMs >= 0L) "Tap: Loop-Ende setzen" else "Tap: Loop-Start setzen",
-                                    color = LeVolt.copy(alpha = 0.7f),
+                                    text = if (firstTapMs >= 0L)
+                                        "2. Tap: Loop-Ende setzen"
+                                    else
+                                        "1. Tap: Loop-Start setzen",
+                                    color = LeVolt.copy(alpha = 0.72f),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center
@@ -308,25 +360,30 @@ fun LoopEditorScreen(
                             }
                         }
 
-                        // ── Gesture capture (transparent, on top) ─────────────────
+                        // ── Gesture layer ─────────────────────────────────────
                         Box(
-                            modifier = Modifier.fillMaxSize()
-                                .pointerInput(canvasW.toLong(), effectiveDuration) {
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(canvasW, effectiveDuration) {
                                     awaitEachGesture {
                                         val down   = awaitFirstDown(requireUnconsumed = false)
                                         val touchX = down.position.x
                                         val touchY = down.position.y
-                                        var maxMove   = 0f
-                                        var prevSpan  = 0f
-                                        var nPointers = 1
-                                        var didZoom   = false
 
-                                        val startX    = msToScreen(loopStartMs)
-                                        val endX      = msToScreen(loopEndMs)
-                                        val nearStart = abs(touchX - startX) < handleZonePx
-                                        val nearEnd   = abs(touchX - endX)   < handleZonePx
-                                        val inLoop    = !nearStart && !nearEnd
-                                            && touchX > startX && touchX < endX
+                                        val startScreenX = msToScreen(latestLoopStartMs)
+                                        val endScreenX   = msToScreen(latestLoopEndMs)
+                                        val dragTarget = when {
+                                            latestTapToCreate -> DragTarget.NONE
+                                            abs(touchX - startScreenX) < handleZonePx -> DragTarget.START
+                                            abs(touchX - endScreenX)   < handleZonePx -> DragTarget.END
+                                            touchX > startScreenX && touchX < endScreenX -> DragTarget.LOOP
+                                            else -> DragTarget.NONE
+                                        }
+
+                                        var prevSpan = 0f
+                                        var didZoom  = false
+                                        var didDrag  = false
+                                        var maxMove  = 0f
 
                                         do {
                                             val event   = awaitPointerEvent()
@@ -336,80 +393,77 @@ fun LoopEditorScreen(
                                                 val p1   = pressed[0]; val p2 = pressed[1]
                                                 val span = abs(p2.position.x - p1.position.x)
                                                 val cx   = (p1.position.x + p2.position.x) / 2f
-                                                if (prevSpan > 0f && nPointers >= 2) {
-                                                    val zoomChange = span / prevSpan.coerceAtLeast(1f)
-                                                    val anchorMs   = screenToMs(cx)
-                                                    val newScale   = (scale * zoomChange).coerceIn(1f, 100f)
-                                                    val natAnchorX = naturalX(anchorMs)
-                                                    val newOffsetX = cx - natAnchorX * newScale
+                                                if (prevSpan > 0f) {
+                                                    val factor    = span / prevSpan.coerceAtLeast(1f)
+                                                    val anchorMs  = screenToMs(cx)
+                                                    val newScale  = (scale * factor).coerceIn(1f, 100f)
+                                                    val newOffset = cx - naturalX(anchorMs) * newScale
                                                     scale   = newScale
-                                                    offsetX = clampOffset(newScale, newOffsetX)
+                                                    offsetX = clampOffset(newScale, newOffset)
                                                     didZoom = true
                                                 }
-                                                prevSpan  = span
-                                                nPointers = 2
+                                                prevSpan = span
                                                 pressed.forEach { it.consume() }
+                                            } else {
+                                                prevSpan = 0f
+                                                if (pressed.size == 1) {
+                                                    val p     = pressed[0]
+                                                    val dx    = p.position.x - p.previousPosition.x
+                                                    val msPpx = effectiveDuration.toFloat() /
+                                                        scale.coerceAtLeast(0.001f) / canvasW
+                                                    maxMove = maxOf(maxMove,
+                                                        abs(p.position.x - touchX),
+                                                        abs(p.position.y - touchY))
 
-                                            } else if (pressed.size == 1) {
-                                                val p      = pressed[0]
-                                                maxMove    = maxOf(maxMove,
-                                                    abs(p.position.x - touchX),
-                                                    abs(p.position.y - touchY))
-                                                nPointers  = 1
-                                                val deltaX = p.position.x - p.previousPosition.x
-                                                val msPpx  = effectiveDuration / scale / canvasW
-                                                val tapCreate = loopEndMs <= loopStartMs + MIN_LOOP_MS || firstTapMs >= 0L
-
-                                                when {
-                                                    nearStart && !didZoom && !tapCreate -> {
-                                                        val dms = (deltaX * msPpx).roundToLong()
-                                                        loopStartMs = (loopStartMs + dms)
-                                                            .coerceIn(0L, loopEndMs - MIN_LOOP_MS)
+                                                    when {
+                                                        didZoom -> {
+                                                            offsetX = clampOffset(dx = offsetX + dx)
+                                                        }
+                                                        dragTarget == DragTarget.START -> {
+                                                            vm.leSetStart(
+                                                                latestLoopStartMs + (dx * msPpx).roundToLong()
+                                                            )
+                                                            didDrag = true
+                                                        }
+                                                        dragTarget == DragTarget.END -> {
+                                                            vm.leSetEnd(
+                                                                latestLoopEndMs + (dx * msPpx).roundToLong(),
+                                                                effectiveDuration
+                                                            )
+                                                            didDrag = true
+                                                        }
+                                                        dragTarget == DragTarget.LOOP -> {
+                                                            val len = latestLoopEndMs - latestLoopStartMs
+                                                            val ns  = (latestLoopStartMs + (dx * msPpx).roundToLong())
+                                                                .coerceIn(0L, effectiveDuration - len)
+                                                            vm.leSetBoth(ns, ns + len, effectiveDuration)
+                                                            didDrag = true
+                                                        }
+                                                        else -> {
+                                                            offsetX = clampOffset(dx = offsetX + dx)
+                                                        }
                                                     }
-                                                    nearEnd && !didZoom && !tapCreate -> {
-                                                        val dms = (deltaX * msPpx).roundToLong()
-                                                        loopEndMs = (loopEndMs + dms)
-                                                            .coerceIn(loopStartMs + MIN_LOOP_MS, effectiveDuration)
-                                                    }
-                                                    inLoop && !didZoom && !tapCreate -> {
-                                                        val dms = (deltaX * msPpx).roundToLong()
-                                                        val len = loopEndMs - loopStartMs
-                                                        val newStart = (loopStartMs + dms)
-                                                            .coerceIn(0L, effectiveDuration - len)
-                                                        loopStartMs = newStart
-                                                        loopEndMs   = newStart + len
-                                                    }
-                                                    else -> {
-                                                        offsetX = clampOffset(dx = offsetX + deltaX)
-                                                    }
+                                                    p.consume()
                                                 }
-                                                p.consume()
                                             }
                                         } while (event.changes.any { it.pressed })
 
-                                        val isTap     = maxMove < tapThreshPx && !didZoom
-                                        val tapCreate = loopEndMs <= loopStartMs + MIN_LOOP_MS || firstTapMs >= 0L
-
+                                        val isTap = maxMove < tapThreshPx && !didDrag && !didZoom
                                         when {
-                                            isTap && tapCreate -> {
-                                                val tappedMs = screenToMs(touchX)
-                                                if (firstTapMs < 0L) {
-                                                    firstTapMs  = tappedMs
-                                                    loopStartMs = tappedMs
-                                                    loopEndMs   = tappedMs
-                                                } else if (tappedMs > firstTapMs + MIN_LOOP_MS) {
-                                                    loopEndMs  = tappedMs
-                                                    firstTapMs = -1L
-                                                } else {
-                                                    firstTapMs  = tappedMs
-                                                    loopStartMs = tappedMs
-                                                    loopEndMs   = tappedMs
+                                            isTap && latestTapToCreate -> {
+                                                vm.leTapCanvas(screenToMs(touchX))
+                                            }
+                                            didDrag && !didZoom -> {
+                                                // Snap to onset on drag release
+                                                when (dragTarget) {
+                                                    DragTarget.START ->
+                                                        vm.leSetStart(snapToOnset(latestLoopStartMs))
+                                                    DragTarget.END ->
+                                                        vm.leSetEnd(snapToOnset(latestLoopEndMs), effectiveDuration)
+                                                    else -> {}
                                                 }
                                             }
-                                            !isTap && !didZoom && !tapCreate -> {
-                                                if (nearStart) loopStartMs = snapToOnset(loopStartMs)
-                                                if (nearEnd)   loopEndMs   = snapToOnset(loopEndMs)
-                                            }
+                                            else -> {}
                                         }
                                     }
                                 }
@@ -418,15 +472,18 @@ fun LoopEditorScreen(
                 }
             }
 
-            // ── Vorhör-Player ─────────────────────────────────────────────────────
+            // ── Vorhör Player ─────────────────────────────────────────────────
             Box(
-                modifier = Modifier.fillMaxWidth().background(LeBg).padding(vertical = 6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(LeBg)
+                    .padding(vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 val canAudition = !isLoading && auditionUri.isNotEmpty()
                 Text(
-                    text      = if (isAuditioning) "◼  STOP" else "▶  VORHÖR",
-                    color     = when {
+                    text = if (isAuditioning) "◼  STOP" else "▶  VORHÖR",
+                    color = when {
                         !canAudition  -> LeGray
                         isAuditioning -> LeRed
                         else          -> LeGreen
@@ -434,7 +491,7 @@ fun LoopEditorScreen(
                     fontSize   = 13.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign  = TextAlign.Center,
-                    modifier = Modifier
+                    modifier   = Modifier
                         .background(
                             when {
                                 !canAudition  -> Color(0x22777777)
@@ -452,13 +509,17 @@ fun LoopEditorScreen(
                 )
             }
 
-            // ── Zeit-Anzeige + Fine-Tune ──────────────────────────────────────────
+            // ── Zeit-Anzeige + Fine-Tune Buttons ─────────────────────────────
             Column(
-                modifier = Modifier.fillMaxWidth().background(LeCard)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(LeCard)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     TimeLabel("START", loopStartMs, LeGreen)
@@ -469,19 +530,11 @@ fun LoopEditorScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    FineTune("← Start", LeGreen, Modifier.weight(1f)) {
-                        loopStartMs = (loopStartMs - 10L).coerceAtLeast(0L)
-                    }
-                    FineTune("Start →", LeGreen, Modifier.weight(1f)) {
-                        loopStartMs = (loopStartMs + 10L).coerceAtMost(loopEndMs - MIN_LOOP_MS)
-                    }
+                    FineTune("← Start", LeGreen, Modifier.weight(1f)) { vm.leNudgeStart(-10L) }
+                    FineTune("Start →", LeGreen, Modifier.weight(1f)) { vm.leNudgeStart(+10L) }
                     Spacer(Modifier.width(4.dp))
-                    FineTune("← Ende", LeRed, Modifier.weight(1f)) {
-                        loopEndMs = (loopEndMs - 10L).coerceAtLeast(loopStartMs + MIN_LOOP_MS)
-                    }
-                    FineTune("Ende →", LeRed, Modifier.weight(1f)) {
-                        loopEndMs = (loopEndMs + 10L).coerceAtMost(effectiveDuration)
-                    }
+                    FineTune("← Ende",  LeRed,   Modifier.weight(1f)) { vm.leNudgeEnd(-10L, effectiveDuration) }
+                    FineTune("Ende →",  LeRed,   Modifier.weight(1f)) { vm.leNudgeEnd(+10L, effectiveDuration) }
                 }
             }
         }
@@ -519,7 +572,7 @@ private fun FineTune(label: String, color: Color, modifier: Modifier, onClick: (
 
 private fun fmtMs(ms: Long): String {
     val m   = ms / 60_000L
-    val s   = (ms % 60_000L) / 1_000L
+    val s   = ms % 60_000L / 1_000L
     val ms3 = ms % 1_000L
     return "%d:%02d.%03d".format(m, s, ms3)
 }

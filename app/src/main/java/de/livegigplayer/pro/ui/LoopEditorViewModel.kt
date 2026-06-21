@@ -70,7 +70,7 @@ class LoopEditorViewModel(
             }
             val raw = cached ?: run {
                 val analyzed = withContext(Dispatchers.IO) {
-                    WaveformAnalyzer.analyze(getApplication(), uri)
+                    WaveformAnalyzer.analyze(getApplication(), uri, maxSamples = RAW_SAMPLES)
                 }
                 if (analyzed != null) withContext(Dispatchers.IO) {
                     WaveformAnalyzer.saveCache(getApplication(), song.id, analyzed)
@@ -195,7 +195,8 @@ class LoopEditorViewModel(
 
     companion object {
         const val MIN_LOOP_MS    = 100L
-        private const val TARGET_SAMPLES = 1200
+        private const val RAW_SAMPLES    = 1000  // max points from analyzer (IO thread)
+        private const val TARGET_SAMPLES = 800   // max points given to Canvas (always downsampled)
 
         fun factory(song: Song): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

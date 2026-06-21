@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -762,9 +763,9 @@ private fun StageSongRow(index: Int, song: Song, selected: Boolean, onClick: () 
 }
 
 // ── Global Player ──────────────────────────────────────────────────────────────
-@Composable
 private val LoopOrange = Color(0xFFFF8C00)
 
+@Composable
 private fun GlobalPlayer(
     song: Song?, nextSong: Song?,
     isPlaying: Boolean, loopState: LoopState,

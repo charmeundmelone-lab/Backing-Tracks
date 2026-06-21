@@ -2,6 +2,36 @@
 
 ---
 
+## [Sprint 5.19] — 2026-06-21 — Zero-Latency Loop-Trigger & Audio-Race-Fix
+
+### Fix 1: Zero-Latency Loop-Button (MainScreen.kt)
+
+**Problem:** `Modifier.clickable` feuert erst beim *Pointer Up* → bis zu ~100ms
+Latenz zwischen Fingerberührung und Loop-Punkt-Setzung.
+
+**Lösung:** `PlayerBtn` erhält Parameter `pressDown: Boolean`. Bei `true` ersetzt
+`Modifier.pointerInput { detectTapGestures(onPress = { onClick() }) }` das
+Standard-`clickable` — Event feuert exakt bei *Pointer Down*, in Millisekunde 0.
+Angewendet auf den LOOP-Button (SET A / SET B): `pressDown = true`.
+
+### Fix 2: Audio-Race-Condition bei Loop-Punkt-Anpassung (AudioEngine.kt)
+
+**Problem:** Slider/Nudge-Anpassungen riefen `activateLoopDirect()` auf dem
+aktiv spielenden Player auf → `seekTo()` unterbricht Wiedergabe → hörbarer
+Click/Glitch.
+
+**Lösung:** Neue Methode `updateLoopPoints(startMs, endMs)`:
+1. Aktualisiert `loopStartMs`/`loopEndMs` in-place
+2. Kein `seekTo()` auf dem aktiv spielenden Player (A oder B)
+3. Idle-Player wird per `seekTo(startMs)` auf neuen Start gesetzt (silent)
+4. Edge-Case (pos >= newEnd): 5ms-Crossfade-Monitor erkennt
+   `shouldCrossfade() == true` beim nächsten Tick → sofortiger Ping-Pong-Swap
+
+`setLoopRange()`, `nudgeLoopStart()`, `nudgeLoopEnd()` in PlayerViewModel
+nutzen jetzt `updateLoopPoints()` statt `activateLoopDirect()`.
+
+---
+
 ## [Sprint 5.11 — Loop-Editor UX/Performance-Update]
 
 **Datum:** 2026-06-21

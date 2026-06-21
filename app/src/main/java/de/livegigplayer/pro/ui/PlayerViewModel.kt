@@ -187,7 +187,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _loopStartMs.value = startMs
         _loopEndMs.value   = endMs
         if (_loopState.value == LoopState.LOOPING) {
-            engine.activateLoopDirect(startMs, endMs)
+            engine.updateLoopPoints(startMs, endMs)   // kein Seek auf active player
         }
         updateIsLoopModified()
     }
@@ -197,7 +197,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val end   = _loopEndMs.value   ?: return
         val new   = (start + deltaMs).coerceIn(0L, end - MIN_LOOP_DURATION_MS)
         _loopStartMs.value = new
-        engine.activateLoopDirect(new, end)
+        engine.updateLoopPoints(new, end)   // kein Seek auf active player
         updateIsLoopModified()
     }
 
@@ -207,7 +207,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val dur   = engine.durationMs.let { if (it > 0) it else end + 30_000L }
         val new   = (end + deltaMs).coerceIn(start + MIN_LOOP_DURATION_MS, dur)
         _loopEndMs.value = new
-        engine.activateLoopDirect(start, new)
+        engine.updateLoopPoints(start, new)   // kein Seek auf active player
         updateIsLoopModified()
     }
 

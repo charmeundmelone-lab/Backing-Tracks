@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -843,25 +844,26 @@ private fun GlobalPlayer(
                 onClick  = onStop
             )
             PlayerBtn(
-                modifier = Modifier.weight(1f),
-                icon     = Icons.Filled.Repeat,
-                label    = when (loopState) {
+                modifier   = Modifier.weight(1f),
+                icon       = Icons.Filled.Repeat,
+                label      = when (loopState) {
                     LoopState.INACTIVE -> "LOOP"
                     LoopState.A_SET    -> "SET B"
                     LoopState.LOOPING  -> "LOOP"
                 },
-                tint     = when (loopState) {
+                tint       = when (loopState) {
                     LoopState.INACTIVE -> Gray
                     LoopState.A_SET    -> LoopOrange
                     LoopState.LOOPING  -> Volt
                 },
-                bgColor  = when (loopState) {
+                bgColor    = when (loopState) {
                     LoopState.INACTIVE -> BgCard
                     LoopState.A_SET    -> Color(0xFF1A0E00)
                     LoopState.LOOPING  -> Color(0xFF1A1A00)
                 },
-                enabled  = song != null,
-                onClick  = onToggleLoop
+                enabled    = song != null,
+                pressDown  = true,
+                onClick    = onToggleLoop
             )
         }
     }
@@ -870,11 +872,19 @@ private fun GlobalPlayer(
 @Composable
 private fun PlayerBtn(
     modifier: Modifier, icon: ImageVector, label: String,
-    tint: Color, bgColor: Color, enabled: Boolean = true, onClick: () -> Unit
+    tint: Color, bgColor: Color, enabled: Boolean = true,
+    pressDown: Boolean = false,
+    onClick: () -> Unit
 ) {
+    val touchModifier = when {
+        !enabled    -> Modifier
+        pressDown   -> Modifier.pointerInput(onClick) {
+            detectTapGestures(onPress = { onClick() })
+        }
+        else        -> Modifier.clickable(onClick = onClick)
+    }
     Column(
-        modifier = modifier.fillMaxHeight().background(bgColor)
-            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        modifier = modifier.fillMaxHeight().background(bgColor).then(touchModifier),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

@@ -134,6 +134,16 @@ class AudioEngine(private val context: Context) {
 
     fun shouldCrossfade(): Boolean = loopActive && isPlaying && positionMs >= loopEndMs
 
+    // Aktualisiert Loop-Punkte OHNE den aktiven Player zu unterbrechen.
+    // Nur der Idle-Player wird heimlich auf den neuen Start-Punkt gesetzt.
+    // Edge-Case (pos >= newEnd): shouldCrossfade() feuert beim nächsten 5ms-Tick automatisch.
+    fun updateLoopPoints(startMs: Long, endMs: Long) {
+        loopStartMs = startMs
+        loopEndMs   = endMs
+        idle.forEach { it.seekTo(startMs) }
+        Log.d(TAG, "updateLoopPoints: start=${startMs}ms end=${endMs}ms (pos=${positionMs}ms)")
+    }
+
     suspend fun performCrossfade() {
         if (!loopActive) return
         idle.forEach { it.play() }

@@ -164,7 +164,7 @@ fun LoopEditorScreen(song: Song, onClose: () -> Unit) {
                 }
                 wfState.errorMsg != null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Text(
-                        text = wfState.errorMsg,
+                        text = wfState.errorMsg!!,
                         color = LeRed, fontSize = 13.sp, textAlign = TextAlign.Center,
                         modifier = Modifier.padding(24.dp)
                     )

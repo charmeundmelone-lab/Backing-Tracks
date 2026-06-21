@@ -220,6 +220,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _isLoopModified.value = false
     }
 
+    fun clearLoop() {
+        val song = _currentSong.value
+        // Deaktiviert Loop-Engine ohne Playback zu unterbrechen
+        engine.deactivateLoop()
+        _loopState.value      = LoopState.INACTIVE
+        _loopStartMs.value    = null
+        _loopEndMs.value      = null
+        _isLoopModified.value = false
+        // DB async: Loop-Felder auf 0 zurücksetzen
+        if (song != null) {
+            viewModelScope.launch { dao.updateLoopPoints(song.id, 0L, 0L) }
+            _currentSong.value = song.copy(loopStartMs = 0L, loopEndMs = 0L)
+        }
+    }
+
     private fun updateIsLoopModified() {
         val song = _currentSong.value
         _isLoopModified.value = _loopStartMs.value != song?.loopStartMs ||

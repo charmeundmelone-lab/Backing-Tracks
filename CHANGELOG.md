@@ -2,6 +2,31 @@
 
 ---
 
+## [Sprint 5.20] — 2026-06-21 — Feature: Clear Loop Button
+
+### Feature: Clear Loop Button (reset state, Room DB, cancel active looping)
+
+**UI (MainScreen.kt):**
+- Neuer `IconButton` (Icons.Filled.Delete, Rot) im Nudge-Row des LoopPanels,
+  direkt links neben dem Speichern-Button — beide in einem `Row` gruppiert
+- Immer sichtbar solange loopState != INACTIVE (d.h. bei A_SET und LOOPING)
+- Feuert `onClearLoop` → `vm.clearLoop()`
+
+**State (PlayerViewModel.kt):**
+- Neue Funktion `clearLoop()` nach UDF-Architektur:
+  - `engine.deactivateLoop()` → stoppt Loop-Engine ohne Playback zu unterbrechen
+  - `_loopState`, `_loopStartMs`, `_loopEndMs`, `_isLoopModified` sofort auf Initialwerte
+  - Async-DB-Update via `dao.updateLoopPoints(song.id, 0L, 0L)`
+  - `_currentSong` wird mit `loopStartMs = 0L, loopEndMs = 0L` gepatcht
+
+**AudioEngine-Synchronisation:**
+- `deactivateLoop()` setzt `loopActive = false`, pausiert Idle-Player — kein seekTo
+  auf dem aktiv spielenden Player → Playback läuft nahtlos weiter
+- Da wir Polling statt PlayerMessages nutzen, werden ausstehende Loop-Checks
+  sofort inaktiv (`shouldCrossfade()` gibt `false` zurück wenn `loopActive = false`)
+
+---
+
 ## [Sprint 5.19] — 2026-06-21 — Zero-Latency Loop-Trigger & Audio-Race-Fix
 
 ### Fix 1: Zero-Latency Loop-Button (MainScreen.kt)

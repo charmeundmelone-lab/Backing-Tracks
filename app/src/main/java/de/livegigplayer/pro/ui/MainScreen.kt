@@ -194,7 +194,8 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                 onNudgeStart   = { vm.nudgeLoopStart(it) },
                 onNudgeEnd     = { vm.nudgeLoopEnd(it) },
                 onRangeChanged = { s, e -> vm.setLoopRange(s, e) },
-                onSave         = { vm.saveLoopPoints() }
+                onSave         = { vm.saveLoopPoints() },
+                onClearLoop    = { vm.clearLoop() }
             )
         }
 
@@ -942,7 +943,8 @@ private fun LoopPanel(
     onNudgeStart: (Long) -> Unit,
     onNudgeEnd: (Long) -> Unit,
     onRangeChanged: (Long, Long) -> Unit,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    onClearLoop: () -> Unit
 ) {
     AnimatedVisibility(
         visible = loopState != LoopState.INACTIVE,
@@ -1024,19 +1026,32 @@ private fun LoopPanel(
                         modifier = Modifier.size(48.dp)
                     ) { Text("A+", color = Volt, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.weight(1f))
-                    // Save button — nur sichtbar wenn geändert
-                    if (isLoopModified) {
+                    // Clear-Loop-Button — immer sichtbar solange Loop aktiv
+                    Row {
                         IconButton(
-                            onClick  = onSave,
+                            onClick  = onClearLoop,
                             modifier = Modifier
                                 .size(48.dp)
-                                .background(Color(0xFF0A2A0A), MaterialTheme.shapes.small)
+                                .background(Color(0xFF2A0A0A), MaterialTheme.shapes.small)
                         ) {
-                            Icon(Icons.Filled.Check, contentDescription = "Speichern",
-                                tint = Volt, modifier = Modifier.size(22.dp))
+                            Icon(Icons.Filled.Delete, contentDescription = "Loop verwerfen",
+                                tint = RedStop, modifier = Modifier.size(22.dp))
                         }
-                        Spacer(Modifier.width(4.dp))
+                        // Save button — nur sichtbar wenn geändert
+                        if (isLoopModified) {
+                            Spacer(Modifier.width(4.dp))
+                            IconButton(
+                                onClick  = onSave,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(Color(0xFF0A2A0A), MaterialTheme.shapes.small)
+                            ) {
+                                Icon(Icons.Filled.Check, contentDescription = "Speichern",
+                                    tint = Volt, modifier = Modifier.size(22.dp))
+                            }
+                        }
                     }
+                    Spacer(Modifier.width(4.dp))
                     IconButton(
                         onClick  = { onNudgeEnd(-10L) },
                         modifier = Modifier.size(48.dp)

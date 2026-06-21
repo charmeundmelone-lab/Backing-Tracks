@@ -169,7 +169,7 @@ fun LoopEditorScreen(song: Song, onClose: () -> Unit) {
                         modifier = Modifier.padding(24.dp)
                     )
                 }
-                else -> {
+                else ->
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     val canvasW      = constraints.maxWidth.toFloat()
                     val canvasH      = constraints.maxHeight.toFloat()

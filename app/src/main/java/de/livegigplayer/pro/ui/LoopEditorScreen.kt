@@ -154,15 +154,22 @@ fun LoopEditorScreen(song: Song, onClose: () -> Unit) {
             }
 
             // ── Waveform ──────────────────────────────────────────────────────
-            if (wfState.isLoading) {
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            when {
+                wfState.isLoading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = LeVolt)
                         Spacer(Modifier.height(12.dp))
                         Text("Analysiere Wellenform…", color = LeGray, fontSize = 13.sp)
                     }
                 }
-            } else {
+                wfState.errorMsg != null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = wfState.errorMsg,
+                        color = LeRed, fontSize = 13.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(24.dp)
+                    )
+                }
+                else -> {
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     val canvasW      = constraints.maxWidth.toFloat()
                     val canvasH      = constraints.maxHeight.toFloat()
@@ -384,7 +391,7 @@ fun LoopEditorScreen(song: Song, onClose: () -> Unit) {
                         }
                     }
                 }
-            }
+            } // end when
 
             // ── Vorhör — komplett isoliert von Canvas-Gestenlogik ─────────────
             val canAudition = !wfState.isLoading && wfState.auditionUri.isNotEmpty()

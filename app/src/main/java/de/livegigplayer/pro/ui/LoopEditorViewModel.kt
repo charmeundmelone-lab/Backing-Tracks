@@ -1,6 +1,7 @@
 package de.livegigplayer.pro.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -32,7 +33,8 @@ class LoopEditorViewModel(
         val samples: FloatArray? = null,   // downsampled max-envelope, normalized 0..1
         val onsets: LongArray?   = null,
         val durationMs: Long     = 0L,
-        val auditionUri: String  = ""
+        val auditionUri: String  = "",
+        val errorMsg: String?    = null    // != null → Analyse fehlgeschlagen, Grund anzeigen
     )
 
     private val _waveformState = MutableStateFlow(WaveformUiState())
@@ -56,48 +58,78 @@ class LoopEditorViewModel(
         viewModelScope.launch {
             _waveformState.value = WaveformUiState(isLoading = true)
 
-            // Determine URI — IO thread
-            val mode = withContext(Dispatchers.IO) { SongScanner.scan(song, getApplication()) }
-            val uri  = when (mode) {
-                is TrackMode.Multitrack ->
-                    mode.click ?: mode.drums ?: mode.bass ?: mode.keys ?: mode.vocals ?: mode.cue ?: ""
-                is TrackMode.Legacy -> mode.filePath
-            }
-
-            // Cache-first waveform load — IO thread
-            val cached = withContext(Dispatchers.IO) {
-                WaveformAnalyzer.loadCache(getApplication(), song.id)
-            }
-            val raw = cached ?: run {
-                val analyzed = withContext(Dispatchers.IO) {
-                    WaveformAnalyzer.analyze(getApplication(), uri, maxSamples = RAW_SAMPLES)
+            // ALLES in try/catch: eine ungefangene Exception würde sonst die
+            // Coroutine killen und isLoading=true für immer stehen lassen → Dauerspinner.
+            try {
+                // Determine URI — IO thread
+                val mode = withContext(Dispatchers.IO) { SongScanner.scan(song, getApplication()) }
+                val uri  = when (mode) {
+                    is TrackMode.Multitrack ->
+                        mode.click ?: mode.drums ?: mode.bass ?: mode.keys ?: mode.vocals ?: mode.cue ?: ""
+                    is TrackMode.Legacy -> mode.filePath
                 }
-                if (analyzed != null) withContext(Dispatchers.IO) {
-                    WaveformAnalyzer.saveCache(getApplication(), song.id, analyzed)
+                Log.d(TAG, "loadWaveform song=${song.id} uri='$uri'")
+
+                if (uri.isEmpty()) {
+                    _waveformState.value = WaveformUiState(
+                        isLoading = false,
+                        errorMsg  = "Keine Audiodatei gefunden (SAF-Pfad nicht auflösbar)."
+                    )
+                    return@launch
                 }
-                analyzed
-            }
 
-            // Downsampling — CPU-bound, Default thread
-            val downsampled = raw?.let { d ->
-                withContext(Dispatchers.Default) { downsample(d.samples, TARGET_SAMPLES) }
-            }
+                // Cache-first waveform load — IO thread
+                val cached = withContext(Dispatchers.IO) {
+                    WaveformAnalyzer.loadCache(getApplication(), song.id)
+                }
+                val raw = cached ?: run {
+                    val analyzed = withContext(Dispatchers.IO) {
+                        WaveformAnalyzer.analyze(getApplication(), uri, maxSamples = RAW_SAMPLES)
+                    }
+                    if (analyzed != null) withContext(Dispatchers.IO) {
+                        WaveformAnalyzer.saveCache(getApplication(), song.id, analyzed)
+                    }
+                    analyzed
+                }
 
-            val dur = raw?.durationMs ?: 0L
-            _waveformState.value = WaveformUiState(
-                isLoading   = false,
-                samples     = downsampled,
-                onsets      = raw?.onsets,
-                durationMs  = dur,
-                auditionUri = uri
-            )
+                if (raw == null) {
+                    _waveformState.value = WaveformUiState(
+                        isLoading   = false,
+                        durationMs  = 0L,
+                        auditionUri = uri,
+                        errorMsg    = "Wellenform-Analyse fehlgeschlagen (kein gültiges WAV?)."
+                    )
+                    return@launch
+                }
 
-            // Set default 8-bar loop if nothing stored
-            if (_endMs.value <= _startMs.value + MIN_LOOP_MS && dur > 0L) {
-                val bpm = song.bpmExact.takeIf { it > 0f }
-                    ?: song.bpm.toFloat().coerceAtLeast(1f)
-                val eightBarsMs = (8.0 * 4.0 * 60_000.0 / bpm).roundToLong()
-                setLoopBoth(0L, eightBarsMs.coerceAtMost(dur), dur)
+                // Downsampling — CPU-bound, Default thread (Canvas bekommt max. TARGET_SAMPLES)
+                val downsampled = withContext(Dispatchers.Default) {
+                    downsample(raw.samples, TARGET_SAMPLES)
+                }
+                Log.d(TAG, "loadWaveform done: raw=${raw.samples.size} → ds=${downsampled.size} dur=${raw.durationMs}")
+
+                val dur = raw.durationMs
+                _waveformState.value = WaveformUiState(
+                    isLoading   = false,
+                    samples     = downsampled,
+                    onsets      = raw.onsets,
+                    durationMs  = dur,
+                    auditionUri = uri
+                )
+
+                // Set default 8-bar loop if nothing stored
+                if (_endMs.value <= _startMs.value + MIN_LOOP_MS && dur > 0L) {
+                    val bpm = song.bpmExact.takeIf { it > 0f }
+                        ?: song.bpm.toFloat().coerceAtLeast(1f)
+                    val eightBarsMs = (8.0 * 4.0 * 60_000.0 / bpm).roundToLong()
+                    setLoopBoth(0L, eightBarsMs.coerceAtMost(dur), dur)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "loadWaveform crashed for song ${song.id}", e)
+                _waveformState.value = WaveformUiState(
+                    isLoading = false,
+                    errorMsg  = "Fehler beim Laden: ${e.message ?: e.javaClass.simpleName}"
+                )
             }
         }
     }
@@ -194,7 +226,8 @@ class LoopEditorViewModel(
     override fun onCleared() { super.onCleared(); auditionPlayer.release() }
 
     companion object {
-        const val MIN_LOOP_MS    = 100L
+        private const val TAG            = "LoopEditorVM"
+        const val MIN_LOOP_MS            = 100L
         private const val RAW_SAMPLES    = 1000  // max points from analyzer (IO thread)
         private const val TARGET_SAMPLES = 800   // max points given to Canvas (always downsampled)
 

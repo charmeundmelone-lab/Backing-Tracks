@@ -37,6 +37,9 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE audioFilePath = :path LIMIT 1")
     suspend fun findByPath(path: String): Song?
 
+    @Query("UPDATE songs SET loopStartMs=:startMs, loopEndMs=:endMs WHERE id=:id")
+    suspend fun updateLoopPoints(id: Long, startMs: Long, endMs: Long)
+
     @Query("DELETE FROM songs")
     suspend fun deleteAll()
 }

@@ -102,6 +102,28 @@ class AudioEngine(private val context: Context) {
         Log.d(TAG, "Loop aktiviert: start=${loopStartMs}ms end=${loopEndMs}ms ($bars Takte @ ${bpm}BPM)")
     }
 
+    fun activateLoopDirect(startMs: Long, endMs: Long) {
+        loopStartMs = startMs
+        loopEndMs   = endMs
+        originalDurationMs = tracks.firstOrNull()?.player?.duration?.takeIf { it > 0 } ?: 0L
+        loopActive = true
+        tracks.forEach { track ->
+            val clipped = MediaItem.Builder()
+                .setUri(Uri.parse(track.uri))
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(loopStartMs)
+                        .setEndPositionMs(loopEndMs)
+                        .build()
+                ).build()
+            track.player.setMediaItems(List(64) { clipped })
+            track.player.repeatMode = Player.REPEAT_MODE_ALL
+            track.player.prepare()
+            if (isPlaying) track.player.play()
+        }
+        Log.d(TAG, "Loop (direkt): start=${startMs}ms end=${endMs}ms")
+    }
+
     fun deactivateLoop() {
         val resumeAt = loopStartMs + (tracks.firstOrNull()?.player?.currentPosition ?: 0L)
         loopActive = false

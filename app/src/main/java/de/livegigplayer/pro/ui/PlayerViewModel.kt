@@ -139,11 +139,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (_loopActive.value) {
             engine.deactivateLoop(); _loopActive.value = false
         } else {
-            val bpm = _currentSong.value?.bpmExact?.takeIf { it > 0f }
-                ?: _currentSong.value?.bpm?.toFloat() ?: 120f
-            engine.activateLoop(bpm)
+            val song = _currentSong.value
+            if (song != null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
+                engine.activateLoopDirect(song.loopStartMs, song.loopEndMs)
+            } else {
+                val bpm = song?.bpmExact?.takeIf { it > 0f } ?: song?.bpm?.toFloat() ?: 120f
+                engine.activateLoop(bpm)
+            }
             _loopActive.value = true
         }
+    }
+
+    fun updateLoopPoints(song: Song, startMs: Long, endMs: Long) {
+        val updated = song.copy(loopStartMs = startMs, loopEndMs = endMs)
+        viewModelScope.launch { dao.updateLoopPoints(song.id, startMs, endMs) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = updated
     }
 
     fun updateAutoStop(song: Song, enabled: Boolean) {

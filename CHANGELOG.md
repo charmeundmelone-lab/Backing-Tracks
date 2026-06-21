@@ -2,6 +2,42 @@
 
 ---
 
+## [Sprint 5.8 — Visueller Loop-Editor (Koala-Style)]
+
+**Datum:** 2026-06-21
+**Branch:** main
+
+### WaveformAnalyzer (neu)
+- Liest WAV-Dateien über SAF-ContentResolver (RIFF-Chunk-Iteration: `fmt ` + `data`)
+- Downsampling auf 50ms-Fenster → normalisiertes RMS-Array für Canvas
+- Onset-Erkennung: Energie-Anstieg >2,5× geglättetes Baseline → magnetische Snap-Punkte
+- Multitrack: bevorzugt Click- bzw. Drums-Spur für Analyse
+
+### LoopEditorScreen (neu)
+- Vollbild-Overlay: Canvas-Wellenform (RMS-Balken), Onset-Marker (Volt), Koala-Overlay (halbtransparent grün)
+- Start-Handle (grün) + End-Handle (rot): Drag-to-move; snap-to-nearest-onset beim Loslassen
+- Pinch-to-Zoom (zwei Finger): Zoom 1×–200×, Anker-Punkt bleibt bei Centroid
+- Pan: ein Finger scrollt Ansicht
+- Fein-Tuning: `← Start` / `Start →` / `← Ende` / `Ende →` — je 1ms
+- Zeitanzeige: START / LÄNGE / ENDE in Monospace-Format
+
+### Datenbank v8 → v9
+- `Song.kt`: `loopStartMs: Long = 0L`, `loopEndMs: Long = 0L`
+- `MIGRATION_8_9`: zwei neue Spalten (ALTER TABLE)
+- `SongDao`: `updateLoopPoints(id, startMs, endMs)`
+
+### AudioEngine — `activateLoopDirect(startMs, endMs)`
+- DB-Werte direkt einsetzen, kein BPM-Berechnen
+- Identische gapless-Technik: 64× ClippingConfiguration + REPEAT_MODE_ALL
+- Alle Stems (Multitrack) synchron
+
+### PlayerViewModel + MainScreen
+- `toggleLoop()` nutzt `activateLoopDirect()` wenn DB-Punkte vorhanden, sonst BPM-Snap
+- `updateLoopPoints()` persistiert Punkte in DB
+- SongEditorSheet: Button "Loop visuell bearbeiten" öffnet LoopEditorScreen als Vollbild-Overlay
+
+---
+
 ## [Sprint 5.7 — Player Layout: Countdown links, Songs rechts]
 
 **Datum:** 2026-06-20

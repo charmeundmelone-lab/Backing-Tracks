@@ -129,8 +129,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
     val nextSong      by vm.nextSong.collectAsState()
     val loopActive    by vm.loopActive.collectAsState()
 
-    var selectedTab   by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
-    var isLocked      by remember { mutableStateOf(false) }
+    var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
+    var isLocked         by remember { mutableStateOf(false) }
+    var loopEditorSong   by remember { mutableStateOf<Song?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -157,7 +158,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             // Tab content
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
-                    0 -> ArchivTab(vm = vm, isLocked = isLocked)
+                    0 -> ArchivTab(vm = vm, isLocked = isLocked, onOpenLoopEditor = { loopEditorSong = it })
                     1 -> PlaylistTab(vm = vm, isLocked = isLocked)
                 }
             }
@@ -188,6 +189,20 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             onStop         = { vm.stopPlayback() },
             onClose        = { vm.closeMixer() }
         )
+
+        // Loop editor — Vollbild-Overlay
+        loopEditorSong?.let { song ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                LoopEditorScreen(
+                    song      = song,
+                    onSave    = { startMs, endMs ->
+                        vm.updateLoopPoints(song, startMs, endMs)
+                        loopEditorSong = null
+                    },
+                    onDismiss = { loopEditorSong = null }
+                )
+            }
+        }
 
         // Scan overlay
         if (isScanning) {
@@ -304,7 +319,7 @@ private fun TopBar(
 // ── Tab A: Archiv ─────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
+private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean, onOpenLoopEditor: (Song) -> Unit) {
     val context       = LocalContext.current
     val songs         by vm.filteredSongs.collectAsState()
     val currentSong   by vm.currentSong.collectAsState()
@@ -386,6 +401,7 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
                 onAutoStopChange = { enabled -> vm.updateAutoStop(editSheet!!, enabled) },
                 onCapoChange     = { delta -> vm.updateCapo(editSheet!!, delta) },
                 onNavigate       = { newSong -> editSheet = newSong },
+                onOpenLoopEditor = { scope.launch { sheetState.hide() }; onOpenLoopEditor(editSheet!!) },
                 onDismiss        = { scope.launch { sheetState.hide(); editSheet = null } }
             )
         }
@@ -529,6 +545,7 @@ private fun SongEditorSheet(
     onAutoStopChange: (Boolean) -> Unit,
     onCapoChange: (Int) -> Unit,
     onNavigate: (Song) -> Unit,
+    onOpenLoopEditor: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var title    by remember(song.id) { mutableStateOf(song.title) }
@@ -605,7 +622,21 @@ private fun SongEditorSheet(
                 )
             )
         }
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+        // Loop-Editor öffnen
+        Button(
+            onClick  = onOpenLoopEditor,
+            modifier = Modifier.fillMaxWidth(),
+            colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2A1A))
+        ) {
+            Text(
+                text  = "Loop visuell bearbeiten",
+                color = Volt,
+                fontWeight = FontWeight.Bold,
+                fontSize   = 14.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onDismiss, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = BgTrack)) {

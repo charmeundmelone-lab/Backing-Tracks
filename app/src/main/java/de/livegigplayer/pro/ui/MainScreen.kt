@@ -5,6 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -128,6 +132,10 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
     val scanProgress  by vm.scanProgress.collectAsState()
     val nextSong      by vm.nextSong.collectAsState()
     val loopActive    by vm.loopActive.collectAsState()
+    val loopState     by vm.loopState.collectAsState()
+    val loopStartMs   by vm.loopStartMs.collectAsState()
+    val loopEndMs     by vm.loopEndMs.collectAsState()
+    val isLoopModified by vm.isLoopModified.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
     var isLocked         by remember { mutableStateOf(false) }
@@ -167,12 +175,24 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                 song          = currentSong,
                 nextSong      = nextSong,
                 isPlaying     = isPlaying,
-                loopActive    = loopActive,
+                loopState     = loopState,
                 positionMs    = positionMs,
                 durationMs    = durationMs,
                 onPlayPause   = { vm.togglePlayPause() },
                 onStop        = { vm.stopPlayback() },
-                onToggleLoop  = { vm.toggleLoop() }
+                onToggleLoop  = { vm.onLoopButtonPressed(positionMs) }
+            )
+            // A/B Loop Panel — erscheint sobald A oder Loop gesetzt
+            LoopPanel(
+                loopState      = loopState,
+                loopStartMs    = loopStartMs,
+                loopEndMs      = loopEndMs,
+                durationMs     = durationMs,
+                isLoopModified = isLoopModified,
+                onNudgeStart   = { vm.nudgeLoopStart(it) },
+                onNudgeEnd     = { vm.nudgeLoopEnd(it) },
+                onRangeChanged = { s, e -> vm.setLoopRange(s, e) },
+                onSave         = { vm.saveLoopPoints() }
             )
         }
 
@@ -743,9 +763,11 @@ private fun StageSongRow(index: Int, song: Song, selected: Boolean, onClick: () 
 
 // ── Global Player ──────────────────────────────────────────────────────────────
 @Composable
+private val LoopOrange = Color(0xFFFF8C00)
+
 private fun GlobalPlayer(
     song: Song?, nextSong: Song?,
-    isPlaying: Boolean, loopActive: Boolean,
+    isPlaying: Boolean, loopState: LoopState,
     positionMs: Long, durationMs: Long,
     onPlayPause: () -> Unit, onStop: () -> Unit, onToggleLoop: () -> Unit
 ) {
@@ -819,14 +841,25 @@ private fun GlobalPlayer(
                 bgColor  = BgCard,
                 onClick  = onStop
             )
-            val loopArmed = song != null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs
             PlayerBtn(
                 modifier = Modifier.weight(1f),
                 icon     = Icons.Filled.Repeat,
-                label    = "LOOP",
-                tint     = when { loopActive -> Volt; loopArmed -> VoltDim; else -> Gray },
-                bgColor  = when { loopActive -> Color(0xFF1A1A00); loopArmed -> Color(0xFF141400); else -> BgCard },
-                enabled  = loopActive || loopArmed,
+                label    = when (loopState) {
+                    LoopState.INACTIVE -> "LOOP"
+                    LoopState.A_SET    -> "SET B"
+                    LoopState.LOOPING  -> "LOOP"
+                },
+                tint     = when (loopState) {
+                    LoopState.INACTIVE -> Gray
+                    LoopState.A_SET    -> LoopOrange
+                    LoopState.LOOPING  -> Volt
+                },
+                bgColor  = when (loopState) {
+                    LoopState.INACTIVE -> BgCard
+                    LoopState.A_SET    -> Color(0xFF1A0E00)
+                    LoopState.LOOPING  -> Color(0xFF1A1A00)
+                },
+                enabled  = song != null,
                 onClick  = onToggleLoop
             )
         }
@@ -884,6 +917,128 @@ private fun SearchBar(active: Boolean, query: String, onToggle: () -> Unit, onCh
             }
         }
     }
+}
+
+// ── A/B Loop Panel ────────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LoopPanel(
+    loopState: LoopState,
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    durationMs: Long,
+    isLoopModified: Boolean,
+    onNudgeStart: (Long) -> Unit,
+    onNudgeEnd: (Long) -> Unit,
+    onRangeChanged: (Long, Long) -> Unit,
+    onSave: () -> Unit
+) {
+    AnimatedVisibility(
+        visible = loopState != LoopState.INACTIVE,
+        enter   = expandVertically(),
+        exit    = shrinkVertically()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF111111))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            val startMs = loopStartMs ?: 0L
+            val endMs   = loopEndMs   ?: startMs
+
+            // Time labels
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("A", color = Volt, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(fmtMs(startMs),
+                        color = Volt, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+                if (loopState == LoopState.A_SET) {
+                    Text("Jetzt B setzen →",
+                        color = LoopOrange, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.align(Alignment.CenterVertically))
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("B", color = RedStop, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(fmtMs(endMs),
+                            color = RedStop, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    }
+                }
+            }
+
+            // RangeSlider + Nudge buttons (nur wenn LOOPING)
+            if (loopState == LoopState.LOOPING && durationMs > 0L) {
+                val dur = durationMs.toFloat()
+                var sliderRange by remember(startMs, endMs) {
+                    mutableStateOf(startMs.toFloat()..endMs.toFloat())
+                }
+                Spacer(Modifier.height(4.dp))
+                RangeSlider(
+                    value          = sliderRange,
+                    onValueChange  = { sliderRange = it },
+                    valueRange     = 0f..dur,
+                    onValueChangeFinished = {
+                        val newStart = sliderRange.start.toLong()
+                        val newEnd   = sliderRange.endInclusive.toLong()
+                        if (newEnd - newStart >= 500L) onRangeChanged(newStart, newEnd)
+                    },
+                    colors = SliderDefaults.colors(
+                        thumbColor              = Volt,
+                        activeTrackColor        = Volt,
+                        inactiveTrackColor      = BgTrack
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                // Nudge buttons
+                Row(
+                    modifier            = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick  = { onNudgeStart(-10L) },
+                        modifier = Modifier.size(48.dp)
+                    ) { Text("A−", color = Volt, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    IconButton(
+                        onClick  = { onNudgeStart(+10L) },
+                        modifier = Modifier.size(48.dp)
+                    ) { Text("A+", color = Volt, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    Spacer(Modifier.weight(1f))
+                    // Save button — nur sichtbar wenn geändert
+                    if (isLoopModified) {
+                        IconButton(
+                            onClick  = onSave,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(Color(0xFF0A2A0A), MaterialTheme.shapes.small)
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = "Speichern",
+                                tint = Volt, modifier = Modifier.size(22.dp))
+                        }
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    IconButton(
+                        onClick  = { onNudgeEnd(-10L) },
+                        modifier = Modifier.size(48.dp)
+                    ) { Text("B−", color = RedStop, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    IconButton(
+                        onClick  = { onNudgeEnd(+10L) },
+                        modifier = Modifier.size(48.dp)
+                    ) { Text("B+", color = RedStop, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+    }
+}
+
+private fun fmtMs(ms: Long): String {
+    val m = ms / 60_000L; val s = ms % 60_000L / 1000L; val r = ms % 1000L / 10L
+    return "%d:%02d.%02d".format(m, s, r)
 }
 
 // ── Genre Bar ─────────────────────────────────────────────────────────────────

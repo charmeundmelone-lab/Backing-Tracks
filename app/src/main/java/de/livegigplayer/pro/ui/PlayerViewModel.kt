@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.livegigplayer.pro.LiveGigPlayerApp
+import de.livegigplayer.pro.audio.AuditionPlayer
 import de.livegigplayer.pro.audio.AudioEngine
 import de.livegigplayer.pro.audio.FolderImporter
 import de.livegigplayer.pro.audio.SongScanner
@@ -27,6 +28,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val dao    = (app as LiveGigPlayerApp).database.songDao()
     private val engine = AudioEngine(app)
+
+    private val auditionPlayer = AuditionPlayer(app)
+    private var auditionUri = ""
+    private val _isAuditioning = MutableStateFlow(false)
+    val isAuditioning: StateFlow<Boolean> = _isAuditioning.asStateFlow()
 
     val songs: StateFlow<List<Song>> = dao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -267,5 +273,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (s != null) _currentSong.value = s.copy(volDrums=0f,volBass=0f,volKeys=0f,volVocals=0f,volClick=0f,volCue=0f)
     }
 
-    override fun onCleared() { super.onCleared(); engine.release() }
+    fun toggleAudition(uri: String, startMs: Long, endMs: Long) {
+        if (_isAuditioning.value) { auditionPlayer.stop(); _isAuditioning.value = false }
+        else { auditionUri = uri; auditionPlayer.startLoop(uri, startMs, endMs); _isAuditioning.value = true }
+    }
+
+    fun refreshAuditionLoop(startMs: Long, endMs: Long) {
+        if (_isAuditioning.value && auditionUri.isNotEmpty())
+            auditionPlayer.startLoop(auditionUri, startMs, endMs)
+    }
+
+    fun stopAudition() { auditionPlayer.stop(); _isAuditioning.value = false }
+
+    override fun onCleared() { super.onCleared(); engine.release(); auditionPlayer.release() }
 }

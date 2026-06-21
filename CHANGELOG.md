@@ -2,6 +2,39 @@
 
 ---
 
+## [Sprint 5.11 — Loop-Editor UX/Performance-Update]
+
+**Datum:** 2026-06-21
+**Branch:** main
+
+### PlayerViewModel — AuditionPlayer-Kapselung
+- `AuditionPlayer` jetzt im ViewModel (nicht mehr im Composable) → überlebt Rekomposition
+- `toggleAudition(uri, startMs, endMs)` / `refreshAuditionLoop(startMs, endMs)` / `stopAudition()`
+- `isAuditioning: StateFlow<Boolean>` — UI reagiert reaktiv auf Vorhör-Status
+- `onCleared()` released AuditionPlayer sauber
+
+### WaveformAnalyzer — Waveform-Cache
+- `saveCache(context, songId, data)` — schreibt Samples + Onsets als Binärdatei in CacheDir
+- `loadCache(context, songId)` — lädt gespeicherte Analyse (DataInputStream, schnell)
+- Cache-Datei: `waveform_{songId}.bin` (durationMs + samples + onsets im Big-Endian-Format)
+
+### LoopEditorScreen — vollständige Überarbeitung
+- Neue Signatur: `fun LoopEditorScreen(song, vm, onClose)` — ViewModel statt Callbacks für Save/Audition
+- **Scaffold + SnackbarHostState**: "Loop gespeichert" Snackbar nach Speichern, dann `onClose()`
+- **Initialer Zoom**: `scale = dur / 12000f` → ca. 12 Sekunden sichtbar beim Öffnen
+- **Cache-first Loading**: Cache laden (schnell), Fallback auf Analyse + Cache speichern
+- **Tap-to-Create**: Wenn kein gültiger Loop gesetzt → Tap 1 = Start, Tap 2 = Ende; Instruction-Text als Overlay
+- **Audition via ViewModel**: `vm.toggleAudition()` / `vm.refreshAuditionLoop()` / `vm.stopAudition()`
+- `DisposableEffect(Unit)` → `vm.stopAudition()` bei Composable-Verlassen
+- `LaunchedEffect(loopStartMs, loopEndMs)` mit 200ms Debounce → `vm.refreshAuditionLoop()`
+- Handle-Drag und Slip-Edit deaktiviert im Tap-to-Create-Modus (nur Pan/Zoom erlaubt)
+- Tap-Erkennung: `maxMove < 8.dp` = Tap, sonst Drag
+
+### MainScreen — LoopEditorScreen-Aufruf aktualisiert
+- Neuer Aufruf: `LoopEditorScreen(song, vm, onClose = { loopEditorSong = null })`
+
+---
+
 ## [Sprint 5.9 — Loop-Editor Fixes + Live-Player Logik]
 
 **Datum:** 2026-06-21

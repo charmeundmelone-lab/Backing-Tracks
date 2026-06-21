@@ -3,6 +3,9 @@ package de.livegigplayer.pro.audio
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -18,6 +21,34 @@ object WaveformAnalyzer {
         val onsets: LongArray,     // onset times in ms (transient feet)
         val durationMs: Long
     )
+
+    fun saveCache(context: Context, songId: Long, data: WaveformData) {
+        try {
+            val file = File(context.cacheDir, "waveform_${songId}.bin")
+            DataOutputStream(file.outputStream().buffered()).use { out ->
+                out.writeLong(data.durationMs)
+                out.writeInt(data.samples.size)
+                data.samples.forEach { out.writeFloat(it) }
+                out.writeInt(data.onsets.size)
+                data.onsets.forEach { out.writeLong(it) }
+            }
+        } catch (e: Exception) { Log.e(WTAG, "saveCache failed for song $songId", e) }
+    }
+
+    fun loadCache(context: Context, songId: Long): WaveformData? {
+        return try {
+            val file = File(context.cacheDir, "waveform_${songId}.bin")
+            if (!file.exists()) return null
+            DataInputStream(file.inputStream().buffered()).use { inp ->
+                val durationMs  = inp.readLong()
+                val sampleCount = inp.readInt()
+                val samples     = FloatArray(sampleCount) { inp.readFloat() }
+                val onsetCount  = inp.readInt()
+                val onsets      = LongArray(onsetCount) { inp.readLong() }
+                WaveformData(samples, onsets, durationMs)
+            }
+        } catch (e: Exception) { Log.e(WTAG, "loadCache failed for song $songId", e); null }
+    }
 
     fun analyze(context: Context, audioUri: String, maxSamples: Int = 1000): WaveformData? {
         if (audioUri.isEmpty()) return null

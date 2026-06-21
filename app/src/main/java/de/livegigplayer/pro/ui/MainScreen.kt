@@ -194,12 +194,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
         loopEditorSong?.let { song ->
             Box(modifier = Modifier.fillMaxSize()) {
                 LoopEditorScreen(
-                    song      = song,
-                    onSave    = { startMs, endMs ->
-                        vm.updateLoopPoints(song, startMs, endMs)
-                        loopEditorSong = null
-                    },
-                    onDismiss = { loopEditorSong = null }
+                    song    = song,
+                    vm      = vm,
+                    onClose = { loopEditorSong = null }
                 )
             }
         }

@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -199,69 +198,58 @@ fun LoopEditorScreen(
                         ?.takeIf { abs(it - ms) <= threshMs } ?: ms
                 }
 
+                // Single canvas: waveform + overlay + handles all at screen coordinates.
+                // Gesture box sits on top as transparent overlay.
                 Box(modifier = Modifier.fillMaxSize()) {
 
-                    // ── Layer 1: Waveform canvas with graphicsLayer zoom ──────
-                    // Draws at natural coords (0..canvasW); graphicsLayer maps to screen.
-                    // translationX adjusted for default center pivot so that
-                    //   screen_x = natural_x * scale + offsetX  (pivot-independent).
-                    Canvas(
-                        modifier = Modifier.fillMaxSize().graphicsLayer {
-                            scaleX = scale
-                            translationX = offsetX + canvasW / 2f * (scale - 1f)
-                        }
-                    ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
                         val mid = canvasH / 2f
                         drawRect(LeBg, size = size)
+
+                        // ── Waveform in screen coordinates ───────────────────
                         val samples = waveformData?.samples
                         if (samples != null && samples.isNotEmpty()) {
-                            val n    = samples.size
-                            val barW = (canvasW / n).coerceAtLeast(1f)
+                            val n  = samples.size
+                            val bw = (canvasW / n * scale).coerceAtLeast(1f)
                             for (i in samples.indices) {
-                                val x     = i.toFloat() / n * canvasW
+                                val sx = msToScreen(i.toLong() * effectiveDuration / n)
+                                if (sx < -bw || sx > canvasW + bw) continue
                                 val lineH = samples[i] * mid * 0.85f
-                                drawLine(LeWave, Offset(x, mid - lineH), Offset(x, mid + lineH), barW)
+                                drawLine(LeWave, Offset(sx, mid - lineH), Offset(sx, mid + lineH), bw)
                             }
                         } else {
                             drawLine(LeGray, Offset(0f, mid), Offset(canvasW, mid), 1f)
                             drawRect(Color(0x22777777), size = size)
                         }
-                        // Onset markers
+
+                        // ── Onset markers ─────────────────────────────────────
                         waveformData?.onsets?.forEach { ms ->
-                            val x = naturalX(ms)
+                            val x = msToScreen(ms)
+                            if (x < 0f || x > canvasW) return@forEach
                             drawLine(LeOnset, Offset(x, 0f), Offset(x, canvasH), 1.5f)
                         }
-                    }
 
-                    // ── Layer 2: Handles + overlay at screen coordinates ──────
-                    // No graphicsLayer — positions computed via msToScreen().
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val mid = canvasH / 2f
-                        val sx  = msToScreen(loopStartMs)
-                        val ex  = msToScreen(loopEndMs)
+                        // ── Loop overlay ──────────────────────────────────────
+                        val lsx = msToScreen(loopStartMs)
+                        val lex = msToScreen(loopEndMs)
+                        val ox  = lsx.coerceAtLeast(0f)
+                        val ow  = (lex - ox).coerceIn(0f, canvasW - ox)
+                        if (ow > 0f) drawRect(LeOverlay, topLeft = Offset(ox, 0f), size = Size(ow, canvasH))
 
-                        // Loop overlay
-                        val ox = sx.coerceAtLeast(0f)
-                        val ow = (ex - ox).coerceIn(0f, canvasW - ox)
-                        if (ow > 0f) {
-                            drawRect(LeOverlay, topLeft = Offset(ox, 0f), size = Size(ow, canvasH))
-                        }
-
-                        // Start handle (green)
-                        val sxC = sx.coerceIn(-knobR, canvasW + knobR)
+                        // ── Start handle (green) ──────────────────────────────
+                        val sxC = lsx.coerceIn(-knobR, canvasW + knobR)
                         drawLine(LeGreen, Offset(sxC, 0f), Offset(sxC, canvasH), stroke)
                         drawCircle(LeGreen, knobR,        Offset(sxC, mid))
                         drawCircle(LeBg,   knobR * 0.5f, Offset(sxC, mid))
 
-                        // End handle (red)
-                        val exC = ex.coerceIn(-knobR, canvasW + knobR)
+                        // ── End handle (red) ──────────────────────────────────
+                        val exC = lex.coerceIn(-knobR, canvasW + knobR)
                         drawLine(LeRed, Offset(exC, 0f), Offset(exC, canvasH), stroke)
                         drawCircle(LeRed, knobR,        Offset(exC, mid))
                         drawCircle(LeBg,  knobR * 0.5f, Offset(exC, mid))
                     }
 
-                    // ── Layer 3: Gesture capture ──────────────────────────────
-                    // Transparent overlay — receives all touch events.
+                    // ── Gesture capture — transparent Box on top ──────────────
                     Box(
                         modifier = Modifier.fillMaxSize()
                             .pointerInput(canvasW.toLong(), effectiveDuration) {

@@ -100,19 +100,31 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-06-20
-**CI Build:** #147 — grün
-**Commit:** `d269031` — Sprint 5.3 Loop + Auto-Stop
+**Datum:** 2026-06-21
+**CI Build:** #163 — grün
+**Commit:** `f16eae1` — Sprint 5.11 Loop-Editor UX/Performance-Update
 
 ### Abgeschlossene Sprints
 
+- **Sprint 5.11 DONE:** Loop-Editor vollständig überarbeitet: AuditionPlayer im ViewModel, Waveform-Cache (CacheDir), Initialzoom ~12s, Tap-to-Create State-Machine, Scaffold+Snackbar "Loop gespeichert", neue Signatur `LoopEditorScreen(song, vm, onClose)`
+- **Sprint 5.10 DONE:** Loop-Editor Interaktion: scale/offsetX als MutableState, Single-Canvas-Ansatz (kein graphicsLayer), UX-Regel A (Kollisionsvermeidung 100ms), UX-Regel B (Slip-Editing), Fine-Tune ±10ms, X=Abbrechen / ✓=Speichern
+- **Sprint 5.9 DONE:** WaveformAnalyzer dataChunkSize-Fix (schwarze Waveform behoben), AuditionPlayer-Klasse, VORHÖR/STOP-Button, LOOP-Button 3-Zustände (aktiv/armed/disabled), safeDrawingPadding
 - **Sprint 5.3 DONE:** A/B-Loop (snap-to-beat, 8 Takte, alle Stems synchron), Auto-Stop (DB v8, Switch im Editor), LOOP-Button leuchtet Volt wenn aktiv
 - **Sprint 5.2 DONE:** Zwei-Tab-Layout (Archiv/Playlist), Mini-Player 96dp, Set-Akkordeon, StageTraxx-Queue, Import-Bugfixes (Modus A Einzel-Eintrag, Click case-insensitiv), Tab-B-Sicherheits-Audit
 - **Sprint 5.1 DONE:** ArchivSongRow (combinedClickable, Kapo-Stepper, Inline-Edit, Batch-Modus, GenreBar)
 - **Sprint 5 DONE:** ExoPlayer 1.3.1, Multitrack-Support, Mixer, Preload
+
+### Wichtige Architektur-Details (Sprint 5.9–5.11)
+
+- **AuditionPlayer** (`audio/AuditionPlayer.kt`) — separater ExoPlayer für Loop-Vorschau, 64× ClippingConfiguration + REPEAT_MODE_ALL
+- **AuditionPlayer im ViewModel** — `PlayerViewModel.toggleAudition()`, `refreshAuditionLoop()`, `stopAudition()`, `isAuditioning: StateFlow<Boolean>`
+- **WaveformAnalyzer Cache** — `saveCache(ctx, songId, data)` / `loadCache(ctx, songId)` → `cacheDir/waveform_{id}.bin`
+- **LoopEditorScreen** — Tap-to-Create: `firstTapMs: Long = -1` State-Machine; wenn kein gültiger Loop → Tap 1 = Start, Tap 2 = Ende
+- **graphicsLayer** — NICHT verfügbar als Import in dieser Compose-Version → Single-Canvas mit `msToScreen()` Koordinatentransformation
 
 ### Offene TODOs (nächste Session)
 
 - Set-Verwaltung UI: Sets anlegen / umbenennen
 - Song-zu-Set-Zuweisung im UI (aktuell nur per Import)
 - Playlist-Tab: Queue-Swipe (Swipe rechts/links auf Stage-Songs)
+- Loop-Editor in der App testen (Tap-to-Create, Vorhör, Snackbar)

@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -59,7 +60,9 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
-// ── Palette (lokal, unabhängig von MainScreen) ────────────────────────────────
+private const val MIN_LOOP_MS = 100L
+
+// ── Palette ───────────────────────────────────────────────────────────────────
 private val LeBg      = Color(0xFF0A0A0A)
 private val LeCard    = Color(0xFF1A1A1A)
 private val LeHeader  = Color(0xFF1E293B)
@@ -86,19 +89,21 @@ fun LoopEditorScreen(
     var isLoading    by remember { mutableStateOf(true) }
     var auditionUri  by remember { mutableStateOf("") }
 
-    var loopStartMs by remember(song.id) { mutableLongStateOf(song.loopStartMs) }
-    var loopEndMs   by remember(song.id) { mutableLongStateOf(song.loopEndMs) }
+    var loopStartMs   by remember(song.id) { mutableLongStateOf(song.loopStartMs) }
+    var loopEndMs     by remember(song.id) { mutableLongStateOf(song.loopEndMs) }
+    var isAuditioning by remember { mutableStateOf(false) }
 
-    var zoomLevel         by remember { mutableFloatStateOf(1f) }
-    var viewStartFraction by remember { mutableFloatStateOf(0f) }
-    var isAuditioning     by remember { mutableStateOf(false) }
+    // ── Zoom / pan state ─────────────────────────────────────────────────────
+    // scale: 1f = full song visible, 2f = double zoom, max 100f
+    // offsetX: pixel offset so that natural_x * scale + offsetX = screen_x
+    //          range: [canvasW * (1 - scale), 0]
+    var scale   by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
 
     val auditionPlayer = remember(context) { AuditionPlayer(context) }
-    DisposableEffect(Unit) {
-        onDispose { auditionPlayer.release() }
-    }
+    DisposableEffect(Unit) { onDispose { auditionPlayer.release() } }
 
-    // Debounced audition restart when loop points change
+    // Debounced audition restart whenever loop points or active state changes
     LaunchedEffect(isAuditioning, loopStartMs, loopEndMs) {
         if (isAuditioning && auditionUri.isNotEmpty()) {
             delay(200)
@@ -108,7 +113,6 @@ fun LoopEditorScreen(
         }
     }
 
-    // Load waveform in IO background
     LaunchedEffect(song.id) {
         isLoading = true
         val mode = withContext(Dispatchers.IO) { SongScanner.scan(song, context) }
@@ -124,7 +128,7 @@ fun LoopEditorScreen(
         waveformData = data
 
         val dur = data?.durationMs ?: 0L
-        if (loopEndMs <= loopStartMs) {
+        if (loopEndMs <= loopStartMs + MIN_LOOP_MS) {
             val bpm = song.bpmExact.takeIf { it > 0f } ?: song.bpm.toFloat().coerceAtLeast(1f)
             val eightBarsMs = (8.0 * 4.0 * 60_000.0 / bpm).roundToLong()
             loopEndMs = eightBarsMs.coerceAtMost(dur.coerceAtLeast(10_000L))
@@ -142,27 +146,21 @@ fun LoopEditorScreen(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {
-                auditionPlayer.stop()
-                onDismiss()
-            }) {
+            IconButton(onClick = { auditionPlayer.stop(); onDismiss() }) {
                 Icon(Icons.Filled.Close, contentDescription = "Abbrechen", tint = LeGray)
             }
             Text(
-                text     = "Loop-Editor: ${song.title}",
-                color    = LeWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                text = "Loop-Editor: ${song.title}",
+                color = LeWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            IconButton(onClick = {
-                auditionPlayer.stop()
-                onSave(loopStartMs, loopEndMs)
-            }) {
+            IconButton(onClick = { auditionPlayer.stop(); onSave(loopStartMs, loopEndMs) }) {
                 Icon(Icons.Filled.Check, contentDescription = "Speichern", tint = LeVolt)
             }
         }
 
-        // ── Waveform canvas ───────────────────────────────────────────────────
+        // ── Waveform area ─────────────────────────────────────────────────────
         if (isLoading) {
             Box(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -178,165 +176,199 @@ fun LoopEditorScreen(
             BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 val canvasW    = constraints.maxWidth.toFloat()
                 val canvasH    = constraints.maxHeight.toFloat()
-                val handleZone = with(density) { 48.dp.toPx() }
+                val handleZonePx = with(density) { 48.dp.toPx() }
+                val knobR        = with(density) { 11.dp.toPx() }
+                val stroke       = with(density) { 3.dp.toPx() }
 
                 // ── Coordinate helpers ────────────────────────────────────────
-                fun visMs()   = effectiveDuration.toDouble() / zoomLevel
-                fun vsMs()    = (viewStartFraction * effectiveDuration).toLong()
-                fun msToX(ms: Long)  = ((ms - vsMs()) / visMs() * canvasW).toFloat()
-                fun xToMs(x: Float)  = (vsMs() + x / canvasW * visMs()).roundToLong()
+                // natural_x = ms / dur * canvasW  →  [0, canvasW]
+                // screen_x  = natural_x * scale + offsetX
+                fun naturalX(ms: Long) = ms.toFloat() / effectiveDuration * canvasW
+                fun msToScreen(ms: Long) = naturalX(ms) * scale + offsetX
+                fun screenToMs(x: Float) =
+                    ((x - offsetX) / scale.coerceAtLeast(0.001f) / canvasW * effectiveDuration)
+                        .roundToLong().coerceIn(0L, effectiveDuration)
+
+                fun clampOffset(s: Float = scale, dx: Float = offsetX) =
+                    dx.coerceIn(canvasW * (1f - s), 0f)
+
                 fun snapToOnset(ms: Long): Long {
-                    val threshold = (visMs() / canvasW * handleZone).roundToLong().coerceAtLeast(50L)
+                    val threshMs = (effectiveDuration / scale / canvasW * handleZonePx)
+                        .roundToLong().coerceAtLeast(50L)
                     return waveformData?.onsets?.minByOrNull { abs(it - ms) }
-                        ?.takeIf { abs(it - ms) <= threshold } ?: ms
-                }
-                fun clampView() {
-                    val max = (1f - 1f / zoomLevel).coerceAtLeast(0f)
-                    viewStartFraction = viewStartFraction.coerceIn(0f, max)
+                        ?.takeIf { abs(it - ms) <= threshMs } ?: ms
                 }
 
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(canvasW, effectiveDuration) {
-                            awaitEachGesture {
-                                val down       = awaitFirstDown(requireUnconsumed = false)
-                                val touchX     = down.position.x
-                                val startHandleX = msToX(loopStartMs)
-                                val endHandleX   = msToX(loopEndMs)
-                                val nearStart  = abs(touchX - startHandleX) < handleZone
-                                val nearEnd    = abs(touchX - endHandleX)   < handleZone
+                Box(modifier = Modifier.fillMaxSize()) {
 
-                                var prevSpan   = 0f
-                                var nPointers  = 1
-
-                                do {
-                                    val event    = awaitPointerEvent()
-                                    val pressed  = event.changes.filter { it.pressed }
-
-                                    if (pressed.size >= 2) {
-                                        // ── Pinch zoom — centred on finger midpoint ──
-                                        val p1 = pressed[0]; val p2 = pressed[1]
-                                        val span = abs(p2.position.x - p1.position.x)
-                                        val cx   = (p1.position.x + p2.position.x) / 2f
-
-                                        if (prevSpan > 0f && nPointers >= 2) {
-                                            val scale    = span / prevSpan.coerceAtLeast(1f)
-                                            val anchorMs = xToMs(cx)
-                                            zoomLevel    = (zoomLevel * scale).coerceIn(1f, 200f)
-                                            val newVisMs = effectiveDuration / zoomLevel
-                                            val newVsMs  = anchorMs - (cx / canvasW * newVisMs).roundToLong()
-                                            viewStartFraction = (newVsMs.toFloat() / effectiveDuration)
-                                            clampView()
-                                        }
-                                        prevSpan  = span
-                                        nPointers = 2
-                                        pressed.forEach { it.consume() }
-                                    } else if (pressed.size == 1) {
-                                        val p      = pressed[0]
-                                        val deltaX = p.position.x - p.previousPosition.x
-                                        nPointers  = 1
-
-                                        when {
-                                            nearStart -> {
-                                                val dms = (deltaX / canvasW * visMs()).roundToLong()
-                                                loopStartMs = (loopStartMs + dms).coerceIn(0L, loopEndMs - 100L)
-                                            }
-                                            nearEnd -> {
-                                                val dms = (deltaX / canvasW * visMs()).roundToLong()
-                                                loopEndMs = (loopEndMs + dms).coerceIn(loopStartMs + 100L, effectiveDuration)
-                                            }
-                                            else -> {
-                                                // Pan — clamp so view never shows empty space
-                                                val df = deltaX / canvasW / zoomLevel
-                                                viewStartFraction -= df
-                                                clampView()
-                                            }
-                                        }
-                                        p.consume()
-                                    }
-                                } while (event.changes.any { it.pressed })
-
-                                // Snap to nearest onset on release
-                                if (nearStart) loopStartMs = snapToOnset(loopStartMs)
-                                if (nearEnd)   loopEndMs   = snapToOnset(loopEndMs)
+                    // ── Layer 1: Waveform canvas with graphicsLayer zoom ──────
+                    // Draws at natural coords (0..canvasW); graphicsLayer maps to screen.
+                    // translationX adjusted for default center pivot so that
+                    //   screen_x = natural_x * scale + offsetX  (pivot-independent).
+                    Canvas(
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            scaleX = scale
+                            translationX = offsetX + canvasW / 2f * (scale - 1f)
+                        }
+                    ) {
+                        val mid = canvasH / 2f
+                        drawRect(LeBg, size = size)
+                        val samples = waveformData?.samples
+                        if (samples != null && samples.isNotEmpty()) {
+                            val n    = samples.size
+                            val barW = (canvasW / n).coerceAtLeast(1f)
+                            for (i in samples.indices) {
+                                val x     = i.toFloat() / n * canvasW
+                                val lineH = samples[i] * mid * 0.85f
+                                drawLine(LeWave, Offset(x, mid - lineH), Offset(x, mid + lineH), barW)
                             }
+                        } else {
+                            drawLine(LeGray, Offset(0f, mid), Offset(canvasW, mid), 1f)
+                            drawRect(Color(0x22777777), size = size)
                         }
-                ) {
-                    val mid = canvasH / 2f
-
-                    // Background
-                    drawRect(LeBg, size = size)
-
-                    // ── Waveform ──────────────────────────────────────────────
-                    val samples = waveformData?.samples
-                    if (samples != null && samples.isNotEmpty()) {
-                        val n       = samples.size
-                        val msPer   = effectiveDuration.toFloat() / n
-                        val barW    = (canvasW / n * zoomLevel).coerceAtLeast(1f)
-                        for (i in samples.indices) {
-                            val x = msToX((i * msPer).toLong())
-                            if (x < -barW || x > canvasW + barW) continue
-                            val lineH = samples[i] * mid * 0.85f
-                            drawLine(LeWave, Offset(x, mid - lineH), Offset(x, mid + lineH), barW)
+                        // Onset markers
+                        waveformData?.onsets?.forEach { ms ->
+                            val x = naturalX(ms)
+                            drawLine(LeOnset, Offset(x, 0f), Offset(x, canvasH), 1.5f)
                         }
-                    } else {
-                        // No audio: center line placeholder
-                        drawLine(LeGray, Offset(0f, mid), Offset(canvasW, mid), 1f)
-                        drawRect(Color(0x22777777), size = size)
                     }
 
-                    // ── Onset markers ─────────────────────────────────────────
-                    waveformData?.onsets?.forEach { ms ->
-                        val x = msToX(ms)
-                        if (x < 0f || x > canvasW) return@forEach
-                        drawLine(LeOnset, Offset(x, 0f), Offset(x, canvasH), 1.5f)
-                    }
+                    // ── Layer 2: Handles + overlay at screen coordinates ──────
+                    // No graphicsLayer — positions computed via msToScreen().
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val mid = canvasH / 2f
+                        val sx  = msToScreen(loopStartMs)
+                        val ex  = msToScreen(loopEndMs)
 
-                    // ── Loop overlay ──────────────────────────────────────────
-                    val sx = msToX(loopStartMs)
-                    val ex = msToX(loopEndMs)
-                    if (ex > sx) {
+                        // Loop overlay
                         val ox = sx.coerceAtLeast(0f)
-                        drawRect(
-                            LeOverlay,
-                            topLeft = Offset(ox, 0f),
-                            size    = Size((ex - ox).coerceAtMost(canvasW - ox), canvasH)
-                        )
+                        val ow = (ex - ox).coerceIn(0f, canvasW - ox)
+                        if (ow > 0f) {
+                            drawRect(LeOverlay, topLeft = Offset(ox, 0f), size = Size(ow, canvasH))
+                        }
+
+                        // Start handle (green)
+                        val sxC = sx.coerceIn(-knobR, canvasW + knobR)
+                        drawLine(LeGreen, Offset(sxC, 0f), Offset(sxC, canvasH), stroke)
+                        drawCircle(LeGreen, knobR,        Offset(sxC, mid))
+                        drawCircle(LeBg,   knobR * 0.5f, Offset(sxC, mid))
+
+                        // End handle (red)
+                        val exC = ex.coerceIn(-knobR, canvasW + knobR)
+                        drawLine(LeRed, Offset(exC, 0f), Offset(exC, canvasH), stroke)
+                        drawCircle(LeRed, knobR,        Offset(exC, mid))
+                        drawCircle(LeBg,  knobR * 0.5f, Offset(exC, mid))
                     }
 
-                    // ── Start handle (green) ──────────────────────────────────
-                    val stroke = 3.dp.toPx()
-                    val knobR  = 11.dp.toPx()
-                    drawLine(LeGreen, Offset(sx, 0f), Offset(sx, canvasH), stroke)
-                    drawCircle(LeGreen, knobR, Offset(sx, mid))
-                    drawCircle(LeBg,    knobR * 0.5f, Offset(sx, mid))
+                    // ── Layer 3: Gesture capture ──────────────────────────────
+                    // Transparent overlay — receives all touch events.
+                    Box(
+                        modifier = Modifier.fillMaxSize()
+                            .pointerInput(canvasW.toLong(), effectiveDuration) {
+                                awaitEachGesture {
+                                    val down   = awaitFirstDown(requireUnconsumed = false)
+                                    val touchX = down.position.x
 
-                    // ── End handle (red) ──────────────────────────────────────
-                    drawLine(LeRed, Offset(ex, 0f), Offset(ex, canvasH), stroke)
-                    drawCircle(LeRed, knobR, Offset(ex, mid))
-                    drawCircle(LeBg,  knobR * 0.5f, Offset(ex, mid))
+                                    val startX    = msToScreen(loopStartMs)
+                                    val endX      = msToScreen(loopEndMs)
+                                    val nearStart = abs(touchX - startX) < handleZonePx
+                                    val nearEnd   = abs(touchX - endX)   < handleZonePx
+                                    // Slip-edit zone: inside loop, not near either handle
+                                    val inLoop = !nearStart && !nearEnd
+                                        && touchX > startX && touchX < endX
+
+                                    var prevSpan  = 0f
+                                    var nPointers = 1
+                                    var didZoom   = false
+
+                                    do {
+                                        val event   = awaitPointerEvent()
+                                        val pressed = event.changes.filter { it.pressed }
+
+                                        if (pressed.size >= 2) {
+                                            // ── Pinch-to-zoom, centred on finger midpoint ──
+                                            val p1   = pressed[0]; val p2 = pressed[1]
+                                            val span = abs(p2.position.x - p1.position.x)
+                                            val cx   = (p1.position.x + p2.position.x) / 2f
+
+                                            if (prevSpan > 0f && nPointers >= 2) {
+                                                val zoomChange  = span / prevSpan.coerceAtLeast(1f)
+                                                val anchorMs    = screenToMs(cx)
+                                                val newScale    = (scale * zoomChange).coerceIn(1f, 100f)
+                                                val natAnchorX  = naturalX(anchorMs)
+                                                val newOffsetX  = cx - natAnchorX * newScale
+                                                scale   = newScale
+                                                offsetX = clampOffset(newScale, newOffsetX)
+                                                didZoom = true
+                                            }
+                                            prevSpan  = span
+                                            nPointers = 2
+                                            pressed.forEach { it.consume() }
+
+                                        } else if (pressed.size == 1) {
+                                            val p      = pressed[0]
+                                            val deltaX = p.position.x - p.previousPosition.x
+                                            nPointers  = 1
+                                            // ms-per-pixel in the current view
+                                            val msPpx  = effectiveDuration / scale / canvasW
+
+                                            when {
+                                                nearStart && !didZoom -> {
+                                                    val dms = (deltaX * msPpx).roundToLong()
+                                                    loopStartMs = (loopStartMs + dms)
+                                                        .coerceIn(0L, loopEndMs - MIN_LOOP_MS)
+                                                }
+                                                nearEnd && !didZoom -> {
+                                                    val dms = (deltaX * msPpx).roundToLong()
+                                                    loopEndMs = (loopEndMs + dms)
+                                                        .coerceIn(loopStartMs + MIN_LOOP_MS, effectiveDuration)
+                                                }
+                                                inLoop && !didZoom -> {
+                                                    // Slip-edit: move whole loop block, keep length
+                                                    val dms = (deltaX * msPpx).roundToLong()
+                                                    val len = loopEndMs - loopStartMs
+                                                    val newStart = (loopStartMs + dms)
+                                                        .coerceIn(0L, effectiveDuration - len)
+                                                    loopStartMs = newStart
+                                                    loopEndMs   = newStart + len
+                                                }
+                                                else -> {
+                                                    // Pan — clamp so no empty space is shown
+                                                    offsetX = clampOffset(dx = offsetX + deltaX)
+                                                }
+                                            }
+                                            p.consume()
+                                        }
+                                    } while (event.changes.any { it.pressed })
+
+                                    // Snap to onset on finger-lift (handles only)
+                                    if (!didZoom) {
+                                        if (nearStart) loopStartMs = snapToOnset(loopStartMs)
+                                        if (nearEnd)   loopEndMs   = snapToOnset(loopEndMs)
+                                    }
+                                }
+                            }
+                    )
                 }
             }
         }
 
-        // ── Vorhör-Player ──────────────────────────────────────────────────────
+        // ── Vorhör-Player ─────────────────────────────────────────────────────
         Box(
-            modifier = Modifier.fillMaxWidth().background(LeBg)
-                .padding(vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().background(LeBg).padding(vertical = 6.dp),
             contentAlignment = Alignment.Center
         ) {
             val canAudition = !isLoading && auditionUri.isNotEmpty()
             Text(
                 text      = if (isAuditioning) "◼  STOP" else "▶  VORHÖR",
                 color     = when {
-                    !canAudition -> LeGray
+                    !canAudition  -> LeGray
                     isAuditioning -> LeRed
                     else          -> LeGreen
                 },
-                fontSize      = 13.sp,
-                fontWeight    = FontWeight.Bold,
-                textAlign     = TextAlign.Center,
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign  = TextAlign.Center,
                 modifier = Modifier
                     .background(
                         when {
@@ -354,12 +386,11 @@ fun LoopEditorScreen(
             )
         }
 
-        // ── Fine-tune + Zeit-Anzeige ──────────────────────────────────────────
+        // ── Zeit-Anzeige + Fine-Tune ──────────────────────────────────────────
         Column(
             modifier = Modifier.fillMaxWidth().background(LeCard)
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // Zeitanzeige
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -368,24 +399,22 @@ fun LoopEditorScreen(
                 TimeLabel("LÄNGE", (loopEndMs - loopStartMs).coerceAtLeast(0L), LeVolt)
                 TimeLabel("ENDE",  loopEndMs,   LeRed)
             }
-
-            // Fine-tune Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 FineTune("← Start", LeGreen, Modifier.weight(1f)) {
-                    loopStartMs = (loopStartMs - 1L).coerceAtLeast(0L)
+                    loopStartMs = (loopStartMs - 10L).coerceAtLeast(0L)
                 }
                 FineTune("Start →", LeGreen, Modifier.weight(1f)) {
-                    loopStartMs = (loopStartMs + 1L).coerceAtMost(loopEndMs - 100L)
+                    loopStartMs = (loopStartMs + 10L).coerceAtMost(loopEndMs - MIN_LOOP_MS)
                 }
                 Spacer(Modifier.width(4.dp))
                 FineTune("← Ende", LeRed, Modifier.weight(1f)) {
-                    loopEndMs = (loopEndMs - 1L).coerceAtLeast(loopStartMs + 100L)
+                    loopEndMs = (loopEndMs - 10L).coerceAtLeast(loopStartMs + MIN_LOOP_MS)
                 }
                 FineTune("Ende →", LeRed, Modifier.weight(1f)) {
-                    loopEndMs = (loopEndMs + 1L).coerceAtMost(effectiveDuration)
+                    loopEndMs = (loopEndMs + 10L).coerceAtMost(effectiveDuration)
                 }
             }
         }

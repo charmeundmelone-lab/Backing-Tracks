@@ -195,7 +195,6 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             Box(modifier = Modifier.fillMaxSize()) {
                 LoopEditorScreen(
                     song    = song,
-                    vm      = vm,
                     onClose = { loopEditorSong = null }
                 )
             }

@@ -44,6 +44,7 @@ object WaveformAnalyzer {
 
         // Iterate chunks until we find "data"
         val chunkHdr = ByteArray(8)
+        var dataChunkSize = 0L
         outer@ while (true) {
             if (stream.read(chunkHdr) < 8) return null
             val id       = String(chunkHdr, 0, 4)
@@ -62,7 +63,7 @@ object WaveformAnalyzer {
                     fb.int; fb.short                     // byteRate, blockAlign
                     bitsPerSample = if (fmt.size >= 16) fb.short.toInt() else 16
                 }
-                "data" -> break@outer
+                "data" -> { dataChunkSize = chunkLen; break@outer }
                 else   -> skipFully(stream, chunkLen)
             }
         }
@@ -71,9 +72,13 @@ object WaveformAnalyzer {
         val frameSize      = channels * bytesPerSample
         if (frameSize <= 0 || sampleRate <= 0) return null
 
-        // We don't know exact data byte count if "data" size was 0xFFFFFFFF (streaming WAV).
-        // Read until EOF and count dynamically.
-        val framesPerWindow = (sampleRate.toLong() * 50 / 1000).coerceAtLeast(1L) // 50ms windows
+        // Compute framesPerWindow so that maxSamples covers the entire file.
+        // dataChunkSize == 0xFFFFFFFF indicates a streaming WAV (unknown length).
+        val totalFrames = if (dataChunkSize in 1L..0xFFFFFFFEL)
+            dataChunkSize / frameSize
+        else
+            sampleRate.toLong() * 600L  // fallback: assume ≤ 10 min
+        val framesPerWindow = (totalFrames / maxSamples).coerceAtLeast(1L)
 
         val resultSamples = FloatArray(maxSamples)
         val onsetList     = mutableListOf<Long>()
@@ -81,7 +86,8 @@ object WaveformAnalyzer {
         var frameIdx      = 0L
         var smoothed      = 0f
 
-        val winBuf = ByteArray((frameSize * framesPerWindow).coerceAtMost(65536L).toInt())
+        val winBufSize = (frameSize.toLong() * framesPerWindow).coerceIn(1L, 524288L).toInt()
+        val winBuf = ByteArray(winBufSize)
 
         while (sampleIdx < maxSamples) {
             val read = stream.read(winBuf)

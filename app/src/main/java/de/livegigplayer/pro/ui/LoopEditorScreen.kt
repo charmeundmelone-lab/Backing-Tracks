@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -25,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -46,11 +48,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import de.livegigplayer.pro.audio.AuditionPlayer
 import de.livegigplayer.pro.audio.SongScanner
 import de.livegigplayer.pro.audio.WaveformAnalyzer
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.TrackMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToLong
@@ -80,12 +84,29 @@ fun LoopEditorScreen(
 
     var waveformData by remember { mutableStateOf<WaveformAnalyzer.WaveformData?>(null) }
     var isLoading    by remember { mutableStateOf(true) }
+    var auditionUri  by remember { mutableStateOf("") }
 
     var loopStartMs by remember(song.id) { mutableLongStateOf(song.loopStartMs) }
     var loopEndMs   by remember(song.id) { mutableLongStateOf(song.loopEndMs) }
 
     var zoomLevel         by remember { mutableFloatStateOf(1f) }
     var viewStartFraction by remember { mutableFloatStateOf(0f) }
+    var isAuditioning     by remember { mutableStateOf(false) }
+
+    val auditionPlayer = remember(context) { AuditionPlayer(context) }
+    DisposableEffect(Unit) {
+        onDispose { auditionPlayer.release() }
+    }
+
+    // Debounced audition restart when loop points change
+    LaunchedEffect(isAuditioning, loopStartMs, loopEndMs) {
+        if (isAuditioning && auditionUri.isNotEmpty()) {
+            delay(200)
+            auditionPlayer.startLoop(auditionUri, loopStartMs, loopEndMs)
+        } else {
+            auditionPlayer.stop()
+        }
+    }
 
     // Load waveform in IO background
     LaunchedEffect(song.id) {
@@ -96,6 +117,7 @@ fun LoopEditorScreen(
                 mode.click ?: mode.drums ?: mode.bass ?: mode.keys ?: mode.vocals ?: mode.cue ?: ""
             is TrackMode.Legacy -> mode.filePath
         }
+        auditionUri = uri
         val data = if (uri.isNotEmpty()) {
             withContext(Dispatchers.IO) { WaveformAnalyzer.analyze(context, uri) }
         } else null
@@ -112,7 +134,7 @@ fun LoopEditorScreen(
 
     val effectiveDuration = (waveformData?.durationMs ?: 0L).coerceAtLeast(1L)
 
-    Column(modifier = Modifier.fillMaxSize().background(LeBg)) {
+    Column(modifier = Modifier.fillMaxSize().background(LeBg).safeDrawingPadding()) {
 
         // ── Header ────────────────────────────────────────────────────────────
         Row(
@@ -120,7 +142,10 @@ fun LoopEditorScreen(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onDismiss) {
+            IconButton(onClick = {
+                auditionPlayer.stop()
+                onDismiss()
+            }) {
                 Icon(Icons.Filled.Close, contentDescription = "Abbrechen", tint = LeGray)
             }
             Text(
@@ -129,7 +154,10 @@ fun LoopEditorScreen(
                 modifier = Modifier.weight(1f),
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            IconButton(onClick = { onSave(loopStartMs, loopEndMs) }) {
+            IconButton(onClick = {
+                auditionPlayer.stop()
+                onSave(loopStartMs, loopEndMs)
+            }) {
                 Icon(Icons.Filled.Check, contentDescription = "Speichern", tint = LeVolt)
             }
         }
@@ -187,17 +215,17 @@ fun LoopEditorScreen(
                                     val pressed  = event.changes.filter { it.pressed }
 
                                     if (pressed.size >= 2) {
-                                        // ── Pinch zoom ──────────────────────
+                                        // ── Pinch zoom — centred on finger midpoint ──
                                         val p1 = pressed[0]; val p2 = pressed[1]
                                         val span = abs(p2.position.x - p1.position.x)
                                         val cx   = (p1.position.x + p2.position.x) / 2f
 
                                         if (prevSpan > 0f && nPointers >= 2) {
-                                            val scale     = span / prevSpan.coerceAtLeast(1f)
-                                            val anchorMs  = xToMs(cx)
-                                            zoomLevel     = (zoomLevel * scale).coerceIn(1f, 200f)
-                                            val newVisMs  = effectiveDuration / zoomLevel
-                                            val newVsMs   = anchorMs - (cx / canvasW * newVisMs).roundToLong()
+                                            val scale    = span / prevSpan.coerceAtLeast(1f)
+                                            val anchorMs = xToMs(cx)
+                                            zoomLevel    = (zoomLevel * scale).coerceIn(1f, 200f)
+                                            val newVisMs = effectiveDuration / zoomLevel
+                                            val newVsMs  = anchorMs - (cx / canvasW * newVisMs).roundToLong()
                                             viewStartFraction = (newVsMs.toFloat() / effectiveDuration)
                                             clampView()
                                         }
@@ -219,8 +247,8 @@ fun LoopEditorScreen(
                                                 loopEndMs = (loopEndMs + dms).coerceIn(loopStartMs + 100L, effectiveDuration)
                                             }
                                             else -> {
-                                                // Pan
-                                                val df = deltaX / canvasW * (1f / zoomLevel)
+                                                // Pan — clamp so view never shows empty space
+                                                val df = deltaX / canvasW / zoomLevel
                                                 viewStartFraction -= df
                                                 clampView()
                                             }
@@ -269,8 +297,12 @@ fun LoopEditorScreen(
                     val sx = msToX(loopStartMs)
                     val ex = msToX(loopEndMs)
                     if (ex > sx) {
-                        drawRect(LeOverlay, topLeft = Offset(sx.coerceAtLeast(0f), 0f),
-                            size = Size((ex - sx).coerceAtMost(canvasW - sx.coerceAtLeast(0f)), canvasH))
+                        val ox = sx.coerceAtLeast(0f)
+                        drawRect(
+                            LeOverlay,
+                            topLeft = Offset(ox, 0f),
+                            size    = Size((ex - ox).coerceAtMost(canvasW - ox), canvasH)
+                        )
                     }
 
                     // ── Start handle (green) ──────────────────────────────────
@@ -286,6 +318,40 @@ fun LoopEditorScreen(
                     drawCircle(LeBg,  knobR * 0.5f, Offset(ex, mid))
                 }
             }
+        }
+
+        // ── Vorhör-Player ──────────────────────────────────────────────────────
+        Box(
+            modifier = Modifier.fillMaxWidth().background(LeBg)
+                .padding(vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val canAudition = !isLoading && auditionUri.isNotEmpty()
+            Text(
+                text      = if (isAuditioning) "◼  STOP" else "▶  VORHÖR",
+                color     = when {
+                    !canAudition -> LeGray
+                    isAuditioning -> LeRed
+                    else          -> LeGreen
+                },
+                fontSize      = 13.sp,
+                fontWeight    = FontWeight.Bold,
+                textAlign     = TextAlign.Center,
+                modifier = Modifier
+                    .background(
+                        when {
+                            !canAudition  -> Color(0x22777777)
+                            isAuditioning -> Color(0x33FF4444)
+                            else          -> Color(0x3300FF88)
+                        },
+                        MaterialTheme.shapes.small
+                    )
+                    .then(
+                        if (canAudition) Modifier.clickable { isAuditioning = !isAuditioning }
+                        else Modifier
+                    )
+                    .padding(horizontal = 28.dp, vertical = 8.dp)
+            )
         }
 
         // ── Fine-tune + Zeit-Anzeige ──────────────────────────────────────────

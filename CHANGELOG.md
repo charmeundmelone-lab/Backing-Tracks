@@ -2,6 +2,41 @@
 
 ---
 
+## [Sprint 5.9 — Loop-Editor Fixes + Live-Player Logik]
+
+**Datum:** 2026-06-21
+**Branch:** main
+
+### WaveformAnalyzer — dataChunkSize-Fix
+- `"data" -> { dataChunkSize = chunkLen; break@outer }` — Chunk-Größe wird jetzt gespeichert
+- `framesPerWindow` berechnet sich als `totalFrames / maxSamples` → 1.000 Samples verteilen sich über den gesamten Song (nicht nur erste 50 Sek)
+- Fallback bei Streaming-WAV (0xFFFFFFFF): 10 Minuten angenommen
+- `winBufSize` bis zu 512 KB (vorher 64 KB cap) für lange Songs
+
+### AuditionPlayer (neu — `audio/AuditionPlayer.kt`)
+- Separater ExoPlayer ausschließlich für Vorhör im Loop-Editor
+- `startLoop(uri, startMs, endMs)` setzt 64× ClippingConfiguration + REPEAT_MODE_ALL
+- `stop()` / `release()` für sauberes Lifecycle-Management
+
+### LoopEditorScreen — vollständige Überarbeitung
+- `Modifier.safeDrawingPadding()` am Root-Layout: Status-Bar und Nav-Bar bleiben frei
+- `auditionUri` State: URI aus TrackMode-Scan wird gespeichert und an AuditionPlayer übergeben
+- `DisposableEffect(Unit)` → `auditionPlayer.release()` bei Composable-Verlassen
+- Vorhör-Button "▶ VORHÖR" / "◼ STOP" zwischen Waveform und Fine-Tune-Panel
+- `LaunchedEffect(isAuditioning, loopStartMs, loopEndMs)` mit 200 ms Debounce → Audition-Player startet neu wenn Handles verschoben werden
+- Pan-Formel korrigiert: `viewStartFraction -= df / zoomLevel` → kein Überscroll am Ende
+- Loop-Overlay Clip korrigiert: `(ex - ox).coerceAtMost(canvasW - ox)` bleibt immer im Canvas
+- Close/Save: `auditionPlayer.stop()` wird vor Callback aufgerufen (kein Hintergrundrauschen)
+
+### MainScreen — LOOP-Button 3 Zustände
+- `PlayerBtn`: neuer `enabled: Boolean = true` Parameter; wenn `false` → kein `clickable`
+- `loopArmed = song != null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs`
+- **Aktiv** (`loopActive`): Tint = Volt, BG = `#1A1A00`
+- **Armed** (`loopArmed`): Tint = VoltDim (50% Volt), BG = `#141400`
+- **Disabled**: Tint = Gray, BG = BgCard, nicht klickbar
+
+---
+
 ## [Sprint 5.8 — Visueller Loop-Editor (Koala-Style)]
 
 **Datum:** 2026-06-21

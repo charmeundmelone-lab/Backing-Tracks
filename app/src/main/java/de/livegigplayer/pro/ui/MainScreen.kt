@@ -850,12 +850,14 @@ private fun GlobalPlayer(
                 bgColor  = BgCard,
                 onClick  = onStop
             )
+            val loopArmed = song != null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs
             PlayerBtn(
                 modifier = Modifier.weight(1f),
                 icon     = Icons.Filled.Repeat,
                 label    = "LOOP",
-                tint     = if (loopActive) Volt else White,
-                bgColor  = if (loopActive) Color(0xFF1A1A00) else BgCard,
+                tint     = when { loopActive -> Volt; loopArmed -> VoltDim; else -> Gray },
+                bgColor  = when { loopActive -> Color(0xFF1A1A00); loopArmed -> Color(0xFF141400); else -> BgCard },
+                enabled  = loopActive || loopArmed,
                 onClick  = onToggleLoop
             )
         }
@@ -865,10 +867,11 @@ private fun GlobalPlayer(
 @Composable
 private fun PlayerBtn(
     modifier: Modifier, icon: ImageVector, label: String,
-    tint: Color, bgColor: Color, onClick: () -> Unit
+    tint: Color, bgColor: Color, enabled: Boolean = true, onClick: () -> Unit
 ) {
     Column(
-        modifier = modifier.fillMaxHeight().background(bgColor).clickable(onClick = onClick),
+        modifier = modifier.fillMaxHeight().background(bgColor)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

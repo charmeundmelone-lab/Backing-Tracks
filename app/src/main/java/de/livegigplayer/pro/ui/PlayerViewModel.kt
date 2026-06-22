@@ -215,7 +215,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val song  = _currentSong.value ?: return
         val start = _loopStartMs.value ?: return
         val end   = _loopEndMs.value   ?: return
-        viewModelScope.launch { dao.updateLoopPoints(song.id, start, end) }
+        // Pure DB write — vollständig isoliert von AudioEngine und Queue
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.updateSongLoopPoints(song.id, start, end)
+        }
         _currentSong.value    = song.copy(loopStartMs = start, loopEndMs = end)
         _isLoopModified.value = false
     }

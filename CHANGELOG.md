@@ -2,6 +2,22 @@
 
 ---
 
+## [Sprint 5.21] — 2026-06-22 — Fix: Hard-wired Save Loop event isoliert von AudioEngine
+
+**Fix: Hard-wired Save Loop event to purely execute Room DB UPDATE via Coroutine,
+completely isolated from AudioEngine**
+
+- `SongDao`: Neue Methode `updateSongLoopPoints(id, start, end)` mit sauberer
+  `@Query("UPDATE songs SET loopStartMs=:start, loopEndMs=:end WHERE id=:id")`
+- `PlayerViewModel.saveLoopPoints()`: Coroutine explizit auf `Dispatchers.IO`,
+  ruft ausschließlich `dao.updateSongLoopPoints()` auf — kein AudioEngine-,
+  Skip-, Next-, mediaController- oder Queue-Aufruf
+- `MainScreen.kt` Save-Button: bereits eine einzige Zeile `{ vm.saveLoopPoints() }`
+- Hinweis: `Long?` nicht verwendbar da DB-Spalten `NOT NULL DEFAULT 0` —
+  `Long` korrekt; null-Semantik über `clearLoop()` (setzt auf `0L`)
+
+---
+
 ## [Sprint 5.20] — 2026-06-21 — Feature: Clear Loop Button
 
 ### Feature: Clear Loop Button (reset state, Room DB, cancel active looping)

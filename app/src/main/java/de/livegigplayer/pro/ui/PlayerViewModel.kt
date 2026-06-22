@@ -149,20 +149,26 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 val pos = engine.positionMs
                 val dur = engine.durationMs
                 if (_prevPositionMs > 1000 && pos < _prevPositionMs - 1000
-                    && _currentSong.value?.autoStop == true && engine.isPlaying
+                    && engine.isPlaying
                     && _loopState.value != LoopState.LOOPING) {
                     val next = nextSong.value
-                    if (next != null) {
-                        Log.d("PlayerViewModel", "Auto-Advance: Song-Ende → '${next.title}'")
-                        skipNext()
-                        engine.play()
-                        _isPlaying.value = true
-                    } else {
-                        Log.d("PlayerViewModel", "Auto-Stop: Song-Ende erkannt, kein nächster Song.")
-                        engine.pause(); engine.seekTo(0L)
-                        _isPlaying.value = false
-                        engine.deactivateLoop()
-                        _loopState.value = LoopState.INACTIVE
+                    when {
+                        next != null -> {
+                            // Nächster Song vorhanden → immer weiter (unabhängig von autoStop)
+                            Log.d("PlayerViewModel", "Auto-Advance: Song-Ende → '${next.title}'")
+                            skipNext()
+                            engine.play()
+                            _isPlaying.value = true
+                        }
+                        _currentSong.value?.autoStop == true -> {
+                            // Kein nächster Song + autoStop=true → Stopp
+                            Log.d("PlayerViewModel", "Auto-Stop: Song-Ende, kein nächster Song.")
+                            engine.pause(); engine.seekTo(0L)
+                            _isPlaying.value = false
+                            engine.deactivateLoop()
+                            _loopState.value = LoopState.INACTIVE
+                        }
+                        // autoStop=false + kein nächster Song → Song loopt weiter (REPEAT_MODE_ONE)
                     }
                 }
                 _prevPositionMs = pos

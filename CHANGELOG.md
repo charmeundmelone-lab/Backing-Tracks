@@ -2,6 +2,35 @@
 
 ---
 
+## [Sprint 5.25] — 2026-06-22 — Fix: Loop-Wiederherstellung + Set-aware nextSong
+
+### Fix 1: Loop-Punkte werden nach App-Neustart wiederhergestellt
+`selectSong()` prüft jetzt nach dem Laden ob der Song gespeicherte Loop-Punkte hat
+(`loopStartMs > 0 && loopEndMs > loopStartMs`). Falls ja: Loop-State wird auf
+`LOOPING` gesetzt, `activateLoopDirect()` wird aufgerufen. Loop startet NICHT
+automatisch — erst wenn der User Play drückt.
+
+### Fix 2: nextSong-Logik ist Set-aware
+Neuer `_currentPlaylistId: MutableStateFlow<Long?>` in PlayerViewModel.
+`selectSong()` nimmt `sourcePlaylistId: Long? = null` — Library-Aufruf bleibt
+`null`, Set-Aufruf übergibt die Playlist-ID.
+
+`nextSong` nutzt jetzt `combine(_queue, songs, _currentSong, _currentPlaylistId)`:
+- Queue nicht leer → erster Queue-Eintrag (unverändert)
+- Queue leer + Set aktiv → nächster Song im selben Set (nach Titel sortiert)
+- Queue leer + Library → nächster alphabetischer Song in Library (wie bisher)
+
+`preloadNext()` verwendet dieselbe Logik wie `nextSong` um den richtigen
+nächsten Song zu puffern.
+
+`skipNext()` leitet via `nextSong.value` weiter und behält `_currentPlaylistId`
+bei (Set-Kontext bleibt über Skip hinweg erhalten).
+
+`MainScreen.kt`: `SetSongList` übergibt `sourcePlaylistId = playlistId` an
+`vm.selectSong()`.
+
+---
+
 ## [Sprint 5.23] — 2026-06-22 — Fix: Resolved drag-cancel state leak between Library Swipe-Right and Save Loop button
 
 ### Code-Audit: Event-Isolation Save-Loop vs. Library-Swipe-Right

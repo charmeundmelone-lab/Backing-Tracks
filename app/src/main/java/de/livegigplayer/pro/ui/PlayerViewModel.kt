@@ -76,17 +76,26 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _editingSongId = MutableStateFlow<Long?>(null)
     val editingSongId: StateFlow<Long?> = _editingSongId.asStateFlow()
 
-    private val _queue = MutableStateFlow<List<Song>>(emptyList())
+    private val _queue           = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
 
-    val nextSong: StateFlow<Song?> = _queue
-        .combine(songs) { q, list ->
-            if (q.isNotEmpty()) q.first()
-            else {
-                val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
+    // Tracks welches Set gerade aktiv ist (null = Library-Modus)
+    private val _currentPlaylistId = MutableStateFlow<Long?>(null)
+
+    val nextSong: StateFlow<Song?> = combine(_queue, songs, _currentSong, _currentPlaylistId) { q, list, current, playlistId ->
+        when {
+            q.isNotEmpty() -> q.first()
+            playlistId != null -> {
+                val setList = list.filter { it.playlistId == playlistId }
+                val idx = setList.indexOfFirst { it.id == current?.id }
+                if (idx in 0 until setList.size - 1) setList[idx + 1] else null
+            }
+            else -> {
+                val idx = list.indexOfFirst { it.id == current?.id }
                 if (idx in 0 until list.size - 1) list[idx + 1] else null
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun addToQueueNext(song: Song) { _queue.value = listOf(song) + _queue.value.filter { it.id != song.id } }
     fun addToQueueEnd(song: Song)  { _queue.value = _queue.value.filter { it.id != song.id } + listOf(song) }
@@ -271,23 +280,43 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSearchQuery(q: String) { _searchQuery.value = q }
 
-    fun selectSong(song: Song, context: Context) {
+    fun selectSong(song: Song, context: Context, sourcePlaylistId: Long? = null) {
         resetLoopState()
+        _currentPlaylistId.value = sourcePlaylistId
         val mode = SongScanner.scan(song, context)
         if (!engine.activatePreloaded(song.id)) engine.load(mode)
         engine.setVolumeDb("drums", song.volDrums); engine.setVolumeDb("bass",   song.volBass)
         engine.setVolumeDb("keys",  song.volKeys);  engine.setVolumeDb("vocals", song.volVocals)
         engine.setVolumeDb("click", song.volClick); engine.setVolumeDb("cue",    song.volCue)
         _currentSong.value = song; _trackMode.value = mode; _isPlaying.value = false
+        // Loop-Punkte aus DB wiederherstellen wenn vorhanden
+        if (song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
+            _loopStartMs.value    = song.loopStartMs
+            _loopEndMs.value      = song.loopEndMs
+            _loopState.value      = LoopState.LOOPING
+            engine.activateLoopDirect(song.loopStartMs, song.loopEndMs)
+            _isLoopModified.value = false
+        }
         preloadNext(context)
     }
 
     private fun preloadNext(context: Context) {
-        val list = songs.value; val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
-        if (idx in 0 until list.size - 1) {
-            val next = list[idx + 1]
-            viewModelScope.launch { val m = withContext(Dispatchers.IO) { SongScanner.scan(next, context) }; engine.preload(next.id, m) }
-        }
+        val list      = songs.value
+        val currentId = _currentSong.value?.id ?: return
+        val playlistId = _currentPlaylistId.value
+        val next = when {
+            _queue.value.isNotEmpty() -> _queue.value.first()
+            playlistId != null -> {
+                val setList = list.filter { it.playlistId == playlistId }
+                val idx = setList.indexOfFirst { it.id == currentId }
+                if (idx in 0 until setList.size - 1) setList[idx + 1] else null
+            }
+            else -> {
+                val idx = list.indexOfFirst { it.id == currentId }
+                if (idx in 0 until list.size - 1) list[idx + 1] else null
+            }
+        } ?: return
+        viewModelScope.launch { val m = withContext(Dispatchers.IO) { SongScanner.scan(next, context) }; engine.preload(next.id, m) }
     }
 
     fun importFolder(context: Context, uri: Uri) {
@@ -309,8 +338,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun skipNext() {
         val queued = dequeueFirst()
         if (queued != null) { selectSong(queued, getApplication()); return }
-        val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }
-        if (i in 0 until l.size - 1) selectSong(l[i + 1], getApplication())
+        val next = nextSong.value ?: return
+        selectSong(next, getApplication(), _currentPlaylistId.value)
     }
     fun toggleMixer()  { _showMixer.value = !_showMixer.value }
     fun closeMixer()   { _showMixer.value = false }

@@ -730,7 +730,7 @@ private fun SetSongList(
                 index    = index + 1,
                 song     = song,
                 selected = song.id == currentSong?.id,
-                onClick  = { if (!isLocked) vm.selectSong(song, context) }
+                onClick  = { if (!isLocked) vm.selectSong(song, context, sourcePlaylistId = playlistId) }
             )
             Spacer(modifier = Modifier.height(2.dp))
         }

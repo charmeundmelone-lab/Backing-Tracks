@@ -472,7 +472,8 @@ private fun ArchivSongRow(
                             else if (dragX < -80f) onQueueEnd()
                         }
                         dragX = 0f
-                    }
+                    },
+                    onDragCancel = { dragX = 0f }
                 ) { _, delta -> dragX += delta }
             }
             .combinedClickable(

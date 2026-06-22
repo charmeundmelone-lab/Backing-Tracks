@@ -2,6 +2,33 @@
 
 ---
 
+## [Sprint 5.23] — 2026-06-22 — Fix: Resolved drag-cancel state leak between Library Swipe-Right and Save Loop button
+
+### Code-Audit: Event-Isolation Save-Loop vs. Library-Swipe-Right
+
+**Audit-Ergebnis:**
+- `executeHardDatabaseSave()` ist vollständig isoliert — ausschließlich DB-Write via
+  `Dispatchers.IO`, kein AudioEngine-, Queue- oder Skip-Aufruf vorhanden. Kein Code-Level-Coupling.
+- Swipe-Right (`detectHorizontalDragGestures`) und Save-Loop (`executeHardDatabaseSave`)
+  sind in komplett getrennten Code-Pfaden.
+
+**Root Cause des gemeldeten Bugs:**
+`detectHorizontalDragGestures` in `ArchivSongRow` fehlte `onDragCancel`-Callback.
+Wenn eine Drag-Geste system-seitig abgebrochen wurde (Finger wandert über Komponentengrenze,
+Multi-Touch, Systemereignis), blieb `dragX` auf dem akkumulierten Wert stehen.
+Beim nächsten Drag-Beginn wurde dieser Stale-Wert weiter aufaddiert und konnte die
+80f-Schwelle überschreiten → `onQueueNext()` feuerte unbeabsichtigt.
+
+**Fix (MainScreen.kt):**
+```kotlin
+detectHorizontalDragGestures(
+    onDragEnd    = { if (!isLocked && !selectionMode) { ... }; dragX = 0f },
+    onDragCancel = { dragX = 0f }   // NEU: verhindert stale-dragX-Akkumulation
+) { _, delta -> dragX += delta }
+```
+
+---
+
 ## [Sprint 5.22] — 2026-06-22 — Fix: Nuked Compose Lambda Leak on Save
 
 **Fix: Nuked Compose Lambda Leak causing Skip-to-Next on save;

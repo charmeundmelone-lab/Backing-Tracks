@@ -81,6 +81,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // Tracks welches Set gerade aktiv ist (null = Library-Modus)
     private val _currentPlaylistId = MutableStateFlow<Long?>(null)
+    val currentPlaylistId: StateFlow<Long?> = _currentPlaylistId.asStateFlow()
 
     val nextSong: StateFlow<Song?> = combine(_queue, songs, _currentSong, _currentPlaylistId) { q, list, current, playlistId ->
         when {
@@ -96,6 +97,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // ── Live-Loop-States (Tab B) ───────────────────────────────────────────────
+    // isArmed: Song hat gespeicherte Loop-Punkte in DB — rein aus currentSong abgeleitet
+    val isArmed: StateFlow<Boolean> = _currentSong
+        .map { it != null && it.loopStartMs > 0L && it.loopEndMs > it.loopStartMs }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    private val _isLoopActiveLive = MutableStateFlow(false)
+    val isLoopActiveLive: StateFlow<Boolean> = _isLoopActiveLive.asStateFlow()
+
+    private val _isExitPending = MutableStateFlow(false)
+    val isExitPending: StateFlow<Boolean> = _isExitPending.asStateFlow()
 
     fun addToQueueNext(song: Song) { _queue.value = listOf(song) + _queue.value.filter { it.id != song.id } }
     fun addToQueueEnd(song: Song)  { _queue.value = _queue.value.filter { it.id != song.id } + listOf(song) }
@@ -154,7 +167,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) {
                 if (_loopState.value == LoopState.LOOPING && engine.isPlaying) {
-                    if (engine.shouldCrossfade()) engine.performCrossfade()
+                    if (_isLoopActiveLive.value && _isExitPending.value
+                        && engine.positionMs >= (_loopEndMs.value ?: Long.MAX_VALUE)) {
+                        // Quantized Exit: loopEndMs erreicht → linear weiterspielen, DB unangetastet
+                        engine.deactivateLoop()
+                        _isLoopActiveLive.value = false
+                        _isExitPending.value    = false
+                        _loopState.value        = LoopState.INACTIVE
+                        _loopStartMs.value      = null
+                        _loopEndMs.value        = null
+                    } else if (!_isExitPending.value && engine.shouldCrossfade()) {
+                        engine.performCrossfade()
+                    }
                 }
                 delay(5L)
             }
@@ -188,6 +212,28 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 _loopState.value      = LoopState.INACTIVE
                 _isLoopModified.value = false
             }
+        }
+    }
+
+    // Tab B Live-Modus: ORANGE → LIVE → EXIT_PENDING → (Quantized Exit zurück zu ORANGE)
+    fun onSetLoopButtonPressed() {
+        val song = _currentSong.value ?: return
+        if (song.loopStartMs <= 0L || song.loopEndMs <= song.loopStartMs) return
+        when {
+            !_isLoopActiveLive.value -> {
+                // ORANGE: Loop einschalten (DB-Punkte laden, Engine aktivieren)
+                _loopStartMs.value      = song.loopStartMs
+                _loopEndMs.value        = song.loopEndMs
+                _loopState.value        = LoopState.LOOPING
+                _isLoopActiveLive.value = true
+                _isLoopModified.value   = false
+                engine.activateLoopDirect(song.loopStartMs, song.loopEndMs)
+            }
+            !_isExitPending.value -> {
+                // LIVE → Quantized Exit vormerken (kein DB-Zugriff)
+                _isExitPending.value = true
+            }
+            // isExitPending == true: kein weiterer Eingriff, Timer übernimmt
         }
     }
 
@@ -266,10 +312,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun resetLoopState() {
         engine.deactivateLoop()
-        _loopState.value      = LoopState.INACTIVE
-        _loopStartMs.value    = null
-        _loopEndMs.value      = null
-        _isLoopModified.value = false
+        _loopState.value        = LoopState.INACTIVE
+        _loopStartMs.value      = null
+        _loopEndMs.value        = null
+        _isLoopModified.value   = false
+        _isLoopActiveLive.value = false
+        _isExitPending.value    = false
     }
 
     fun updateAutoStop(song: Song, enabled: Boolean) {
@@ -289,14 +337,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         engine.setVolumeDb("keys",  song.volKeys);  engine.setVolumeDb("vocals", song.volVocals)
         engine.setVolumeDb("click", song.volClick); engine.setVolumeDb("cue",    song.volCue)
         _currentSong.value = song; _trackMode.value = mode; _isPlaying.value = false
-        // Loop-Punkte aus DB wiederherstellen wenn vorhanden
-        if (song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
-            _loopStartMs.value    = song.loopStartMs
-            _loopEndMs.value      = song.loopEndMs
-            _loopState.value      = LoopState.LOOPING
-            engine.activateLoopDirect(song.loopStartMs, song.loopEndMs)
-            _isLoopModified.value = false
-        }
+        // isArmed leitet sich automatisch aus _currentSong ab — keine Engine-Aktivierung bei Songstart
         preloadNext(context)
     }
 

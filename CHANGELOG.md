@@ -2,6 +2,50 @@
 
 ---
 
+## [Sprint 5.26] — 2026-06-22 — Feature: Quantized Loop Exit with relative loop-duration countdown indicator and DB protection
+
+### Neue Live-Loop-States in PlayerViewModel (isArmed / isLoopActiveLive / isExitPending)
+
+`isArmed`: Abgeleitet aus `_currentSong` — true wenn `loopStartMs > 0 && loopEndMs > loopStartMs`
+in der DB des aktuellen Songs. Kein eigener MutableStateFlow, kein DB-Zugriff.
+
+`isLoopActiveLive`: true wenn die Engine gerade aktiv looopt (vom User explizit per Tab-B-Button
+gestartet). Standard bei Songstart = **false** (Spontaner Catch-In: Song läuft linear auch wenn
+Loop-Punkte gespeichert sind).
+
+`isExitPending`: true wenn der User den Quantized-Exit per Tap auf den gelben Button angefordert hat.
+
+### DB-Schutz (Hintergrund-Fehler behoben)
+`selectSong()` aktiviert den Loop **nicht** mehr automatisch (Sprint 5.25 Auto-Aktivierung entfernt).
+`onSetLoopButtonPressed()` schreibt **niemals** in die DB.
+Quantized-Exit-Handler (5ms-Monitor) schreibt **niemals** in die DB.
+DB-Werte werden nur durch `executeHardDatabaseSave()` / `saveLoopPoints()` / `clearLoop()` geändert
+— alle explizite User-Aktionen über dedizierte Buttons.
+
+### Farbcodierung Tab-B LOOP-Button (GlobalPlayer)
+- `isArmed == false`                            → GRAU (Button disabled)
+- `isArmed == true && isLoopActiveLive == false` → ORANGE / Label "ARMED"
+- `isLoopActiveLive == true && isExitPending == false` → VOLT-GELB / Label "LIVE"
+- `isLoopActiveLive == true && isExitPending == true`  → VOLT-GELB / Label "EXIT" + Countdown-Balken
+
+### Countdown-Balken (Canvas-Overlay)
+Bei `isExitPending == true`: horizontaler Balken am unteren Rand des LOOP-Buttons.
+Formel: `progress = (loopEndMs − currentPosition) / (loopEndMs − loopStartMs)`
+Der Balken schrumpft von rechts nach links gegen null (DrawScope: `size.copy(width = size.width * progress)`).
+
+### Quantized Exit (5ms-Monitor)
+Wenn `isExitPending == true && positionMs >= loopEndMs`:
+`engine.deactivateLoop()` → Song läuft nahtlos linear weiter.
+`isLoopActiveLive = false`, `isExitPending = false`, `loopState = INACTIVE`.
+Alle DB-Felder (`loopStartMs`/`loopEndMs` in Room) bleiben **vollständig unangetastet**.
+Danach: `isArmed` bleibt true → Button zeigt wieder ORANGE an.
+
+### Tab-A bleibt unverändert
+Wenn kein Set aktiv (`currentPlaylistId == null`): LOOP-Button nutzt weiterhin
+die bestehende A/B-Tipp-Logik (`onLoopButtonPressed()`, `LoopState.INACTIVE → A_SET → LOOPING`).
+
+---
+
 ## [Sprint 5.25] — 2026-06-22 — Fix: Loop-Wiederherstellung + Set-aware nextSong
 
 ### Fix 1: Loop-Punkte werden nach App-Neustart wiederhergestellt

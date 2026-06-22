@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -137,7 +138,11 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
     val loopState     by vm.loopState.collectAsState()
     val loopStartMs   by vm.loopStartMs.collectAsState()
     val loopEndMs     by vm.loopEndMs.collectAsState()
-    val isLoopModified by vm.isLoopModified.collectAsState()
+    val isLoopModified    by vm.isLoopModified.collectAsState()
+    val isArmed           by vm.isArmed.collectAsState()
+    val isLoopActiveLive  by vm.isLoopActiveLive.collectAsState()
+    val isExitPending     by vm.isExitPending.collectAsState()
+    val currentPlaylistId by vm.currentPlaylistId.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
     var isLocked         by remember { mutableStateOf(false) }
@@ -174,15 +179,22 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
 
             // Global Player — fest verankert, in beiden Tabs sichtbar
             GlobalPlayer(
-                song          = currentSong,
-                nextSong      = nextSong,
-                isPlaying     = isPlaying,
-                loopState     = loopState,
-                positionMs    = positionMs,
-                durationMs    = durationMs,
-                onPlayPause   = { vm.togglePlayPause() },
-                onStop        = { vm.stopPlayback() },
-                onToggleLoop  = { vm.onLoopButtonPressed(positionMs) }
+                song             = currentSong,
+                nextSong         = nextSong,
+                isPlaying        = isPlaying,
+                loopState        = loopState,
+                isArmed          = isArmed,
+                isLoopActiveLive = isLoopActiveLive,
+                isExitPending    = isExitPending,
+                isInSetMode      = currentPlaylistId != null,
+                positionMs       = positionMs,
+                durationMs       = durationMs,
+                loopStartMs      = loopStartMs,
+                loopEndMs        = loopEndMs,
+                onPlayPause      = { vm.togglePlayPause() },
+                onStop           = { vm.stopPlayback() },
+                onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
+                onSetLoopButton  = { vm.onSetLoopButtonPressed() }
             )
             // A/B Loop Panel — erscheint sobald A oder Loop gesetzt
             LoopPanel(
@@ -772,8 +784,12 @@ private val LoopOrange = Color(0xFFFF8C00)
 private fun GlobalPlayer(
     song: Song?, nextSong: Song?,
     isPlaying: Boolean, loopState: LoopState,
+    isArmed: Boolean, isLoopActiveLive: Boolean, isExitPending: Boolean,
+    isInSetMode: Boolean,
     positionMs: Long, durationMs: Long,
-    onPlayPause: () -> Unit, onStop: () -> Unit, onToggleLoop: () -> Unit
+    loopStartMs: Long?, loopEndMs: Long?,
+    onPlayPause: () -> Unit, onStop: () -> Unit,
+    onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit
 ) {
     val progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
     val remainMs = (durationMs - positionMs).coerceAtLeast(0L)
@@ -845,28 +861,94 @@ private fun GlobalPlayer(
                 bgColor  = BgCard,
                 onClick  = onStop
             )
-            PlayerBtn(
-                modifier   = Modifier.weight(1f),
-                icon       = Icons.Filled.Repeat,
-                label      = when (loopState) {
-                    LoopState.INACTIVE -> "LOOP"
-                    LoopState.A_SET    -> "SET B"
-                    LoopState.LOOPING  -> "LOOP"
-                },
-                tint       = when (loopState) {
-                    LoopState.INACTIVE -> Gray
-                    LoopState.A_SET    -> LoopOrange
-                    LoopState.LOOPING  -> Volt
-                },
-                bgColor    = when (loopState) {
-                    LoopState.INACTIVE -> BgCard
-                    LoopState.A_SET    -> Color(0xFF1A0E00)
-                    LoopState.LOOPING  -> Color(0xFF1A1A00)
-                },
-                enabled    = song != null,
-                pressDown  = true,
-                onClick    = onToggleLoop
-            )
+            if (isInSetMode) {
+                // Tab B: Farbcodierung nach Live-Loop-State
+                val loopTint = when {
+                    !isArmed          -> Gray
+                    !isLoopActiveLive -> LoopOrange
+                    else              -> Volt
+                }
+                val loopBg = when {
+                    !isArmed          -> BgCard
+                    !isLoopActiveLive -> Color(0xFF1A0E00)
+                    else              -> Color(0xFF1A1A00)
+                }
+                val loopLabel = when {
+                    !isArmed          -> "LOOP"
+                    !isLoopActiveLive -> "ARMED"
+                    isExitPending     -> "EXIT"
+                    else              -> "LIVE"
+                }
+                val exitProgress = if (isExitPending && loopEndMs != null && loopStartMs != null
+                    && loopEndMs > loopStartMs) {
+                    ((loopEndMs - positionMs).coerceAtLeast(0L).toFloat() /
+                        (loopEndMs - loopStartMs).toFloat()).coerceIn(0f, 1f)
+                } else 0f
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(loopBg)
+                        .then(
+                            if (isArmed && song != null)
+                                Modifier.pointerInput(isArmed, isLoopActiveLive, isExitPending) {
+                                    detectTapGestures(onPress = { onSetLoopButton() })
+                                }
+                            else Modifier
+                        )
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Filled.Repeat, contentDescription = loopLabel,
+                            tint = loopTint, modifier = Modifier.size(34.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(loopLabel, color = loopTint, fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold)
+                    }
+                    // Countdown-Balken: schrumpft von rechts nach links gegen null
+                    if (isExitPending && exitProgress > 0f) {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .align(Alignment.BottomCenter)
+                        ) {
+                            drawRect(
+                                color = Volt,
+                                size  = size.copy(width = size.width * exitProgress)
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Tab A: bestehende A/B-Tipp-Logik
+                PlayerBtn(
+                    modifier   = Modifier.weight(1f),
+                    icon       = Icons.Filled.Repeat,
+                    label      = when (loopState) {
+                        LoopState.INACTIVE -> "LOOP"
+                        LoopState.A_SET    -> "SET B"
+                        LoopState.LOOPING  -> "LOOP"
+                    },
+                    tint       = when (loopState) {
+                        LoopState.INACTIVE -> Gray
+                        LoopState.A_SET    -> LoopOrange
+                        LoopState.LOOPING  -> Volt
+                    },
+                    bgColor    = when (loopState) {
+                        LoopState.INACTIVE -> BgCard
+                        LoopState.A_SET    -> Color(0xFF1A0E00)
+                        LoopState.LOOPING  -> Color(0xFF1A1A00)
+                    },
+                    enabled    = song != null,
+                    pressDown  = true,
+                    onClick    = onToggleLoop
+                )
+            }
         }
     }
 }

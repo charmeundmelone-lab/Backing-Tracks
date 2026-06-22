@@ -2,6 +2,26 @@
 
 ---
 
+## [Sprint 5.27] — 2026-06-22 — Fix: Auto-Advance zum nächsten Song nach Song-Ende
+
+### Problem
+Bei Songs mit `autoStop = true` wurde die Wiedergabe am Ende gestoppt, ohne zum
+nächsten Song weiterzugehen. Ein `onCompletion`-Listener existierte nie (ExoPlayer
+`REPEAT_MODE_ONE` feuert kein `STATE_ENDED`); die Song-Ende-Erkennung läuft über
+den 200ms-Poll (Rückwärtssprung-Erkennung).
+
+### Fix: Isolated `onCompletion → loadNext` in 200ms-Poll (`PlayerViewModel.kt`)
+Wenn `autoStop == true && loop nicht aktiv && Song hat geloopt`:
+- **Nächster Song vorhanden** → `skipNext()` + `engine.play()` — nahtloser Übergang
+- **Kein nächster Song** → bisheriges Stop-Verhalten bleibt erhalten
+
+### Strikte Trennung
+- Kein Zusammenhang mit SaveLoop-Button oder LoopActive-State
+- Die Bedingung `_loopState.value != LoopState.LOOPING` verhindert Auslösung bei aktivem Loop
+- DB wird nicht berührt
+
+---
+
 ## [Sprint 5.26] — 2026-06-22 — Feature: Quantized Loop Exit with relative loop-duration countdown indicator and DB protection
 
 ### Neue Live-Loop-States in PlayerViewModel (isArmed / isLoopActiveLive / isExitPending)

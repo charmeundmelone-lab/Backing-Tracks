@@ -151,11 +151,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 if (_prevPositionMs > 1000 && pos < _prevPositionMs - 1000
                     && _currentSong.value?.autoStop == true && engine.isPlaying
                     && _loopState.value != LoopState.LOOPING) {
-                    Log.d("PlayerViewModel", "Auto-Stop: Song-Ende erkannt, stoppe.")
-                    engine.pause(); engine.seekTo(0L)
-                    _isPlaying.value = false
-                    engine.deactivateLoop()
-                    _loopState.value = LoopState.INACTIVE
+                    val next = nextSong.value
+                    if (next != null) {
+                        Log.d("PlayerViewModel", "Auto-Advance: Song-Ende → '${next.title}'")
+                        skipNext()
+                        engine.play()
+                        _isPlaying.value = true
+                    } else {
+                        Log.d("PlayerViewModel", "Auto-Stop: Song-Ende erkannt, kein nächster Song.")
+                        engine.pause(); engine.seekTo(0L)
+                        _isPlaying.value = false
+                        engine.deactivateLoop()
+                        _loopState.value = LoopState.INACTIVE
+                    }
                 }
                 _prevPositionMs = pos
                 _positionMs.value = pos

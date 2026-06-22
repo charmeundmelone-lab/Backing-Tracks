@@ -337,7 +337,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         engine.setVolumeDb("keys",  song.volKeys);  engine.setVolumeDb("vocals", song.volVocals)
         engine.setVolumeDb("click", song.volClick); engine.setVolumeDb("cue",    song.volCue)
         _currentSong.value = song; _trackMode.value = mode; _isPlaying.value = false
-        // isArmed leitet sich automatisch aus _currentSong ab — keine Engine-Aktivierung bei Songstart
+        // Tab A (Library): Loop-Punkte auto-wiederherstellen wie Sprint 5.25
+        // Tab B (Set): kein Auto-Aktivieren — isArmed leitet sich aus _currentSong ab (Spontaner Catch-In)
+        if (sourcePlaylistId == null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
+            _loopStartMs.value    = song.loopStartMs
+            _loopEndMs.value      = song.loopEndMs
+            _loopState.value      = LoopState.LOOPING
+            engine.activateLoopDirect(song.loopStartMs, song.loopEndMs)
+            _isLoopModified.value = false
+        }
         preloadNext(context)
     }
 

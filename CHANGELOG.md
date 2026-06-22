@@ -2,6 +2,19 @@
 
 ---
 
+## [Sprint 5.22] — 2026-06-22 — Fix: Nuked Compose Lambda Leak on Save
+
+**Fix: Nuked Compose Lambda Leak causing Skip-to-Next on save;
+implemented hard-wired Room DB loop persistence**
+
+- `MainActivity.kt`: Verifiziert sauber — `MainScreen()` ohne Callbacks, kein Leak
+- `SongDao`: `forceUpdateLoopPoints(songId, startMs, endMs)` — direktes Room-Update
+- `PlayerViewModel`: `executeHardDatabaseSave()` — Dispatchers.IO, nur DAO-Aufruf,
+  null Audio-Engine-/Skip-/Queue-Berührung
+- `MainScreen` Save-Button: direkt verdrahtet auf `vm.executeHardDatabaseSave()`
+
+---
+
 ## [Sprint 5.21] — 2026-06-22 — Fix: Hard-wired Save Loop event isoliert von AudioEngine
 
 **Fix: Hard-wired Save Loop event to purely execute Room DB UPDATE via Coroutine,

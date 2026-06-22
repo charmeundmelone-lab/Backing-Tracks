@@ -211,6 +211,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         updateIsLoopModified()
     }
 
+    fun executeHardDatabaseSave() {
+        val currentSong = _currentSong.value ?: return
+        val start = _loopStartMs.value ?: return
+        val end   = _loopEndMs.value   ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.forceUpdateLoopPoints(currentSong.id, start, end)
+        }
+        _currentSong.value    = currentSong.copy(loopStartMs = start, loopEndMs = end)
+        _isLoopModified.value = false
+    }
+
     fun saveLoopPoints() {
         val song  = _currentSong.value ?: return
         val start = _loopStartMs.value ?: return

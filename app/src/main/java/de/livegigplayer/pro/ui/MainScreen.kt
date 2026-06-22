@@ -194,7 +194,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
                 onNudgeStart   = { vm.nudgeLoopStart(it) },
                 onNudgeEnd     = { vm.nudgeLoopEnd(it) },
                 onRangeChanged = { s, e -> vm.setLoopRange(s, e) },
-                onSave         = { vm.saveLoopPoints() },
+                onSave         = { vm.executeHardDatabaseSave() },
                 onClearLoop    = { vm.clearLoop() }
             )
         }

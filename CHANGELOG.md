@@ -2,6 +2,34 @@
 
 ---
 
+## [Sprint 5.24] — 2026-06-22 — Fix: nextSong reaktivitätsfehler
+
+**Root Cause:** `nextSong` kombinierte nur `_queue` und `songs`. `_currentSong` wurde
+als `.value` im Lambda abgelesen — nicht reaktiv. Wenn `selectSong()` aufgerufen wird,
+emittiert Room keine neue Songs-Liste (kein DB-Write). `nextSong` blieb auf dem alten
+Wert stehen. Erst beim nächsten DB-Write (z.B. Save-Loop) emittierte Room → `nextSong`
+recomputed → "Careless Whisper" erschien scheinbar ausgelöst durch den Save-Button.
+
+**Fix (PlayerViewModel.kt):**
+Alle drei Inputs (`_queue`, `songs`, `_currentSong`) in ein dreiwertiges `combine()`
+aufgenommen. `nextSong` reagiert jetzt sofort auf Song-Selektion — nicht erst beim
+nächsten DB-Write.
+
+```kotlin
+// Vorher (buggy):
+val nextSong = _queue.combine(songs) { q, list ->
+    val idx = list.indexOfFirst { it.id == _currentSong.value?.id }  // nicht reaktiv!
+    ...
+}
+// Nachher (fix):
+val nextSong = combine(_queue, songs, _currentSong) { q, list, current ->
+    val idx = list.indexOfFirst { it.id == current?.id }  // reaktiv
+    ...
+}
+```
+
+---
+
 ## [Sprint 5.23] — 2026-06-22 — Fix: Resolved drag-cancel state leak between Library Swipe-Right and Save Loop button
 
 ### Code-Audit: Event-Isolation Save-Loop vs. Library-Swipe-Right

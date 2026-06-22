@@ -79,14 +79,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _queue = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
 
-    val nextSong: StateFlow<Song?> = _queue
-        .combine(songs) { q, list ->
-            if (q.isNotEmpty()) q.first()
-            else {
-                val idx = list.indexOfFirst { it.id == _currentSong.value?.id }
-                if (idx in 0 until list.size - 1) list[idx + 1] else null
-            }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val nextSong: StateFlow<Song?> = combine(_queue, songs, _currentSong) { q, list, current ->
+        if (q.isNotEmpty()) q.first()
+        else {
+            val idx = list.indexOfFirst { it.id == current?.id }
+            if (idx in 0 until list.size - 1) list[idx + 1] else null
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun addToQueueNext(song: Song) { _queue.value = listOf(song) + _queue.value.filter { it.id != song.id } }
     fun addToQueueEnd(song: Song)  { _queue.value = _queue.value.filter { it.id != song.id } + listOf(song) }

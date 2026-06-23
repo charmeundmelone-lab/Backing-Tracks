@@ -100,27 +100,70 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-06-21
-**CI Build:** #172 — ausstehend
-**Commit:** Rollback Sprint 5.16 — Visueller Loop-Editor entfernt
+**Datum:** 2026-06-23
+**CI Build:** #199 ✅ — grün
+**Branch:** `claude/new-session-ktxvys` (Remote-Session-Branch — enthält alle Änderungen dieser Session)
+**Commit:** Sprint 5.18 — Schreibschutz für Loops im Gig-Set-Modus
 
-### Rollback Sprint 5.16
+### Branch-Hinweis für neue Sessions
+Die remote Web-Session nutzt den Branch `claude/new-session-ktxvys`.
+Bei neuer Session diesen Stand mergen:
+```bash
+git checkout main
+git merge claude/new-session-ktxvys
+git push origin main
+```
 
-Visueller Loop-Editor (`LoopEditorScreen.kt`, `LoopEditorViewModel.kt`) restlos entfernt.
-Grund: UI friert auf Testgerät trotz aller Fixes (5.12–5.15) weiterhin ein — Feature wird von Grund auf neu konzipiert.
-Entfernt: LoopEditorScreen, LoopEditorViewModel, AuditionPlayer-Block in PlayerViewModel, Loop-Button im SongEditorSheet, loopEditorSong-State in MainScreen.
-Unangetastet: Room-DB (loopStartMs/loopEndMs bleiben), LOOP-Button im GlobalPlayer, WaveformAnalyzer, AuditionPlayer.kt.
+### Sprint 5.17 DONE: Positionsfix, Matching-UI, Loop-READY-State (CI #198)
 
-### Abgeschlossene Sprints
+- `sanitizeSetPositions(setId)` in GigViewModel: renummeriert beim Öffnen
+  eines Sets alle Songs von 0 aufsteigend (kein 01,01,02,02 mehr)
+- `SetSongRow` jetzt 1:1 wie `ArchivSongRow`: 72dp, 24sp Volt-Nummer (44dp),
+  15sp Bold White Titel, 11sp Gray Subtitle "artist · bpm | duration"
+- Loop-Auto-Aktivierung entfernt: Song lädt Punkte vor (loopStartMs/loopEndMs),
+  aber `_loopState` bleibt INACTIVE — User muss LOOP drücken
+- LOOP-Button zeigt "READY" (VoltDim) wenn Punkte vorgeladen, kein Loop aktiv
+- LoopPanel erscheint auch bei INACTIVE wenn Punkte vorhanden
+- Einmaliger LOOP-Druck bei READY → springt direkt zu LOOPING (kein A_SET)
 
-- **Sprint 5.3 DONE:** A/B-Loop (snap-to-beat, 8 Takte, alle Stems synchron), Auto-Stop (DB v8, Switch im Editor), LOOP-Button leuchtet Volt wenn aktiv
-- **Sprint 5.2 DONE:** Zwei-Tab-Layout (Archiv/Playlist), Mini-Player 96dp, Set-Akkordeon, StageTraxx-Queue, Import-Bugfixes (Modus A Einzel-Eintrag, Click case-insensitiv), Tab-B-Sicherheits-Audit
-- **Sprint 5.1 DONE:** ArchivSongRow (combinedClickable, Kapo-Stepper, Inline-Edit, Batch-Modus, GenreBar)
-- **Sprint 5 DONE:** ExoPlayer 1.3.1, Multitrack-Support, Mixer, Preload
+### Sprint 5.18 DONE: Strikter Schreibschutz im Gig-Set-Modus (CI #199)
+
+- `isGigSetMode: StateFlow<Boolean>` in PlayerViewModel
+- `loadSetAsQueue` setzt `isGigSet = true` → bleibt durch skipNext/skipPrevious erhalten
+- LOOP-Button im Set: reiner Ein/Aus-Schalter (kein A_SET, kein DB-Schreiben)
+  - Kein gespeicherter Loop → Button grau/inaktiv, kein Effekt
+  - Gespeicherter Loop vorhanden → READY → Tippen → LOOPING → Tippen → READY
+- Guards in: `nudgeLoopStart`, `nudgeLoopEnd`, `setLoopRange`, `saveLoopPoints`,
+  `executeHardDatabaseSave`, `clearLoop` — alle `return` im Set-Modus
+- LoopPanel im Gig-Set-Modus komplett ausgeblendet
+
+### Gig/Set-Architektur (DB Phase 2, abgeschlossen)
+
+Neue Tabellen in AppDatabase (Migration 2→9, dann Bridge + fallbackToDestructive entfernt bei v10):
+- `GigEntity` (gigId, name)
+- `SetEntity` (setId, gigOwnerId, name, position)
+- `SetSongCrossRef` (setId, songId, positionInSet, isCompleted)
+- `SongInSet` = @Embedded Song + positionInSet + completedInSet
+
+Neue Dateien:
+- `data/GigEntity.kt`, `data/SetEntity.kt`, `data/SetWithSongs.kt`
+- `data/GigDao.kt`, `data/SetDao.kt`
+- `ui/GigViewModel.kt`
+- `ui/GigManagementScreen.kt`
+
+Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
+
+### Abgeschlossene frühere Sprints
+
+- **Sprint 5.16 ROLLBACK:** Visueller Loop-Editor entfernt (UI-Freeze)
+- **Sprint 5.3 DONE:** A/B-Loop, Auto-Stop, LOOP-Button
+- **Sprint 5.2 DONE:** Zwei-Tab-Layout, Mini-Player, Set-Akkordeon, Queue
+- **Sprint 5.1 DONE:** ArchivSongRow, Kapo-Stepper, Inline-Edit, Batch-Modus
+- **Sprint 5 DONE:** ExoPlayer 1.3.1, Multitrack, Mixer, Preload
 
 ### Offene TODOs (nächste Session)
 
-- Loop-Editor: Neukonzeption mit Gemini (von Grund auf)
-- Set-Verwaltung UI: Sets anlegen / umbenennen
-- Song-zu-Set-Zuweisung im UI (aktuell nur per Import)
-- Playlist-Tab: Queue-Swipe (Swipe rechts/links auf Stage-Songs)
+- **Loop-Editor Neukonzeption:** Von Grund auf neu (hatte UI-Freeze-Probleme)
+- **Set-Umbenennen:** Sets können noch nicht umbenannt werden
+- **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
+- **Playlist-Tab Queue-Swipe:** Swipe rechts/links auf Stage-Songs

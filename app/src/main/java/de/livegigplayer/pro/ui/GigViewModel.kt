@@ -119,9 +119,9 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     // ── Auto-Arm: lädt ersten ungespielten Song in Player (ohne Auto-Play) ──────
 
     fun armSetIfIdle(setId: Long, playerVm: PlayerViewModel) {
+        _activeSetId.value = setId
         if (playerVm.currentSong.value != null) return
         viewModelScope.launch {
-            _activeSetId.value = setId
             val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
             val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
             playerVm.selectSong(first.song, getApplication(), isGigSet = true)

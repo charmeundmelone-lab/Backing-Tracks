@@ -28,7 +28,7 @@ interface SetDao {
     // Variante B aus der Spezifikation: geordneter INNER JOIN mit positionInSet + isCompleted
     @Transaction
     @Query("""
-        SELECT songs.*, ref.positionInSet, ref.isCompleted
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet
         FROM songs
         INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
         WHERE ref.setId = :setId

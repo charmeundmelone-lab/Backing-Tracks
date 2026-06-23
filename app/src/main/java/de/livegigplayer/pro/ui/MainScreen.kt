@@ -171,7 +171,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             // Tab content
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
-                    0 -> ArchivTab(vm = vm, isLocked = isLocked)
+                    0 -> ArchivTab(vm = vm, gigVm = gigVm, isLocked = isLocked)
                     1 -> GigManagementScreen(vm = gigVm)
                 }
             }
@@ -338,7 +338,7 @@ private fun TopBar(
 // ── Tab A: Archiv ─────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
+private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolean) {
     val context       = LocalContext.current
     val songs         by vm.filteredSongs.collectAsState()
     val currentSong   by vm.currentSong.collectAsState()
@@ -348,10 +348,11 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
     val searchQuery   by vm.searchQuery.collectAsState()
     val selectionMode = selectedIds.isNotEmpty()
 
-    var searchActive  by remember { mutableStateOf(false) }
-    var editSheet     by remember { mutableStateOf<Song?>(null) }
-    val sheetState    = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope         = rememberCoroutineScope()
+    var searchActive     by remember { mutableStateOf(false) }
+    var editSheet        by remember { mutableStateOf<Song?>(null) }
+    var showSetPicker    by remember { mutableStateOf(false) }
+    val sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope            = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Search bar
@@ -391,14 +392,31 @@ private fun ArchivTab(vm: PlayerViewModel, isLocked: Boolean) {
             }
         }
 
-        // Batch genre bar
+        // Batch genre bar + Set-Zuweisung
         if (selectionMode) {
             GenreBar(
-                count   = selectedIds.size,
-                onGenre = { vm.applyGenre(it) },
-                onClear = { vm.clearSelection() }
+                count      = selectedIds.size,
+                onGenre    = { vm.applyGenre(it) },
+                onClear    = { vm.clearSelection() },
+                onAddToSet = { showSetPicker = true }
             )
         }
+    }
+
+    // Set-Picker Dialog
+    if (showSetPicker) {
+        val orderedIds = songs.filter { it.id in selectedIds }.map { it.id }
+        AddToSetDialog(
+            gigVm      = gigVm,
+            songCount  = selectedIds.size,
+            songIds    = orderedIds,
+            onConfirm  = { setId ->
+                gigVm.addSongsToSet(setId, orderedIds)
+                vm.clearSelection()
+                showSetPicker = false
+            },
+            onDismiss  = { showSetPicker = false }
+        )
     }
 
     // Bottom-Sheet Editor
@@ -1097,21 +1115,31 @@ private fun fmtMs(ms: Long): String {
 
 // ── Genre Bar ─────────────────────────────────────────────────────────────────
 @Composable
-private fun GenreBar(count: Int, onGenre: (String) -> Unit, onClear: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().height(80.dp).background(BgDeep)) {
+private fun GenreBar(count: Int, onGenre: (String) -> Unit, onClear: () -> Unit, onAddToSet: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().background(BgDeep)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("$count Song${if (count == 1) "" else "s"} markiert",
                 color = White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Button(
+                onClick = onAddToSet,
+                colors = ButtonDefaults.buttonColors(containerColor = Volt),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Filled.QueueMusic, contentDescription = null,
+                    tint = Color.Black, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("→ Set", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
             IconButton(onClick = onClear) {
                 Icon(Icons.Filled.Close, contentDescription = "Auswahl aufheben",
                     tint = Gray, modifier = Modifier.size(20.dp))
             }
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             listOf("Pop/Rock", "Folk/Country", "Deutsch", "Groove").forEach { g ->
@@ -1123,6 +1151,125 @@ private fun GenreBar(count: Int, onGenre: (String) -> Unit, onClear: () -> Unit)
                 ) {
                     Text(g, color = Volt, fontSize = 10.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+// ── Add-to-Set Dialog ────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddToSetDialog(
+    gigVm: GigViewModel,
+    songCount: Int,
+    songIds: List<Long>,
+    onConfirm: (setId: Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val allGigs by gigVm.allGigs.collectAsState()
+    var pickedGigId by remember { mutableStateOf<Long?>(null) }
+    val pickedGig = allGigs.find { it.gigId == pickedGigId }
+
+    val setsForGig by remember(pickedGigId) {
+        if (pickedGigId != null) gigVm.getSetsForGig(pickedGigId!!)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(emptyList())
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = BgCard
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (pickedGig != null) {
+                    IconButton(onClick = { pickedGigId = null }) {
+                        Icon(Icons.Filled.ChevronLeft, contentDescription = "Zurück",
+                            tint = White, modifier = Modifier.size(26.dp))
+                    }
+                    Text(pickedGig.name, color = White, fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                } else {
+                    Text("$songCount Song${if (songCount == 1) "" else "s"} zu Set hinzufügen",
+                        color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f))
+                }
+            }
+
+            if (pickedGig == null) {
+                if (allGigs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(120.dp),
+                        contentAlignment = Alignment.Center) {
+                        Text("Noch keine Gigs — erst in Tab B einen Gig anlegen.",
+                            color = Gray, fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                } else {
+                    Text("Gig wählen:", color = Gray, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 8.dp))
+                    allGigs.forEach { gig ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .background(BgTrack, shape = MaterialTheme.shapes.small)
+                                .clickable { pickedGigId = gig.gigId }
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(gig.name, color = White, fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null,
+                                tint = Gray, modifier = Modifier.size(22.dp))
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            } else {
+                if (setsForGig.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(120.dp),
+                        contentAlignment = Alignment.Center) {
+                        Text("Dieser Gig hat noch keine Sets.",
+                            color = Gray, fontSize = 13.sp)
+                    }
+                } else {
+                    Text("Set wählen:", color = Gray, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 8.dp))
+                    setsForGig.forEach { set ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .background(BgTrack, shape = MaterialTheme.shapes.small)
+                                .clickable { onConfirm(set.setId) }
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("%02d".format(set.position + 1),
+                                color = Volt, fontSize = 16.sp, fontWeight = FontWeight.Black,
+                                modifier = Modifier.width(36.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(set.name, color = White, fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.Filled.Check, contentDescription = null,
+                                tint = Volt, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
                 }
             }
         }

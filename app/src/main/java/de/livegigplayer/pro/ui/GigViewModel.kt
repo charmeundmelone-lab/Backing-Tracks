@@ -108,7 +108,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             val toPlay = songs.subList(startIdx, songs.size).filter { !it.completedInSet }
             if (toPlay.isEmpty()) return@launch
             playerVm.clearQueue()
-            playerVm.selectSong(toPlay.first().song, getApplication())
+            playerVm.selectSong(toPlay.first().song, getApplication(), isGigSet = true)
             toPlay.drop(1).forEach { playerVm.addToQueueEnd(it.song) }
             playerVm.onSongCompleted = { completedId ->
                 viewModelScope.launch(Dispatchers.IO) {

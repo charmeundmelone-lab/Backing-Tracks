@@ -83,6 +83,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _currentPlaylistId = MutableStateFlow<Long?>(null)
     val currentPlaylistId: StateFlow<Long?> = _currentPlaylistId.asStateFlow()
 
+    // Gig-Set-Modus: Loop-Punkte sind schreibgeschützt, kein A/B-Setzen
+    private val _isGigSetMode = MutableStateFlow(false)
+    val isGigSetMode: StateFlow<Boolean> = _isGigSetMode.asStateFlow()
+
     val nextSong: StateFlow<Song?> = combine(_queue, songs, _currentSong, _currentPlaylistId) { q, list, current, playlistId ->
         when {
             q.isNotEmpty() -> q.first()
@@ -196,6 +200,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onLoopButtonPressed(currentPosMs: Long) {
+        if (_isGigSetMode.value) {
+            // Set-Modus: reiner Ein/Aus-Schalter, kein Schreiben in DB, kein A_SET
+            val preStart = _loopStartMs.value
+            val preEnd   = _loopEndMs.value
+            when (_loopState.value) {
+                LoopState.INACTIVE, LoopState.A_SET -> {
+                    if (preStart != null && preEnd != null) {
+                        _loopState.value = LoopState.LOOPING
+                        engine.activateLoopDirect(preStart, preEnd)
+                    }
+                    // Kein gespeicherter Loop → kein Effekt
+                }
+                LoopState.LOOPING -> {
+                    engine.deactivateLoop()
+                    _loopState.value = LoopState.INACTIVE
+                    // Punkte bleiben in _loopStartMs/_loopEndMs (READY bleibt sichtbar)
+                }
+            }
+            return
+        }
+
         when (_loopState.value) {
             LoopState.INACTIVE -> {
                 val preStart = _loopStartMs.value
@@ -257,6 +282,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setLoopRange(startMs: Long, endMs: Long) {
+        if (_isGigSetMode.value) return
         if (endMs - startMs < MIN_LOOP_DURATION_MS) return
         _loopStartMs.value = startMs
         _loopEndMs.value   = endMs
@@ -267,6 +293,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun nudgeLoopStart(deltaMs: Long) {
+        if (_isGigSetMode.value) return
         val start = _loopStartMs.value ?: return
         val end   = _loopEndMs.value   ?: return
         val new   = (start + deltaMs).coerceIn(0L, end - MIN_LOOP_DURATION_MS)
@@ -276,6 +303,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun nudgeLoopEnd(deltaMs: Long) {
+        if (_isGigSetMode.value) return
         val start = _loopStartMs.value ?: return
         val end   = _loopEndMs.value   ?: return
         val dur   = engine.durationMs.let { if (it > 0) it else end + 30_000L }
@@ -286,6 +314,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun executeHardDatabaseSave() {
+        if (_isGigSetMode.value) return
         val currentSong = _currentSong.value ?: return
         val start = _loopStartMs.value ?: return
         val end   = _loopEndMs.value   ?: return
@@ -297,6 +326,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveLoopPoints() {
+        if (_isGigSetMode.value) return
         val song  = _currentSong.value ?: return
         val start = _loopStartMs.value ?: return
         val end   = _loopEndMs.value   ?: return
@@ -309,6 +339,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearLoop() {
+        if (_isGigSetMode.value) return
         val song = _currentSong.value
         // Deaktiviert Loop-Engine ohne Playback zu unterbrechen
         engine.deactivateLoop()
@@ -347,8 +378,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSearchQuery(q: String) { _searchQuery.value = q }
 
-    fun selectSong(song: Song, context: Context, sourcePlaylistId: Long? = null) {
+    fun selectSong(song: Song, context: Context, sourcePlaylistId: Long? = null, isGigSet: Boolean = false) {
         resetLoopState()
+        _isGigSetMode.value = isGigSet
         _currentPlaylistId.value = sourcePlaylistId
         val mode = SongScanner.scan(song, context)
         if (!engine.activatePreloaded(song.id)) engine.load(mode)
@@ -400,20 +432,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun togglePlayPause() { if (engine.isPlaying) { engine.pause(); _isPlaying.value = false } else { engine.play(); _isPlaying.value = true } }
     fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
-    fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication()) else engine.seekTo(0L) }
+    fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication(), isGigSet = _isGigSetMode.value) else engine.seekTo(0L) }
     var onSongCompleted: ((songId: Long) -> Unit)? = null
 
     fun skipNext() {
         val completedId = _currentSong.value?.id
+        val isGigSet    = _isGigSetMode.value
         val queued = dequeueFirst()
         if (queued != null) {
             completedId?.let { onSongCompleted?.invoke(it) }
-            selectSong(queued, getApplication())
+            selectSong(queued, getApplication(), isGigSet = isGigSet)
             return
         }
         val next = nextSong.value ?: return
         completedId?.let { onSongCompleted?.invoke(it) }
-        selectSong(next, getApplication(), _currentPlaylistId.value)
+        selectSong(next, getApplication(), _currentPlaylistId.value, isGigSet = isGigSet)
     }
     fun toggleMixer()  { _showMixer.value = !_showMixer.value }
     fun closeMixer()   { _showMixer.value = false }

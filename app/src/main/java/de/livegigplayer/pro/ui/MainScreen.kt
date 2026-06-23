@@ -142,6 +142,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val isLoopActiveLive  by vm.isLoopActiveLive.collectAsState()
     val isExitPending     by vm.isExitPending.collectAsState()
     val currentPlaylistId by vm.currentPlaylistId.collectAsState()
+    val isGigSetMode      by vm.isGigSetMode.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
     var isLocked         by remember { mutableStateOf(false) }
@@ -186,6 +187,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 isLoopActiveLive = isLoopActiveLive,
                 isExitPending    = isExitPending,
                 isInSetMode      = currentPlaylistId != null,
+                isGigSetMode     = isGigSetMode,
                 positionMs       = positionMs,
                 durationMs       = durationMs,
                 loopStartMs      = loopStartMs,
@@ -195,8 +197,8 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
                 onSetLoopButton  = { vm.onSetLoopButtonPressed() }
             )
-            // A/B Loop Panel — erscheint sobald A oder Loop gesetzt
-            LoopPanel(
+            // A/B Loop Panel — nur im Archiv-Modus (nicht im Gig-Set-Modus)
+            if (!isGigSetMode) LoopPanel(
                 loopState      = loopState,
                 loopStartMs    = loopStartMs,
                 loopEndMs      = loopEndMs,
@@ -744,7 +746,7 @@ private fun GlobalPlayer(
     song: Song?, nextSong: Song?,
     isPlaying: Boolean, loopState: LoopState,
     isArmed: Boolean, isLoopActiveLive: Boolean, isExitPending: Boolean,
-    isInSetMode: Boolean,
+    isInSetMode: Boolean, isGigSetMode: Boolean,
     positionMs: Long, durationMs: Long,
     loopStartMs: Long?, loopEndMs: Long?,
     onPlayPause: () -> Unit, onStop: () -> Unit,
@@ -886,6 +888,8 @@ private fun GlobalPlayer(
             } else {
                 // Tab A: bestehende A/B-Tipp-Logik
                 val isPreloaded = loopStartMs != null && loopEndMs != null
+                // Im Gig-Set-Modus: Button inaktiv wenn kein Loop gespeichert
+                val loopEnabled = song != null && (!isGigSetMode || isPreloaded)
                 PlayerBtn(
                     modifier   = Modifier.weight(1f),
                     icon       = Icons.Filled.Repeat,
@@ -896,6 +900,7 @@ private fun GlobalPlayer(
                         else                                           -> "LOOP"
                     },
                     tint       = when {
+                        !loopEnabled                                   -> Gray
                         loopState == LoopState.INACTIVE && isPreloaded -> VoltDim
                         loopState == LoopState.INACTIVE                -> Gray
                         loopState == LoopState.A_SET                   -> LoopOrange
@@ -906,7 +911,7 @@ private fun GlobalPlayer(
                         LoopState.A_SET    -> Color(0xFF1A0E00)
                         LoopState.LOOPING  -> Color(0xFF1A1A00)
                     },
-                    enabled    = song != null,
+                    enabled    = loopEnabled,
                     pressDown  = true,
                     onClick    = onToggleLoop
                 )

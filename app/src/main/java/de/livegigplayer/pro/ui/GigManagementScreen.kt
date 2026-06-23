@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -291,9 +293,12 @@ private fun SetCard(
     isEditing: Boolean,
     onDeleteSet: () -> Unit
 ) {
-    val songs by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
+    val context     = LocalContext.current
+    val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
+    val currentSong by playerVm.currentSong.collectAsState()
 
     LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
+    LaunchedEffect(set.setId) { gigVm.armSetIfIdle(set.setId, playerVm) }
 
     Column(modifier = Modifier
         .fillMaxWidth()
@@ -321,12 +326,22 @@ private fun SetCard(
         // Song-Zeilen
         songs.forEach { songInSet ->
             SetSongRow(
-                songInSet    = songInSet,
-                isEditing    = isEditing,
-                onPlay       = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
-                onQueueNext  = { playerVm.addToQueueNext(songInSet.song) },
-                onQueueEnd   = { playerVm.addToQueueEnd(songInSet.song) },
-                onRemove     = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) }
+                songInSet   = songInSet,
+                isEditing   = isEditing,
+                onPlay      = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
+                onQueueNext = {
+                    currentSong?.id?.let { cid ->
+                        gigVm.insertSpontaneousNext(songInSet.song, cid, playerVm)
+                        Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onQueueEnd  = {
+                    currentSong?.id?.let { cid ->
+                        gigVm.insertSpontaneousLater(songInSet.song, cid, playerVm)
+                        Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRemove    = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) }
             )
         }
 

@@ -114,6 +114,23 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Auto-Arm: lädt ersten ungespielten Song in Player (ohne Auto-Play) ──────
+
+    fun armSetIfIdle(setId: Long, playerVm: PlayerViewModel) {
+        if (playerVm.currentSong.value != null) return
+        viewModelScope.launch {
+            _activeSetId.value = setId
+            val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
+            val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
+            playerVm.selectSong(first.song, getApplication(), isGigSet = true)
+            playerVm.onSongCompleted = { completedId ->
+                viewModelScope.launch(Dispatchers.IO) {
+                    setDao.markSongCompleted(setId, completedId, true)
+                }
+            }
+        }
+    }
+
     // ── Set-Wiedergabe ────────────────────────────────────────────────────────
 
     fun loadSetAsQueue(setId: Long, startSongId: Long, playerVm: PlayerViewModel) {

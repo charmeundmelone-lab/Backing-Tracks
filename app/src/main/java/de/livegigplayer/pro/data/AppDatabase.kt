@@ -19,8 +19,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
-    // abstract fun gigDao(): GigDao   — TODO Phase 3: implementieren
-    // abstract fun setDao(): SetDao   — TODO Phase 3: implementieren
+    abstract fun gigDao(): GigDao
+    abstract fun setDao(): SetDao
 
     companion object {
         @Volatile

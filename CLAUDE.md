@@ -37,25 +37,34 @@ und Playlists mit Room-Datenbank. Smartphone-First, dunkles UI für die Bühne.
 ```
 app/src/main/java/de/livegigplayer/pro/
 ├── audio/
-│   ├── AudioEngine.kt    — ExoPlayer-Wrapper: load, play, pause, seekTo, loop, preload
-│   ├── FolderImporter.kt — SAF-Import: Modus A (WAV-Stems), Modus B (Legacy)
-│   └── SongScanner.kt    — erkennt TrackMode aus DocumentFile-Struktur
+│   ├── AudioEngine.kt        — ExoPlayer-Wrapper: load, play, pause, seekTo, loop, preload
+│   ├── FolderImporter.kt     — SAF-Import: Modus A (WAV-Stems), Modus B (Legacy)
+│   └── SongScanner.kt        — erkennt TrackMode aus DocumentFile-Struktur
 ├── data/
-│   ├── Song.kt           — Room-Entity v8 (id, title, artist, bpm, bpmExact, keySignature,
-│   │                        genre, capoPosition, volDrums/Bass/Keys/Vocals/Click/Cue,
-│   │                        autoStop, playlistId, audioFilePath, duration)
-│   ├── SongDao.kt        — CRUD + resetAllMixerSettings
-│   ├── Playlist.kt       — Room-Entity (id, name, isLiveLocked)
-│   ├── PlaylistDao.kt    — getAllPlaylists
-│   ├── AppDatabase.kt    — RoomDatabase v8, Migrationen 1→2, 5→6, 6→7, 7→8
-│   └── TrackMode.kt      — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
+│   ├── Song.kt               — Room-Entity (id, title, artist, bpm, bpmExact, keySignature,
+│   │                            genre, capoPosition, volDrums/Bass/Keys/Vocals/Click/Cue,
+│   │                            autoStop, playlistId, audioFilePath, duration)
+│   ├── SongDao.kt            — CRUD + resetAllMixerSettings
+│   ├── Playlist.kt           — Room-Entity (id, name, isLiveLocked)
+│   ├── PlaylistDao.kt        — getAllPlaylists
+│   ├── GigEntity.kt          — Room-Entity (gigId, name)
+│   ├── GigDao.kt             — getAllGigs, insert, delete
+│   ├── SetEntity.kt          — Room-Entity (setId, gigOwnerId, name, position)
+│   ├── SetSongCrossRef.kt    — (setId, songId, positionInSet, isCompleted, isSpontaneous)
+│   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later (@Transaction)
+│   ├── SongInSet.kt          — @Embedded Song + positionInSet + completedInSet + spontaneousInSet
+│   ├── AppDatabase.kt        — RoomDatabase v12, Migrationen bis v12
+│   └── TrackMode.kt          — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
 ├── ui/
-│   ├── MainScreen.kt     — Compose-UI: zwei Tabs (Archiv / Playlist), Mini-Player, Mixer
-│   └── PlayerViewModel.kt — AndroidViewModel: StateFlow, Queue, Loop, AutoStop
+│   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer
+│   ├── PlayerViewModel.kt    — AndroidViewModel: StateFlow, Queue, Loop, AutoStop, isGigSetMode
+│   ├── GigViewModel.kt       — Gig/Set/Song CRUD, armSetIfIdle, loadSetAsQueue,
+│   │                            insertSpontaneousNext/Later (Mutex-serialisiert)
+│   └── GigManagementScreen.kt — GigCard, SetCard, SetSongRow (Swipe-Handler)
 ├── ui/theme/
-│   └── Theme.kt          — LiveGigPlayerTheme (dark)
-├── LiveGigPlayerApp.kt   — Application-Klasse, DB-Singleton
-└── MainActivity.kt       — Entry Point, Compose-Setup
+│   └── Theme.kt              — LiveGigPlayerTheme (dark)
+├── LiveGigPlayerApp.kt       — Application-Klasse, DB-Singleton
+└── MainActivity.kt           — Entry Point, Compose-Setup
 ```
 
 ## Datenmodell Song (Room v8)
@@ -196,6 +205,9 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
+- **Q-List-Bug (PRIO 1):** Spontane Einreihung versagt nach 1–2 Swipes — Songs landen
+  an falscher Position oder gar nicht. Ursache noch unklar; Diagnose via Q&A begonnen.
+  Gezielte Fragen an User: Archiv vs. Set-Swipe? Rechts vs. Links? Song wechselt zwischen Swipes?
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
 - **Playlist-Tab Queue-Swipe:** Swipe rechts/links auf Stage-Songs

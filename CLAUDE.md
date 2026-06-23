@@ -101,18 +101,18 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-06-23
-**CI Build:** #199 ✅ — grün
-**Branch:** `claude/new-session-ktxvys` (Remote-Session-Branch — enthält alle Änderungen dieser Session)
-**Commit:** Sprint 5.18 — Schreibschutz für Loops im Gig-Set-Modus
+**CI Build:** #206 ✅ — grün
+**Branch:** `main`
+**Commit:** Sprint 5.19 — Dynamische Playlist mit Block-Insertion
 
-### Branch-Hinweis für neue Sessions
-Die remote Web-Session nutzt den Branch `claude/new-session-ktxvys`.
-Bei neuer Session diesen Stand mergen:
-```bash
-git checkout main
-git merge claude/new-session-ktxvys
-git push origin main
-```
+### Sprint 5.19 DONE: Dynamische Playlist mit Block-Insertion (CI #206)
+
+- DB v11→12: `isSpontaneous` in `set_song_cross_ref`
+- Rechts-Swipe Archiv-Song → `insertSpontaneousNext` (direkt nach aktuellem Song ins Set)
+- Links-Swipe Archiv-Song → `insertSpontaneousLater` (vor erstem regulären Song)
+- Queue wird nach DB-Schreibung automatisch neu geladen
+- Spontane Songs: goldgelbe Positionsnummer + ⭐ im Set
+- Completed Songs tab-übergreifend ausgegraut (40%); Dialog "Heute bereits gespielt?"
 
 ### Sprint 5.17 DONE: Positionsfix, Matching-UI, Loop-READY-State (CI #198)
 
@@ -165,7 +165,6 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
-- **Playlist-Tab Queue-Swipe:** Swipe rechts/links auf Stage-Songs
 
 ### Loop-Editor — Archiviert
 

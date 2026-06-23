@@ -60,47 +60,44 @@ abstract class SetDao {
     @Query("UPDATE set_song_cross_ref SET isCompleted = 0 WHERE setId = :setId")
     abstract suspend fun resetCompletedForSet(setId: Long)
 
-    // ── Atomare Spontan-Einreihung ────────────────────────────────────────────
+    // ── Atomare Spontan-Einreihung (Cut & Paste) ─────────────────────────────
 
-    @Query("SELECT COUNT(*) FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")
-    abstract suspend fun existsInSet(setId: Long, songId: Long): Int
+    @Query("SELECT isCompleted FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")
+    abstract suspend fun getCompletedStatus(setId: Long, songId: Long): Boolean?
 
-    // Verschiebt nur Position + isSpontaneous; isCompleted bleibt unberührt.
-    @Query("UPDATE set_song_cross_ref SET positionInSet = :position, isSpontaneous = 1 WHERE setId = :setId AND songId = :songId")
-    abstract suspend fun moveSongSpontaneous(setId: Long, songId: Long, position: Int)
+    @Query("UPDATE set_song_cross_ref SET positionInSet = positionInSet + 1 WHERE setId = :setId AND positionInSet >= :insertPos")
+    abstract suspend fun shiftPositionsUp(setId: Long, insertPos: Int)
 
     @Transaction
     open suspend fun moveSpontaneousNext(setId: Long, songId: Long, currentSongId: Long) {
+        val wasCompleted = cutIfExists(setId, songId)
         val songs = getSongsInSetOnce(setId)
         val currentPos = songs.find { it.song.id == currentSongId }?.positionInSet
             ?: (songs.maxOfOrNull { it.positionInSet } ?: -1)
-        applyMoveSpontaneous(setId, songId, currentPos + 1, songs)
+        pasteAndSanitize(setId, songId, currentPos + 1, wasCompleted)
     }
 
     @Transaction
     open suspend fun moveSpontaneousLater(setId: Long, songId: Long, currentSongId: Long) {
+        val wasCompleted = cutIfExists(setId, songId)
         val songs = getSongsInSetOnce(setId)
         val firstRegular = songs.firstOrNull {
-            !it.completedInSet && !it.spontaneousInSet
-                && it.song.id != currentSongId && it.song.id != songId
+            !it.completedInSet && !it.spontaneousInSet && it.song.id != currentSongId
         }
         val insertPos = firstRegular?.positionInSet
             ?: ((songs.maxOfOrNull { it.positionInSet } ?: -1) + 1)
-        applyMoveSpontaneous(setId, songId, insertPos, songs)
+        pasteAndSanitize(setId, songId, insertPos, wasCompleted)
     }
 
-    private suspend fun applyMoveSpontaneous(setId: Long, songId: Long, insertPos: Int, songs: List<SongInSet>) {
-        // Nachbarn verschieben; den Song selbst auslassen (kein doppelter Shift)
-        songs.filter { it.positionInSet >= insertPos && it.song.id != songId }
-             .forEach { updateSongPosition(setId, it.song.id, it.positionInSet + 1) }
-        // Existiert der Song bereits im Set? → nur Position + isSpontaneous updaten,
-        // isCompleted BLEIBT erhalten. Neu? → frisch einreihen.
-        if (existsInSet(setId, songId) > 0) {
-            moveSongSpontaneous(setId, songId, insertPos)
-        } else {
-            insertCrossRef(SetSongCrossRef(setId, songId, insertPos, isSpontaneous = true))
-        }
-        // Lückenlos renummerieren innerhalb derselben Transaktion
+    private suspend fun cutIfExists(setId: Long, songId: Long): Boolean {
+        val wasCompleted = getCompletedStatus(setId, songId) ?: false
+        deleteCrossRef(setId, songId)
+        return wasCompleted
+    }
+
+    private suspend fun pasteAndSanitize(setId: Long, songId: Long, insertPos: Int, wasCompleted: Boolean) {
+        shiftPositionsUp(setId, insertPos)
+        insertCrossRef(SetSongCrossRef(setId, songId, insertPos, isCompleted = wasCompleted, isSpontaneous = true))
         val updated = getSongsInSetOnce(setId)
         updated.forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
     }

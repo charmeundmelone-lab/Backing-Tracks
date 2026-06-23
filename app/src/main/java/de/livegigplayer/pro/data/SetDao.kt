@@ -81,7 +81,8 @@ abstract class SetDao {
     open suspend fun moveSpontaneousLater(setId: Long, songId: Long, currentSongId: Long) {
         val songs = getSongsInSetOnce(setId)
         val firstRegular = songs.firstOrNull {
-            !it.completedInSet && !it.spontaneousInSet && it.song.id != currentSongId
+            !it.completedInSet && !it.spontaneousInSet
+                && it.song.id != currentSongId && it.song.id != songId
         }
         val insertPos = firstRegular?.positionInSet
             ?: ((songs.maxOfOrNull { it.positionInSet } ?: -1) + 1)

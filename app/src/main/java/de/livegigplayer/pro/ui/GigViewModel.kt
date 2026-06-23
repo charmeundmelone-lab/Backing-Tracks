@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class GigViewModel(app: Application) : AndroidViewModel(app) {
@@ -151,21 +153,27 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Spontane Einfügung aus dem Archiv ────────────────────────────────────
+    // ── Spontane Einfügung — Mutex verhindert gleichzeitige Swipes ──────────
+
+    private val queueMutex = Mutex()
 
     fun insertSpontaneousNext(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
         val setId = _activeSetId.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            setDao.moveSpontaneousNext(setId, song.id, currentSongId)
-            reloadQueueFromSet(setId, currentSongId, playerVm)
+            queueMutex.withLock {
+                setDao.moveSpontaneousNext(setId, song.id, currentSongId)
+                reloadQueueFromSet(setId, currentSongId, playerVm)
+            }
         }
     }
 
     fun insertSpontaneousLater(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
         val setId = _activeSetId.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            setDao.moveSpontaneousLater(setId, song.id, currentSongId)
-            reloadQueueFromSet(setId, currentSongId, playerVm)
+            queueMutex.withLock {
+                setDao.moveSpontaneousLater(setId, song.id, currentSongId)
+                reloadQueueFromSet(setId, currentSongId, playerVm)
+            }
         }
     }
 

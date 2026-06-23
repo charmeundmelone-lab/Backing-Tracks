@@ -198,11 +198,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun onLoopButtonPressed(currentPosMs: Long) {
         when (_loopState.value) {
             LoopState.INACTIVE -> {
-                _loopStartMs.value = currentPosMs
-                _loopEndMs.value   = null
-                _loopState.value   = LoopState.A_SET
-                _isLoopModified.value = true
-                engine.preloadLoopStart(currentPosMs)
+                val preStart = _loopStartMs.value
+                val preEnd   = _loopEndMs.value
+                if (preStart != null && preEnd != null) {
+                    // Vorgeladene Punkte vorhanden → direkt zu LOOPING springen
+                    _loopState.value      = LoopState.LOOPING
+                    engine.activateLoopDirect(preStart, preEnd)
+                    _isLoopModified.value = false
+                } else {
+                    _loopStartMs.value    = currentPosMs
+                    _loopEndMs.value      = null
+                    _loopState.value      = LoopState.A_SET
+                    _isLoopModified.value = true
+                    engine.preloadLoopStart(currentPosMs)
+                }
             }
             LoopState.A_SET -> {
                 val start = _loopStartMs.value ?: return
@@ -347,14 +356,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         engine.setVolumeDb("keys",  song.volKeys);  engine.setVolumeDb("vocals", song.volVocals)
         engine.setVolumeDb("click", song.volClick); engine.setVolumeDb("cue",    song.volCue)
         _currentSong.value = song; _trackMode.value = mode; _isPlaying.value = false
-        // Tab A (Library): Loop-Punkte auto-wiederherstellen wie Sprint 5.25
-        // Tab B (Set): kein Auto-Aktivieren — isArmed leitet sich aus _currentSong ab (Spontaner Catch-In)
-        if (sourcePlaylistId == null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
+        // Loop-Punkte vorladen wenn in DB gespeichert — aber NICHT automatisch aktivieren
+        if (song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
             _loopStartMs.value    = song.loopStartMs
             _loopEndMs.value      = song.loopEndMs
-            _loopState.value      = LoopState.LOOPING
-            engine.activateLoopDirect(song.loopStartMs, song.loopEndMs)
             _isLoopModified.value = false
+            // _loopState bleibt INACTIVE — User drückt LOOP um zu aktivieren
         }
         preloadNext(context)
     }

@@ -70,14 +70,14 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             songIds.forEachIndexed { index, songId ->
                 setDao.insertCrossRef(SetSongCrossRef(setId, songId, startPos + index))
             }
-            reorderSongsInSet(setId)
+            sanitizeSetPositionsInternal(setId)
         }
     }
 
     fun deleteSongFromSet(setId: Long, songId: Long) {
         viewModelScope.launch(Dispatchers.IO) {
             setDao.deleteCrossRef(setId, songId)
-            reorderSongsInSet(setId)
+            sanitizeSetPositionsInternal(setId)
         }
     }
 
@@ -89,7 +89,11 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { setDao.resetCompletedForSet(setId) }
     }
 
-    private suspend fun reorderSongsInSet(setId: Long) {
+    fun sanitizeSetPositions(setId: Long) {
+        viewModelScope.launch(Dispatchers.IO) { sanitizeSetPositionsInternal(setId) }
+    }
+
+    private suspend fun sanitizeSetPositionsInternal(setId: Long) {
         setDao.getSongsInSetOnce(setId).forEachIndexed { index, songInSet ->
             setDao.updateSongPosition(setId, songInSet.song.id, index)
         }

@@ -885,18 +885,21 @@ private fun GlobalPlayer(
                 }
             } else {
                 // Tab A: bestehende A/B-Tipp-Logik
+                val isPreloaded = loopStartMs != null && loopEndMs != null
                 PlayerBtn(
                     modifier   = Modifier.weight(1f),
                     icon       = Icons.Filled.Repeat,
-                    label      = when (loopState) {
-                        LoopState.INACTIVE -> "LOOP"
-                        LoopState.A_SET    -> "SET B"
-                        LoopState.LOOPING  -> "LOOP"
+                    label      = when {
+                        loopState == LoopState.INACTIVE && isPreloaded -> "READY"
+                        loopState == LoopState.INACTIVE                -> "LOOP"
+                        loopState == LoopState.A_SET                   -> "SET B"
+                        else                                           -> "LOOP"
                     },
-                    tint       = when (loopState) {
-                        LoopState.INACTIVE -> Gray
-                        LoopState.A_SET    -> LoopOrange
-                        LoopState.LOOPING  -> Volt
+                    tint       = when {
+                        loopState == LoopState.INACTIVE && isPreloaded -> VoltDim
+                        loopState == LoopState.INACTIVE                -> Gray
+                        loopState == LoopState.A_SET                   -> LoopOrange
+                        else                                           -> Volt
                     },
                     bgColor    = when (loopState) {
                         LoopState.INACTIVE -> BgCard
@@ -989,7 +992,7 @@ private fun LoopPanel(
     onClearLoop: () -> Unit
 ) {
     AnimatedVisibility(
-        visible = loopState != LoopState.INACTIVE,
+        visible = loopState != LoopState.INACTIVE || (loopStartMs != null && loopEndMs != null),
         enter   = expandVertically(),
         exit    = shrinkVertically()
     ) {

@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -291,6 +292,8 @@ private fun SetCard(
 ) {
     val songs by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
 
+    LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
+
     Column(modifier = Modifier
         .fillMaxWidth()
         .background(GigBgCard, shape = MaterialTheme.shapes.small)
@@ -340,14 +343,16 @@ private fun SetSongRow(
     onRemove: () -> Unit
 ) {
     var dragX by remember { mutableStateOf(0f) }
-    val alpha = if (songInSet.completedInSet) 0.35f else 1f
-    val bpm   = if (songInSet.song.bpmExact > 0f)
+    val alpha  = if (songInSet.completedInSet) 0.35f else 1f
+    val bpmTxt = if (songInSet.song.bpmExact > 0f)
         "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
+    val pre      = if (songInSet.song.artist.isNotEmpty()) "${songInSet.song.artist}  ·  " else ""
+    val subtitle = "$pre$bpmTxt  |  ${songInSet.song.duration}"
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(72.dp)
             .alpha(alpha)
             .pointerInput(isEditing) {
                 if (!isEditing) {
@@ -364,16 +369,20 @@ private fun SetSongRow(
                 }
             }
             .clickable(enabled = !isEditing, onClick = onPlay)
-            .padding(start = 52.dp, end = 12.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("%02d".format(songInSet.positionInSet + 1), color = GigGray,
-            fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(26.dp))
-        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            "%02d".format(songInSet.positionInSet + 1),
+            color = GigVolt, fontSize = 24.sp, fontWeight = FontWeight.Black,
+            modifier = Modifier.width(44.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(songInSet.song.title, color = GigWhite, fontSize = 13.sp,
-                fontWeight = FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(bpm, color = GigGray, fontSize = 10.sp)
+            Text(songInSet.song.title, color = GigWhite, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = GigGray, fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (isEditing) {
             IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {

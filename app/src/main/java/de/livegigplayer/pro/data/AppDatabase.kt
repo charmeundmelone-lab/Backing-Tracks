@@ -7,17 +7,9 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-// TODO Phase 3 Cleanup (nach ViewModel-Anpassung):
-//   - Playlist::class aus entities entfernen
-//   - abstract fun playlistDao() entfernen
-//   - Playlist.kt + PlaylistDao.kt löschen
-//   - In MIGRATION_10_11: "DROP TABLE IF EXISTS `playlists`" aktivieren
-//   - version auf 12 anheben (oder 11 mit sauberem 10→11 inkl. DROP)
-
 @Database(
     entities = [
         Song::class,
-        Playlist::class,        // TODO Phase 3: entfernen (nach ViewModel-Cleanup)
         GigEntity::class,
         SetEntity::class,
         SetSongCrossRef::class
@@ -27,9 +19,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
-    abstract fun playlistDao(): PlaylistDao  // TODO Phase 3: entfernen
-    // abstract fun gigDao(): GigDao         — TODO Phase 3: implementieren
-    // abstract fun setDao(): SetDao         — TODO Phase 3: implementieren
+    // abstract fun gigDao(): GigDao   — TODO Phase 3: implementieren
+    // abstract fun setDao(): SetDao   — TODO Phase 3: implementieren
 
     companion object {
         @Volatile
@@ -162,8 +153,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "ON `set_song_cross_ref`(`songId`)"
                 )
 
-                // TODO Phase 3: Nach ViewModel-Cleanup aktivieren:
-                // db.execSQL("DROP TABLE IF EXISTS `playlists`")
+                db.execSQL("DROP TABLE IF EXISTS `playlists`")
 
                 // songs-Tabelle bleibt vollständig unangetastet.
             }

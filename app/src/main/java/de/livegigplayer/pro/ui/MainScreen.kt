@@ -104,7 +104,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import de.livegigplayer.pro.data.Playlist
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -672,58 +671,10 @@ private fun SheetField(label: String, value: String, onChange: (String) -> Unit)
 // ── Tab B: Playlist ───────────────────────────────────────────────────────────
 @Composable
 private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean) {
-    val context     = LocalContext.current
-    val playlists   by vm.playlists.collectAsState()
-    val currentSong by vm.currentSong.collectAsState()
-
-    var expandedId  by remember { mutableStateOf<Long?>(null) }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        if (playlists.isEmpty()) {
-            item {
-                Text("Keine Sets vorhanden.\nSongs importieren und im Archiv Sets zuweisen.",
-                    color = Gray, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
-            }
-        }
-        playlists.forEach { playlist ->
-            item(key = playlist.id) {
-                SetHeader(
-                    playlist  = playlist,
-                    expanded  = expandedId == playlist.id,
-                    onToggle  = { expandedId = if (expandedId == playlist.id) null else playlist.id }
-                )
-            }
-            if (expandedId == playlist.id) {
-                item(key = "songs_${playlist.id}") {
-                    SetSongList(
-                        vm          = vm,
-                        playlistId  = playlist.id,
-                        currentSong = currentSong,
-                        isLocked    = isLocked,
-                        context     = context
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SetHeader(playlist: Playlist, expanded: Boolean, onToggle: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(52.dp)
-            .background(BgTrack, shape = MaterialTheme.shapes.small)
-            .clickable(onClick = onToggle).padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(playlist.name, color = White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f))
-        Icon(
-            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-            contentDescription = null, tint = Gray, modifier = Modifier.size(22.dp)
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            "Gig & Set-Verwaltung\nkommt in Phase 3",
+            color = Gray, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
     }
 }

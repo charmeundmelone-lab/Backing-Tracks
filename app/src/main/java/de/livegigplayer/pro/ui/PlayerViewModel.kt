@@ -119,10 +119,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         return first
     }
 
-    private val playlistDao = (app as LiveGigPlayerApp).database.playlistDao()
-    val playlists = playlistDao.getAllPlaylists()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     // ── A/B Loop State Machine ─────────────────────────────────────────────────
     private val _loopState      = MutableStateFlow(LoopState.INACTIVE)
     val loopState: StateFlow<LoopState> = _loopState.asStateFlow()

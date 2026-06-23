@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import de.livegigplayer.pro.LiveGigPlayerApp
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
+import de.livegigplayer.pro.data.SetSongCrossRef
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
 import kotlinx.coroutines.Dispatchers

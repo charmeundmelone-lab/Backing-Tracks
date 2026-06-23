@@ -163,7 +163,12 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
-- **Loop-Editor Neukonzeption:** Von Grund auf neu (hatte UI-Freeze-Probleme)
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
 - **Playlist-Tab Queue-Swipe:** Swipe rechts/links auf Stage-Songs
+
+### Loop-Editor — Archiviert
+
+Der visuelle Waveform-Loop-Editor (LoopEditorScreen / LoopEditorViewModel) ist endgültig
+verworfen — das Konzept wird nicht neu aufgegriffen. Die bestehende Lösung
+(A/B-Tippen im Player + LoopPanel mit Nudge/Save) ist die finale Implementierung.

@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import de.livegigplayer.pro.LiveGigPlayerApp
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
-import de.livegigplayer.pro.data.SetSongCrossRef
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
 import kotlinx.coroutines.Dispatchers
@@ -156,14 +155,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     fun insertSpontaneousNext(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
         val setId = _activeSetId.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val songs = setDao.getSongsInSetOnce(setId)
-            val currentPos = songs.find { it.song.id == currentSongId }?.positionInSet
-                ?: (songs.maxOfOrNull { it.positionInSet } ?: -1)
-            val insertPos = currentPos + 1
-            songs.filter { it.positionInSet >= insertPos }
-                 .forEach { setDao.updateSongPosition(setId, it.song.id, it.positionInSet + 1) }
-            setDao.insertCrossRef(SetSongCrossRef(setId, song.id, insertPos, isSpontaneous = true))
-            sanitizeSetPositionsInternal(setId)
+            setDao.moveSpontaneousNext(setId, song.id, currentSongId)
             reloadQueueFromSet(setId, currentSongId, playerVm)
         }
     }
@@ -171,16 +163,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     fun insertSpontaneousLater(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
         val setId = _activeSetId.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val songs = setDao.getSongsInSetOnce(setId)
-            val firstRegular = songs.firstOrNull {
-                !it.completedInSet && !it.spontaneousInSet && it.song.id != currentSongId
-            }
-            val insertPos = firstRegular?.positionInSet
-                ?: ((songs.maxOfOrNull { it.positionInSet } ?: -1) + 1)
-            songs.filter { it.positionInSet >= insertPos }
-                 .forEach { setDao.updateSongPosition(setId, it.song.id, it.positionInSet + 1) }
-            setDao.insertCrossRef(SetSongCrossRef(setId, song.id, insertPos, isSpontaneous = true))
-            sanitizeSetPositionsInternal(setId)
+            setDao.moveSpontaneousLater(setId, song.id, currentSongId)
             reloadQueueFromSet(setId, currentSongId, playerVm)
         }
     }

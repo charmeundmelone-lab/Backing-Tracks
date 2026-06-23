@@ -101,9 +101,17 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-06-23
-**CI Build:** #211 ✅ — grün
+**CI Build:** #213 ✅ — grün
 **Branch:** `main`
-**Commit:** Fix Self-Move & Race Conditions in GigViewModel/SetDao
+**Commit:** Fix Concurrency & Links-Swipe-Logik (Master-Patch)
+
+### Master-Patch DONE: Mutex & firstRegular-Fix (CI #213)
+
+- GigViewModel: `private val queueMutex = Mutex()` — serialisiert Swipe-Coroutinen;
+  `insertSpontaneousNext/Later` komplett mit `queueMutex.withLock { }` umschlossen
+- SetDao.`moveSpontaneousLater`: `firstRegular`-Filter schließt jetzt auch `songId`
+  (den zu bewegenden Song selbst) aus — verhindert falsche Einfügeposition beim
+  Set-internen Links-Swipe
 
 ### Sprint 5.21 DONE: Fix Self-Move & Race Conditions (CI #211)
 

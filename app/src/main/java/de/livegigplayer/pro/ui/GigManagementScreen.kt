@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -343,11 +344,39 @@ private fun SetSongRow(
     onRemove: () -> Unit
 ) {
     var dragX by remember { mutableStateOf(0f) }
-    val alpha  = if (songInSet.completedInSet) 0.35f else 1f
-    val bpmTxt = if (songInSet.song.bpmExact > 0f)
+    var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val alpha    = if (songInSet.completedInSet) 0.35f else 1f
+    val voltColor = if (songInSet.spontaneousInSet) Color(0xFFFFD700) else GigVolt
+    val bpmTxt   = if (songInSet.song.bpmExact > 0f)
         "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
     val pre      = if (songInSet.song.artist.isNotEmpty()) "${songInSet.song.artist}  ·  " else ""
     val subtitle = "$pre$bpmTxt  |  ${songInSet.song.duration}"
+
+    fun guarded(action: () -> Unit) {
+        if (songInSet.completedInSet) { pendingAction = action; showAlreadyPlayedDialog = true }
+        else action()
+    }
+
+    if (showAlreadyPlayedDialog) {
+        AlertDialog(
+            onDismissRequest = { showAlreadyPlayedDialog = false },
+            containerColor   = GigBgCard,
+            title  = { Text("Heute bereits gespielt.", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text   = { Text("Trotzdem verwenden?", color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showAlreadyPlayedDialog = false; pendingAction?.invoke() }) {
+                    Text("Ja", color = GigVolt, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAlreadyPlayedDialog = false }) {
+                    Text("Abbrechen", color = GigGray)
+                }
+            }
+        )
+    }
 
     Row(
         modifier = Modifier
@@ -359,8 +388,8 @@ private fun SetSongRow(
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             when {
-                                dragX > 80f  -> onQueueNext()
-                                dragX < -80f -> onQueueEnd()
+                                dragX > 80f  -> guarded(onQueueNext)
+                                dragX < -80f -> guarded(onQueueEnd)
                             }
                             dragX = 0f
                         },
@@ -368,15 +397,24 @@ private fun SetSongRow(
                     ) { _, delta -> dragX += delta }
                 }
             }
-            .clickable(enabled = !isEditing, onClick = onPlay)
+            .clickable(enabled = !isEditing, onClick = { guarded(onPlay) })
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            "%02d".format(songInSet.positionInSet + 1),
-            color = GigVolt, fontSize = 24.sp, fontWeight = FontWeight.Black,
-            modifier = Modifier.width(44.dp)
-        )
+        Box(modifier = Modifier.width(44.dp), contentAlignment = Alignment.CenterStart) {
+            Text(
+                "%02d".format(songInSet.positionInSet + 1),
+                color = voltColor, fontSize = 24.sp, fontWeight = FontWeight.Black
+            )
+            if (songInSet.spontaneousInSet) {
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = "Wunsch",
+                    tint = Color(0xFFFFD700),
+                    modifier = Modifier.size(8.dp).align(Alignment.TopEnd)
+                )
+            }
+        }
         Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(songInSet.song.title, color = GigWhite, fontSize = 15.sp,

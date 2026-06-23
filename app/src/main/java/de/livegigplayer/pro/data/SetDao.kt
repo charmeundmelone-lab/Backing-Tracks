@@ -27,7 +27,7 @@ interface SetDao {
 
     @Transaction
     @Query("""
-        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet
         FROM songs
         INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
         WHERE ref.setId = :setId
@@ -37,7 +37,7 @@ interface SetDao {
 
     @Transaction
     @Query("""
-        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet
         FROM songs
         INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
         WHERE ref.setId = :setId

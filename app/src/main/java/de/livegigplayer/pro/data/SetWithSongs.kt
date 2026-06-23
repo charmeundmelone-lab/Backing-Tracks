@@ -40,6 +40,7 @@ data class SetWithSongs(
 
 data class SongInSet(
     @Embedded val song: Song,
-    val positionInSet:  Int,
-    val completedInSet: Boolean   // Alias "completedInSet" wegen Namenskollision mit Song.isCompleted
+    val positionInSet:   Int,
+    val completedInSet:  Boolean,
+    val spontaneousInSet: Boolean
 )

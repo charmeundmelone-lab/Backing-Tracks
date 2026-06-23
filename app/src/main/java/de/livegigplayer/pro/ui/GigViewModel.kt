@@ -7,6 +7,7 @@ import de.livegigplayer.pro.LiveGigPlayerApp
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.SetSongCrossRef
+import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,6 +39,19 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             if (gigId != null) setDao.getSetsForGig(gigId) else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ── Aktives Set (für spontane Einfügung) ─────────────────────────────────
+
+    private val _activeSetId = MutableStateFlow<Long?>(null)
+    val activeSetId: StateFlow<Long?> = _activeSetId.asStateFlow()
+
+    val completedSongIdsInActiveSet: StateFlow<Set<Long>> = _activeSetId
+        .flatMapLatest { setId ->
+            if (setId != null) setDao.getSongsInSet(setId).map { songs ->
+                songs.filter { it.completedInSet }.map { it.song.id }.toSet()
+            } else flowOf(emptySet())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     fun selectGig(id: Long?) { _selectedGigId.value = id }
 
@@ -103,6 +118,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadSetAsQueue(setId: Long, startSongId: Long, playerVm: PlayerViewModel) {
         viewModelScope.launch {
+            _activeSetId.value = setId
             val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
             val startIdx = songs.indexOfFirst { it.song.id == startSongId }.coerceAtLeast(0)
             val toPlay = songs.subList(startIdx, songs.size).filter { !it.completedInSet }
@@ -115,6 +131,49 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
                     setDao.markSongCompleted(setId, completedId, true)
                 }
             }
+        }
+    }
+
+    // ── Spontane Einfügung aus dem Archiv ────────────────────────────────────
+
+    fun insertSpontaneousNext(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
+        val setId = _activeSetId.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val songs = setDao.getSongsInSetOnce(setId)
+            val currentPos = songs.find { it.song.id == currentSongId }?.positionInSet
+                ?: (songs.maxOfOrNull { it.positionInSet } ?: -1)
+            val insertPos = currentPos + 1
+            songs.filter { it.positionInSet >= insertPos }
+                 .forEach { setDao.updateSongPosition(setId, it.song.id, it.positionInSet + 1) }
+            setDao.insertCrossRef(SetSongCrossRef(setId, song.id, insertPos, isSpontaneous = true))
+            sanitizeSetPositionsInternal(setId)
+            reloadQueueFromSet(setId, currentSongId, playerVm)
+        }
+    }
+
+    fun insertSpontaneousLater(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
+        val setId = _activeSetId.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val songs = setDao.getSongsInSetOnce(setId)
+            val firstRegular = songs.firstOrNull {
+                !it.completedInSet && !it.spontaneousInSet && it.song.id != currentSongId
+            }
+            val insertPos = firstRegular?.positionInSet
+                ?: ((songs.maxOfOrNull { it.positionInSet } ?: -1) + 1)
+            songs.filter { it.positionInSet >= insertPos }
+                 .forEach { setDao.updateSongPosition(setId, it.song.id, it.positionInSet + 1) }
+            setDao.insertCrossRef(SetSongCrossRef(setId, song.id, insertPos, isSpontaneous = true))
+            sanitizeSetPositionsInternal(setId)
+            reloadQueueFromSet(setId, currentSongId, playerVm)
+        }
+    }
+
+    private suspend fun reloadQueueFromSet(setId: Long, currentSongId: Long, playerVm: PlayerViewModel) {
+        val updated = setDao.getSongsInSetOnce(setId)
+        val remaining = updated.filter { !it.completedInSet && it.song.id != currentSongId }
+        withContext(Dispatchers.Main) {
+            playerVm.clearQueue()
+            remaining.forEach { playerVm.addToQueueEnd(it.song) }
         }
     }
 }

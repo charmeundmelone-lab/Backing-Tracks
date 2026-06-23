@@ -349,6 +349,8 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
     val importStatus  by vm.importStatus.collectAsState()
     val searchQuery   by vm.searchQuery.collectAsState()
     val selectionMode = selectedIds.isNotEmpty()
+    val activeSetId              by gigVm.activeSetId.collectAsState()
+    val completedSongIdsInSet    by gigVm.completedSongIdsInActiveSet.collectAsState()
 
     var searchActive     by remember { mutableStateOf(false) }
     var editSheet        by remember { mutableStateOf<Song?>(null) }
@@ -373,14 +375,16 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                 item { Text(importStatus, color = Gray, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
             }
             itemsIndexed(songs) { index, song ->
+                val isCompletedInActiveSet = song.id in completedSongIdsInSet
                 ArchivSongRow(
-                    index           = index + 1,
-                    song            = song,
-                    selected        = song.id == currentSong?.id,
-                    isBatchSelected = song.id in selectedIds,
-                    isEditing       = song.id == editingSongId,
-                    isLocked        = isLocked,
-                    selectionMode   = selectionMode,
+                    index                  = index + 1,
+                    song                   = song,
+                    selected               = song.id == currentSong?.id,
+                    isBatchSelected        = song.id in selectedIds,
+                    isEditing              = song.id == editingSongId,
+                    isLocked               = isLocked,
+                    selectionMode          = selectionMode,
+                    isCompletedInActiveSet = isCompletedInActiveSet,
                     onPlay          = { if (!isLocked) vm.selectSong(song, context) },
                     onToggleSelect  = { vm.toggleSelect(song.id) },
                     onActivateBatch = { vm.toggleSelect(song.id) },
@@ -388,8 +392,16 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                     onEditStart     = { vm.startEditing(song.id) },
                     onOpenSheet     = { editSheet = song },
                     onDelete        = { vm.deleteSong(song) },
-                    onQueueNext     = { vm.addToQueueNext(song) },
-                    onQueueEnd      = { vm.addToQueueEnd(song) }
+                    onQueueNext     = {
+                        if (activeSetId != null && currentSong != null)
+                            gigVm.insertSpontaneousNext(song, currentSong!!.id, vm)
+                        else vm.addToQueueNext(song)
+                    },
+                    onQueueEnd      = {
+                        if (activeSetId != null && currentSong != null)
+                            gigVm.insertSpontaneousLater(song, currentSong!!.id, vm)
+                        else vm.addToQueueEnd(song)
+                    }
                 )
             }
         }
@@ -453,6 +465,7 @@ private fun ArchivSongRow(
     index: Int, song: Song,
     selected: Boolean, isBatchSelected: Boolean, isEditing: Boolean,
     isLocked: Boolean, selectionMode: Boolean,
+    isCompletedInActiveSet: Boolean = false,
     onPlay: () -> Unit, onToggleSelect: () -> Unit, onActivateBatch: () -> Unit,
     onTitleSave: (String) -> Unit, onEditStart: () -> Unit,
     onOpenSheet: () -> Unit, onDelete: () -> Unit,
@@ -461,14 +474,41 @@ private fun ArchivSongRow(
     val editFR = remember { FocusRequester() }
     LaunchedEffect(isEditing) { if (isEditing) editFR.requestFocus() }
 
-    var dragX            by remember { mutableStateOf(0f) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    var dragX                 by remember { mutableStateOf(0f) }
+    var showDeleteDialog      by remember { mutableStateOf(false) }
+    var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
+    var pendingAction         by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun guarded(action: () -> Unit) {
+        if (isCompletedInActiveSet) { pendingAction = action; showAlreadyPlayedDialog = true }
+        else action()
+    }
+
+    if (showAlreadyPlayedDialog) {
+        AlertDialog(
+            onDismissRequest = { showAlreadyPlayedDialog = false },
+            containerColor   = BgCard,
+            title  = { Text("Heute bereits gespielt.", color = White, fontWeight = FontWeight.Bold) },
+            text   = { Text("Trotzdem verwenden?", color = Gray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showAlreadyPlayedDialog = false; pendingAction?.invoke() }) {
+                    Text("Ja", color = Volt, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAlreadyPlayedDialog = false }) {
+                    Text("Abbrechen", color = Gray)
+                }
+            }
+        )
+    }
 
     val bgColor = when {
         isBatchSelected -> BgBatch
         selected        -> BgTrack
         else            -> BgCard
     }
+    val rowAlpha = if (isCompletedInActiveSet) 0.4f else 1f
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -494,13 +534,14 @@ private fun ArchivSongRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
+            .alpha(rowAlpha)
             .background(bgColor, shape = MaterialTheme.shapes.small)
             .pointerInput(selectionMode, isLocked) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         if (!isLocked && !selectionMode) {
-                            if (dragX > 80f) onQueueNext()
-                            else if (dragX < -80f) onQueueEnd()
+                            if (dragX > 80f) guarded(onQueueNext)
+                            else if (dragX < -80f) guarded(onQueueEnd)
                         }
                         dragX = 0f
                     },
@@ -508,7 +549,7 @@ private fun ArchivSongRow(
                 ) { _, delta -> dragX += delta }
             }
             .combinedClickable(
-                onClick = { if (selectionMode) onToggleSelect() else if (!isLocked) onPlay() },
+                onClick = { if (selectionMode) onToggleSelect() else if (!isLocked) guarded(onPlay) },
                 onLongClick = { if (!isLocked && !selectionMode) onActivateBatch() }
             )
             .padding(horizontal = 14.dp),

@@ -32,5 +32,6 @@ data class SetSongCrossRef(
     val setId:         Long,
     val songId:        Long,
     val positionInSet: Int,
-    val isCompleted:   Boolean = false
+    val isCompleted:   Boolean = false,
+    val isSpontaneous: Boolean = false
 )

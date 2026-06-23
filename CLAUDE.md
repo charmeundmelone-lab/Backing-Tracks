@@ -101,9 +101,23 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-06-23
-**CI Build:** #206 ✅ — grün
+**CI Build:** #208 ✅ — grün
 **Branch:** `main`
-**Commit:** Sprint 5.19 — Dynamische Playlist mit Block-Insertion
+**Commit:** Sprint 5.20 — Auto-Arm, Set-Tab-Swipes, Toast-Feedback
+
+### Sprint 5.20 DONE: Auto-Arm, Set-Tab-Swipes, Toast-Feedback (CI #208)
+
+- `GigViewModel.armSetIfIdle()`: beim Öffnen einer Set-Karte wird der erste
+  ungespielte Song automatisch in den Player geladen (kein Auto-Play, nur Armed)
+  → `currentSong != null` → Archiv-Swipes funktionieren ohne manuelles Antippen
+- `SetCard`: zweiter `LaunchedEffect(set.setId)` ruft `armSetIfIdle()` auf;
+  `currentSong` per `collectAsState()` weitergereicht
+- Set-Tab-Swipes: Songs INNERHALB des Sets können geswiped werden:
+  - Rechts-Swipe → `insertSpontaneousNext` (sofort nächster, ★ goldgelb)
+  - Links-Swipe → `insertSpontaneousLater` (hinter alle ★-Songs, vor erstem regulären)
+  - Composite-PK mit REPLACE: verschiebt Song, kein Duplikat
+- Toast-Feedback: "★ Titel → nächster" / "★ Titel → später" bei jedem Swipe
+  (sowohl Archiv- als auch Set-Tab)
 
 ### Sprint 5.19 DONE: Dynamische Playlist mit Block-Insertion (CI #206)
 
@@ -165,6 +179,7 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
+- **Playlist-Tab Queue-Swipe:** Swipe rechts/links auf Stage-Songs
 
 ### Loop-Editor — Archiviert
 

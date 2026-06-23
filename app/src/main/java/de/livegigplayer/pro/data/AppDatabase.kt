@@ -7,14 +7,35 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Song::class, Playlist::class], version = 9, exportSchema = false)
+// TODO Phase 3 Cleanup (nach ViewModel-Anpassung):
+//   - Playlist::class aus entities entfernen
+//   - abstract fun playlistDao() entfernen
+//   - Playlist.kt + PlaylistDao.kt löschen
+//   - In MIGRATION_10_11: "DROP TABLE IF EXISTS `playlists`" aktivieren
+//   - version auf 12 anheben (oder 11 mit sauberem 10→11 inkl. DROP)
+
+@Database(
+    entities = [
+        Song::class,
+        Playlist::class,        // TODO Phase 3: entfernen (nach ViewModel-Cleanup)
+        GigEntity::class,
+        SetEntity::class,
+        SetSongCrossRef::class
+    ],
+    version = 11,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
-    abstract fun playlistDao(): PlaylistDao
+    abstract fun playlistDao(): PlaylistDao  // TODO Phase 3: entfernen
+    // abstract fun gigDao(): GigDao         — TODO Phase 3: implementieren
+    // abstract fun setDao(): SetDao         — TODO Phase 3: implementieren
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        // ── Bestehende Migrations ──────────────────────────────────────────────
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -24,6 +45,40 @@ abstract class AppDatabase : RoomDatabase() {
                     "`name` TEXT NOT NULL, " +
                     "`isLiveLocked` INTEGER NOT NULL DEFAULT 0)"
                 )
+            }
+        }
+
+        // Brücken-Migration: deckt Lücken 2→3→4→5.
+        // Geräte auf v2 erhalten sauberes v9-Schema (Songdaten inkompatibel — autoStop/loopPoints fehlten).
+        private val MIGRATION_2_9 = object : Migration(2, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `songs`")
+                db.execSQL("""
+                    CREATE TABLE `songs` (
+                        `id`            INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `title`         TEXT NOT NULL,
+                        `artist`        TEXT NOT NULL DEFAULT '',
+                        `bpm`           INTEGER NOT NULL,
+                        `bpmExact`      REAL NOT NULL DEFAULT 0.0,
+                        `timeSignature` TEXT NOT NULL,
+                        `playlistId`    INTEGER NOT NULL,
+                        `isCompleted`   INTEGER NOT NULL DEFAULT 0,
+                        `audioFilePath` TEXT NOT NULL,
+                        `duration`      TEXT NOT NULL DEFAULT '00:00',
+                        `capoPosition`  INTEGER NOT NULL DEFAULT 0,
+                        `keySignature`  TEXT NOT NULL DEFAULT '',
+                        `genre`         TEXT NOT NULL DEFAULT '',
+                        `volDrums`      REAL NOT NULL DEFAULT 0.0,
+                        `volBass`       REAL NOT NULL DEFAULT 0.0,
+                        `volKeys`       REAL NOT NULL DEFAULT 0.0,
+                        `volVocals`     REAL NOT NULL DEFAULT 0.0,
+                        `volClick`      REAL NOT NULL DEFAULT 0.0,
+                        `volCue`        REAL NOT NULL DEFAULT 0.0,
+                        `autoStop`      INTEGER NOT NULL DEFAULT 0,
+                        `loopStartMs`   INTEGER NOT NULL DEFAULT 0,
+                        `loopEndMs`     INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
             }
         }
 
@@ -54,6 +109,66 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // ── Phase 1: Stabilisierung — no-op ───────────────────────────────────
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Kein Schema-Change. fallbackToDestructiveMigration() wird entfernt.
+            }
+        }
+
+        // ── Phase 2: Gig → Set → Song Architektur ─────────────────────────────
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+
+                // Neue Tabelle: gigs
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `gigs` (
+                        `gigId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name`  TEXT NOT NULL
+                    )
+                """.trimIndent())
+
+                // Neue Tabelle: sets (FK → gigs, CASCADE)
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `sets` (
+                        `setId`      INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `gigOwnerId` INTEGER NOT NULL,
+                        `name`       TEXT NOT NULL,
+                        `position`   INTEGER NOT NULL,
+                        FOREIGN KEY(`gigOwnerId`) REFERENCES `gigs`(`gigId`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_sets_gigOwnerId` ON `sets`(`gigOwnerId`)"
+                )
+
+                // Neue Tabelle: set_song_cross_ref (Composite PK, CASCADE)
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `set_song_cross_ref` (
+                        `setId`         INTEGER NOT NULL,
+                        `songId`        INTEGER NOT NULL,
+                        `positionInSet` INTEGER NOT NULL,
+                        `isCompleted`   INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(`setId`, `songId`),
+                        FOREIGN KEY(`setId`) REFERENCES `sets`(`setId`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(`songId`) REFERENCES `songs`(`id`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_set_song_cross_ref_songId` " +
+                    "ON `set_song_cross_ref`(`songId`)"
+                )
+
+                // TODO Phase 3: Nach ViewModel-Cleanup aktivieren:
+                // db.execSQL("DROP TABLE IF EXISTS `playlists`")
+
+                // songs-Tabelle bleibt vollständig unangetastet.
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -61,8 +176,17 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "livegig_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
-                .fallbackToDestructiveMigration()
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_9,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                    MIGRATION_7_8,
+                    MIGRATION_8_9,
+                    MIGRATION_9_10,
+                    MIGRATION_10_11
+                )
+                // fallbackToDestructiveMigration() entfernt — Phase 1 abgeschlossen
                 .build()
                 .also { INSTANCE = it }
             }

@@ -1,0 +1,558 @@
+# CHANGELOG — Live-Gig-Player Pro
+
+---
+
+## [Sprint 5.27] — 2026-06-22 — Fix: Auto-Advance zum nächsten Song nach Song-Ende
+
+### Problem
+Bei Songs mit `autoStop = true` wurde die Wiedergabe am Ende gestoppt, ohne zum
+nächsten Song weiterzugehen. Ein `onCompletion`-Listener existierte nie (ExoPlayer
+`REPEAT_MODE_ONE` feuert kein `STATE_ENDED`); die Song-Ende-Erkennung läuft über
+den 200ms-Poll (Rückwärtssprung-Erkennung).
+
+### Fix: Isolated `onCompletion → loadNext` in 200ms-Poll (`PlayerViewModel.kt`)
+Wenn `autoStop == true && loop nicht aktiv && Song hat geloopt`:
+- **Nächster Song vorhanden** → `skipNext()` + `engine.play()` — nahtloser Übergang
+- **Kein nächster Song** → bisheriges Stop-Verhalten bleibt erhalten
+
+### Strikte Trennung
+- Kein Zusammenhang mit SaveLoop-Button oder LoopActive-State
+- Die Bedingung `_loopState.value != LoopState.LOOPING` verhindert Auslösung bei aktivem Loop
+- DB wird nicht berührt
+
+---
+
+## [Sprint 5.26] — 2026-06-22 — Feature: Quantized Loop Exit with relative loop-duration countdown indicator and DB protection
+
+### Neue Live-Loop-States in PlayerViewModel (isArmed / isLoopActiveLive / isExitPending)
+
+`isArmed`: Abgeleitet aus `_currentSong` — true wenn `loopStartMs > 0 && loopEndMs > loopStartMs`
+in der DB des aktuellen Songs. Kein eigener MutableStateFlow, kein DB-Zugriff.
+
+`isLoopActiveLive`: true wenn die Engine gerade aktiv looopt (vom User explizit per Tab-B-Button
+gestartet). Standard bei Songstart = **false** (Spontaner Catch-In: Song läuft linear auch wenn
+Loop-Punkte gespeichert sind).
+
+`isExitPending`: true wenn der User den Quantized-Exit per Tap auf den gelben Button angefordert hat.
+
+### DB-Schutz (Hintergrund-Fehler behoben)
+`selectSong()` aktiviert den Loop **nicht** mehr automatisch (Sprint 5.25 Auto-Aktivierung entfernt).
+`onSetLoopButtonPressed()` schreibt **niemals** in die DB.
+Quantized-Exit-Handler (5ms-Monitor) schreibt **niemals** in die DB.
+DB-Werte werden nur durch `executeHardDatabaseSave()` / `saveLoopPoints()` / `clearLoop()` geändert
+— alle explizite User-Aktionen über dedizierte Buttons.
+
+### Farbcodierung Tab-B LOOP-Button (GlobalPlayer)
+- `isArmed == false`                            → GRAU (Button disabled)
+- `isArmed == true && isLoopActiveLive == false` → ORANGE / Label "ARMED"
+- `isLoopActiveLive == true && isExitPending == false` → VOLT-GELB / Label "LIVE"
+- `isLoopActiveLive == true && isExitPending == true`  → VOLT-GELB / Label "EXIT" + Countdown-Balken
+
+### Countdown-Balken (Canvas-Overlay)
+Bei `isExitPending == true`: horizontaler Balken am unteren Rand des LOOP-Buttons.
+Formel: `progress = (loopEndMs − currentPosition) / (loopEndMs − loopStartMs)`
+Der Balken schrumpft von rechts nach links gegen null (DrawScope: `size.copy(width = size.width * progress)`).
+
+### Quantized Exit (5ms-Monitor)
+Wenn `isExitPending == true && positionMs >= loopEndMs`:
+`engine.deactivateLoop()` → Song läuft nahtlos linear weiter.
+`isLoopActiveLive = false`, `isExitPending = false`, `loopState = INACTIVE`.
+Alle DB-Felder (`loopStartMs`/`loopEndMs` in Room) bleiben **vollständig unangetastet**.
+Danach: `isArmed` bleibt true → Button zeigt wieder ORANGE an.
+
+### Tab-A bleibt unverändert
+Wenn kein Set aktiv (`currentPlaylistId == null`): LOOP-Button nutzt weiterhin
+die bestehende A/B-Tipp-Logik (`onLoopButtonPressed()`, `LoopState.INACTIVE → A_SET → LOOPING`).
+
+---
+
+## [Sprint 5.25] — 2026-06-22 — Fix: Loop-Wiederherstellung + Set-aware nextSong
+
+### Fix 1: Loop-Punkte werden nach App-Neustart wiederhergestellt
+`selectSong()` prüft jetzt nach dem Laden ob der Song gespeicherte Loop-Punkte hat
+(`loopStartMs > 0 && loopEndMs > loopStartMs`). Falls ja: Loop-State wird auf
+`LOOPING` gesetzt, `activateLoopDirect()` wird aufgerufen. Loop startet NICHT
+automatisch — erst wenn der User Play drückt.
+
+### Fix 2: nextSong-Logik ist Set-aware
+Neuer `_currentPlaylistId: MutableStateFlow<Long?>` in PlayerViewModel.
+`selectSong()` nimmt `sourcePlaylistId: Long? = null` — Library-Aufruf bleibt
+`null`, Set-Aufruf übergibt die Playlist-ID.
+
+`nextSong` nutzt jetzt `combine(_queue, songs, _currentSong, _currentPlaylistId)`:
+- Queue nicht leer → erster Queue-Eintrag (unverändert)
+- Queue leer + Set aktiv → nächster Song im selben Set (nach Titel sortiert)
+- Queue leer + Library → nächster alphabetischer Song in Library (wie bisher)
+
+`preloadNext()` verwendet dieselbe Logik wie `nextSong` um den richtigen
+nächsten Song zu puffern.
+
+`skipNext()` leitet via `nextSong.value` weiter und behält `_currentPlaylistId`
+bei (Set-Kontext bleibt über Skip hinweg erhalten).
+
+`MainScreen.kt`: `SetSongList` übergibt `sourcePlaylistId = playlistId` an
+`vm.selectSong()`.
+
+---
+
+## [Sprint 5.23] — 2026-06-22 — Fix: Resolved drag-cancel state leak between Library Swipe-Right and Save Loop button
+
+### Code-Audit: Event-Isolation Save-Loop vs. Library-Swipe-Right
+
+**Audit-Ergebnis:**
+- `executeHardDatabaseSave()` ist vollständig isoliert — ausschließlich DB-Write via
+  `Dispatchers.IO`, kein AudioEngine-, Queue- oder Skip-Aufruf vorhanden. Kein Code-Level-Coupling.
+- Swipe-Right (`detectHorizontalDragGestures`) und Save-Loop (`executeHardDatabaseSave`)
+  sind in komplett getrennten Code-Pfaden.
+
+**Root Cause des gemeldeten Bugs:**
+`detectHorizontalDragGestures` in `ArchivSongRow` fehlte `onDragCancel`-Callback.
+Wenn eine Drag-Geste system-seitig abgebrochen wurde (Finger wandert über Komponentengrenze,
+Multi-Touch, Systemereignis), blieb `dragX` auf dem akkumulierten Wert stehen.
+Beim nächsten Drag-Beginn wurde dieser Stale-Wert weiter aufaddiert und konnte die
+80f-Schwelle überschreiten → `onQueueNext()` feuerte unbeabsichtigt.
+
+**Fix (MainScreen.kt):**
+```kotlin
+detectHorizontalDragGestures(
+    onDragEnd    = { if (!isLocked && !selectionMode) { ... }; dragX = 0f },
+    onDragCancel = { dragX = 0f }   // NEU: verhindert stale-dragX-Akkumulation
+) { _, delta -> dragX += delta }
+```
+
+---
+
+## [Sprint 5.22] — 2026-06-22 — Fix: Nuked Compose Lambda Leak on Save
+
+**Fix: Nuked Compose Lambda Leak causing Skip-to-Next on save;
+implemented hard-wired Room DB loop persistence**
+
+- `MainActivity.kt`: Verifiziert sauber — `MainScreen()` ohne Callbacks, kein Leak
+- `SongDao`: `forceUpdateLoopPoints(songId, startMs, endMs)` — direktes Room-Update
+- `PlayerViewModel`: `executeHardDatabaseSave()` — Dispatchers.IO, nur DAO-Aufruf,
+  null Audio-Engine-/Skip-/Queue-Berührung
+- `MainScreen` Save-Button: direkt verdrahtet auf `vm.executeHardDatabaseSave()`
+
+---
+
+## [Sprint 5.21] — 2026-06-22 — Fix: Hard-wired Save Loop event isoliert von AudioEngine
+
+**Fix: Hard-wired Save Loop event to purely execute Room DB UPDATE via Coroutine,
+completely isolated from AudioEngine**
+
+- `SongDao`: Neue Methode `updateSongLoopPoints(id, start, end)` mit sauberer
+  `@Query("UPDATE songs SET loopStartMs=:start, loopEndMs=:end WHERE id=:id")`
+- `PlayerViewModel.saveLoopPoints()`: Coroutine explizit auf `Dispatchers.IO`,
+  ruft ausschließlich `dao.updateSongLoopPoints()` auf — kein AudioEngine-,
+  Skip-, Next-, mediaController- oder Queue-Aufruf
+- `MainScreen.kt` Save-Button: bereits eine einzige Zeile `{ vm.saveLoopPoints() }`
+- Hinweis: `Long?` nicht verwendbar da DB-Spalten `NOT NULL DEFAULT 0` —
+  `Long` korrekt; null-Semantik über `clearLoop()` (setzt auf `0L`)
+
+---
+
+## [Sprint 5.20] — 2026-06-21 — Feature: Clear Loop Button
+
+### Feature: Clear Loop Button (reset state, Room DB, cancel active looping)
+
+**UI (MainScreen.kt):**
+- Neuer `IconButton` (Icons.Filled.Delete, Rot) im Nudge-Row des LoopPanels,
+  direkt links neben dem Speichern-Button — beide in einem `Row` gruppiert
+- Immer sichtbar solange loopState != INACTIVE (d.h. bei A_SET und LOOPING)
+- Feuert `onClearLoop` → `vm.clearLoop()`
+
+**State (PlayerViewModel.kt):**
+- Neue Funktion `clearLoop()` nach UDF-Architektur:
+  - `engine.deactivateLoop()` → stoppt Loop-Engine ohne Playback zu unterbrechen
+  - `_loopState`, `_loopStartMs`, `_loopEndMs`, `_isLoopModified` sofort auf Initialwerte
+  - Async-DB-Update via `dao.updateLoopPoints(song.id, 0L, 0L)`
+  - `_currentSong` wird mit `loopStartMs = 0L, loopEndMs = 0L` gepatcht
+
+**AudioEngine-Synchronisation:**
+- `deactivateLoop()` setzt `loopActive = false`, pausiert Idle-Player — kein seekTo
+  auf dem aktiv spielenden Player → Playback läuft nahtlos weiter
+- Da wir Polling statt PlayerMessages nutzen, werden ausstehende Loop-Checks
+  sofort inaktiv (`shouldCrossfade()` gibt `false` zurück wenn `loopActive = false`)
+
+---
+
+## [Sprint 5.19] — 2026-06-21 — Zero-Latency Loop-Trigger & Audio-Race-Fix
+
+### Fix 1: Zero-Latency Loop-Button (MainScreen.kt)
+
+**Problem:** `Modifier.clickable` feuert erst beim *Pointer Up* → bis zu ~100ms
+Latenz zwischen Fingerberührung und Loop-Punkt-Setzung.
+
+**Lösung:** `PlayerBtn` erhält Parameter `pressDown: Boolean`. Bei `true` ersetzt
+`Modifier.pointerInput { detectTapGestures(onPress = { onClick() }) }` das
+Standard-`clickable` — Event feuert exakt bei *Pointer Down*, in Millisekunde 0.
+Angewendet auf den LOOP-Button (SET A / SET B): `pressDown = true`.
+
+### Fix 2: Audio-Race-Condition bei Loop-Punkt-Anpassung (AudioEngine.kt)
+
+**Problem:** Slider/Nudge-Anpassungen riefen `activateLoopDirect()` auf dem
+aktiv spielenden Player auf → `seekTo()` unterbricht Wiedergabe → hörbarer
+Click/Glitch.
+
+**Lösung:** Neue Methode `updateLoopPoints(startMs, endMs)`:
+1. Aktualisiert `loopStartMs`/`loopEndMs` in-place
+2. Kein `seekTo()` auf dem aktiv spielenden Player (A oder B)
+3. Idle-Player wird per `seekTo(startMs)` auf neuen Start gesetzt (silent)
+4. Edge-Case (pos >= newEnd): 5ms-Crossfade-Monitor erkennt
+   `shouldCrossfade() == true` beim nächsten Tick → sofortiger Ping-Pong-Swap
+
+`setLoopRange()`, `nudgeLoopStart()`, `nudgeLoopEnd()` in PlayerViewModel
+nutzen jetzt `updateLoopPoints()` statt `activateLoopDirect()`.
+
+---
+
+## [Sprint 5.11 — Loop-Editor UX/Performance-Update]
+
+**Datum:** 2026-06-21
+**Branch:** main
+
+### PlayerViewModel — AuditionPlayer-Kapselung
+- `AuditionPlayer` jetzt im ViewModel (nicht mehr im Composable) → überlebt Rekomposition
+- `toggleAudition(uri, startMs, endMs)` / `refreshAuditionLoop(startMs, endMs)` / `stopAudition()`
+- `isAuditioning: StateFlow<Boolean>` — UI reagiert reaktiv auf Vorhör-Status
+- `onCleared()` released AuditionPlayer sauber
+
+### WaveformAnalyzer — Waveform-Cache
+- `saveCache(context, songId, data)` — schreibt Samples + Onsets als Binärdatei in CacheDir
+- `loadCache(context, songId)` — lädt gespeicherte Analyse (DataInputStream, schnell)
+- Cache-Datei: `waveform_{songId}.bin` (durationMs + samples + onsets im Big-Endian-Format)
+
+### LoopEditorScreen — vollständige Überarbeitung
+- Neue Signatur: `fun LoopEditorScreen(song, vm, onClose)` — ViewModel statt Callbacks für Save/Audition
+- **Scaffold + SnackbarHostState**: "Loop gespeichert" Snackbar nach Speichern, dann `onClose()`
+- **Initialer Zoom**: `scale = dur / 12000f` → ca. 12 Sekunden sichtbar beim Öffnen
+- **Cache-first Loading**: Cache laden (schnell), Fallback auf Analyse + Cache speichern
+- **Tap-to-Create**: Wenn kein gültiger Loop gesetzt → Tap 1 = Start, Tap 2 = Ende; Instruction-Text als Overlay
+- **Audition via ViewModel**: `vm.toggleAudition()` / `vm.refreshAuditionLoop()` / `vm.stopAudition()`
+- `DisposableEffect(Unit)` → `vm.stopAudition()` bei Composable-Verlassen
+- `LaunchedEffect(loopStartMs, loopEndMs)` mit 200ms Debounce → `vm.refreshAuditionLoop()`
+- Handle-Drag und Slip-Edit deaktiviert im Tap-to-Create-Modus (nur Pan/Zoom erlaubt)
+- Tap-Erkennung: `maxMove < 8.dp` = Tap, sonst Drag
+
+### MainScreen — LoopEditorScreen-Aufruf aktualisiert
+- Neuer Aufruf: `LoopEditorScreen(song, vm, onClose = { loopEditorSong = null })`
+
+---
+
+## [Sprint 5.9 — Loop-Editor Fixes + Live-Player Logik]
+
+**Datum:** 2026-06-21
+**Branch:** main
+
+### WaveformAnalyzer — dataChunkSize-Fix
+- `"data" -> { dataChunkSize = chunkLen; break@outer }` — Chunk-Größe wird jetzt gespeichert
+- `framesPerWindow` berechnet sich als `totalFrames / maxSamples` → 1.000 Samples verteilen sich über den gesamten Song (nicht nur erste 50 Sek)
+- Fallback bei Streaming-WAV (0xFFFFFFFF): 10 Minuten angenommen
+- `winBufSize` bis zu 512 KB (vorher 64 KB cap) für lange Songs
+
+### AuditionPlayer (neu — `audio/AuditionPlayer.kt`)
+- Separater ExoPlayer ausschließlich für Vorhör im Loop-Editor
+- `startLoop(uri, startMs, endMs)` setzt 64× ClippingConfiguration + REPEAT_MODE_ALL
+- `stop()` / `release()` für sauberes Lifecycle-Management
+
+### LoopEditorScreen — vollständige Überarbeitung
+- `Modifier.safeDrawingPadding()` am Root-Layout: Status-Bar und Nav-Bar bleiben frei
+- `auditionUri` State: URI aus TrackMode-Scan wird gespeichert und an AuditionPlayer übergeben
+- `DisposableEffect(Unit)` → `auditionPlayer.release()` bei Composable-Verlassen
+- Vorhör-Button "▶ VORHÖR" / "◼ STOP" zwischen Waveform und Fine-Tune-Panel
+- `LaunchedEffect(isAuditioning, loopStartMs, loopEndMs)` mit 200 ms Debounce → Audition-Player startet neu wenn Handles verschoben werden
+- Pan-Formel korrigiert: `viewStartFraction -= df / zoomLevel` → kein Überscroll am Ende
+- Loop-Overlay Clip korrigiert: `(ex - ox).coerceAtMost(canvasW - ox)` bleibt immer im Canvas
+- Close/Save: `auditionPlayer.stop()` wird vor Callback aufgerufen (kein Hintergrundrauschen)
+
+### MainScreen — LOOP-Button 3 Zustände
+- `PlayerBtn`: neuer `enabled: Boolean = true` Parameter; wenn `false` → kein `clickable`
+- `loopArmed = song != null && song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs`
+- **Aktiv** (`loopActive`): Tint = Volt, BG = `#1A1A00`
+- **Armed** (`loopArmed`): Tint = VoltDim (50% Volt), BG = `#141400`
+- **Disabled**: Tint = Gray, BG = BgCard, nicht klickbar
+
+---
+
+## [Sprint 5.8 — Visueller Loop-Editor (Koala-Style)]
+
+**Datum:** 2026-06-21
+**Branch:** main
+
+### WaveformAnalyzer (neu)
+- Liest WAV-Dateien über SAF-ContentResolver (RIFF-Chunk-Iteration: `fmt ` + `data`)
+- Downsampling auf 50ms-Fenster → normalisiertes RMS-Array für Canvas
+- Onset-Erkennung: Energie-Anstieg >2,5× geglättetes Baseline → magnetische Snap-Punkte
+- Multitrack: bevorzugt Click- bzw. Drums-Spur für Analyse
+
+### LoopEditorScreen (neu)
+- Vollbild-Overlay: Canvas-Wellenform (RMS-Balken), Onset-Marker (Volt), Koala-Overlay (halbtransparent grün)
+- Start-Handle (grün) + End-Handle (rot): Drag-to-move; snap-to-nearest-onset beim Loslassen
+- Pinch-to-Zoom (zwei Finger): Zoom 1×–200×, Anker-Punkt bleibt bei Centroid
+- Pan: ein Finger scrollt Ansicht
+- Fein-Tuning: `← Start` / `Start →` / `← Ende` / `Ende →` — je 1ms
+- Zeitanzeige: START / LÄNGE / ENDE in Monospace-Format
+
+### Datenbank v8 → v9
+- `Song.kt`: `loopStartMs: Long = 0L`, `loopEndMs: Long = 0L`
+- `MIGRATION_8_9`: zwei neue Spalten (ALTER TABLE)
+- `SongDao`: `updateLoopPoints(id, startMs, endMs)`
+
+### AudioEngine — `activateLoopDirect(startMs, endMs)`
+- DB-Werte direkt einsetzen, kein BPM-Berechnen
+- Identische gapless-Technik: 64× ClippingConfiguration + REPEAT_MODE_ALL
+- Alle Stems (Multitrack) synchron
+
+### PlayerViewModel + MainScreen
+- `toggleLoop()` nutzt `activateLoopDirect()` wenn DB-Punkte vorhanden, sonst BPM-Snap
+- `updateLoopPoints()` persistiert Punkte in DB
+- SongEditorSheet: Button "Loop visuell bearbeiten" öffnet LoopEditorScreen als Vollbild-Overlay
+
+---
+
+## [Sprint 5.7 — Player Layout: Countdown links, Songs rechts]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### GlobalPlayer Layout-Überarbeitung
+- Countdown links: 38sp, Volt, Monospace, FontWeight.Bold — dominantes Element
+- Songtitel rechts: 18sp, FontWeight.Bold, White — klar lesbar
+- Nächster Song: 14sp, FontWeight.SemiBold, White (statt Gray 12sp) — deutlich lesbarer
+- SkipNext-Icon neben "Nächster Song"-Text in Weiß
+- Buttons (PLAY/PAUSE, STOP, LOOP) unverändert: 72dp, breite Touch-Flächen
+
+---
+
+## [Sprint 5.6 — Globaler Player: Einheitlicher Bottom-Player in beiden Tabs]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### Globaler Player (GlobalPlayer)
+- `MiniPlayer` (96dp) → `GlobalPlayer` ersetzt; in BEIDEN Tabs fest am unteren Rand
+- Songtitel: 22sp, `FontWeight.Bold` — Headline-Style für Bühnensichtbarkeit
+- Countdown: 15sp Volt Monospace direkt unter dem Titel
+- Nächster Song: Icon + Titel + optionales Capo in derselben Zeile wie Countdown
+- Fortschrittsbalken: 3dp Volt am oberen Rand des Players
+
+### Transport-Buttons (3 statt 4)
+- `PLAY/PAUSE` (Toggle, weight=2f): Hintergrund grün bei Play, Icon/Label wechseln
+- `STOP`: roter Icon (RedStop), stoppt + seekTo(0)
+- `LOOP`: leuchtet Volt wenn aktiv, dunkler Hintergrund zur Bestätigung
+- ZURÜCK + WEITER vollständig entfernt
+- Touch-Targets: 72dp Höhe, breite Fläche (weight statt fixer Breite)
+
+### Code-Cleanup
+- `StageTransport`-Composable entfernt
+- `TransportButton`-Composable entfernt
+- `PlaylistTab`: `loopActive`-Parameter entfernt, `isPlaying`/`positionMs`/`durationMs` State entfernt
+- `PlaylistTab`: äußere `Column` entfernt, direkt `LazyColumn` zurückgegeben
+- Import `SkipPrevious` → `Stop` ausgetauscht
+
+---
+
+## [Sprint 5.5 — Bildschirmoptimierung: Kompakte TopBar]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### TopBar-Umbau
+- App-Titel "Live-Gig-Player Pro" entfernt — spart ca. 40dp vertikale Höhe
+- Untere Tab-Leiste (64dp) vollständig entfernt
+- Tab-Navigation als zwei große Icons (30dp) in die TopBar integriert:
+  - `LibraryMusic` → Tab A (Archiv), leuchtet Volt wenn aktiv
+  - `QueueMusic` → Tab B (Playlist), leuchtet Volt wenn aktiv
+- Tab-Icons stehen linksbündig, Aktions-Icons (Import/Mixer/Lock/Menü) rechtsbündig
+- Hamburger-Menü bleibt auf Tab A beschränkt (Sicherheitsregel eingehalten)
+- `TabButton`-Composable und `TabActive`/`TabInactive`-Konstanten entfernt
+
+### Gewinn
+- 64dp Bildschirmraum freigegeben → Song-Liste zeigt mehr Einträge
+
+---
+
+## [Sprint 5.4 — Korrekturen: Capo, Mini-Player, Gapless Loop]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### UI-Korrektur Tab A (Capo)
+- Capo-Stepper ("− 0 + Kapo") vollständig aus `ArchivSongRow` entfernt
+- `onCapoChange`-Parameter aus `ArchivSongRow` und Aufruf-Stelle entfernt
+- Capo-Stepper jetzt im `SongEditorSheet` (BottomSheet): "Capo" Label links, "−" / Wert / "+" rechts
+- Tipp auf `−`/`+` ruft `vm.updateCapo()` auf — sofortige DB-Persistierung
+
+### UI-Korrektur Mini-Player
+- Mini-Player verschoben: liegt jetzt zwingend UNTERHALB der Tab-Navigation
+- Reihenfolge in `MainScreen`: TopBar → Box(TabContent) → Row(TabBar) → MiniPlayer
+
+### Loop-Bugfix: Gapless (AudioEngine.kt)
+- `activateLoop()`: ClippingConfiguration + 64 geketttete MediaItems + `REPEAT_MODE_ALL`
+- ExoPlayer puffert nächsten Playlist-Item während Wiedergabe → keine hörbaren Lücken
+- BPM-Präzision: `beatMs = 60_000.0 / bpm` (Double), `floor(pos / beatMs).toLong()`, `roundToLong()` für Start/End
+- `positionMs`: bei aktivem Loop wird `loopStartMs + raw` zurückgegeben (Mini-Player Countdown korrekt)
+- `durationMs`: gibt `originalDurationMs` zurück wenn Loop aktiv
+- `deactivateLoop()`: stellt Original-MediaItem wieder her, setzt `seekTo(loopStartMs + currentClipPos)`
+- `tickLoop()`: no-op (Playlist übernimmt Übergänge)
+
+### Auto-Stop Bugfix
+- `PlayerViewModel`: Auto-Stop-Erkennung bekommt Guard `&& !_loopActive.value`
+- Verhindert Fehlauslösung wenn Loop aktiv ist und Position bei jedem Clip-Wechsel zurückspringt
+
+---
+
+## [Sprint 5.4 — Archiv-Management]
+
+**Datum:** 2026-06-20
+**Branch:** main
+
+### Row-Actions (Tab A)
+- `ArchivSongRow`: Stift-Icon (Bearbeiten) + Mülleimer-Icon (Löschen) am rechten Rand jeder Zeile
+- Icons werden im Batch-/Selektionsmodus ausgeblendet (kein Konflikt mit Mehrfachauswahl)
+- Langer Druck aktiviert weiterhin den Batch-Modus (unverändert)
+
+### Einzel-Löschen
+- Klick auf Mülleimer öffnet `AlertDialog` ("Song wirklich löschen?")
+- Bei Bestätigung: `SongDao.delete()` + reaktive DB-Aktualisierung via Flow
+- Wenn gelöschter Song aktuell spielt: Wiedergabe stoppt automatisch
+
+### Editor-Navigation
+- `SongEditorSheet`: Vor/Zurück-Buttons (`ChevronLeft`/`ChevronRight`) im Header
+- Positionsanzeige "X / N" (z.B. "3 / 12")
+- Navigation innerhalb der gefilterten Song-Liste — keine ungespeicherten Änderungen werden übertragen
+- Doppel-Long-Press zum Öffnen des Editors entfernt; Editor öffnet sich ausschließlich via Stift-Icon
+
+### Hamburger-Menü (nur Tab A)
+- Neues Hamburger-Icon (`Icons.Filled.Menu`) in der Kopfzeile
+- **Sicherheitsregel eingehalten:** Icon nur sichtbar wenn `selectedTab == 0` (Tab A)
+- In Tab B vollständig ausgeblendet — kein Code-Pfad erreichbar
+- `DropdownMenu` mit Option "Alle Songs löschen"
+
+### Alle Songs löschen
+- `SongDao.deleteAll()` (neues Query)
+- `PlayerViewModel.deleteAllSongs()`: DB leeren + Wiedergabe stoppen
+- Strenger `AlertDialog`: "Wirklich ALLE Songs aus dem Archiv löschen? Diese Aktion kann nicht rückgängig gemacht werden."
+- Nur über Hamburger-Menü → Tab A erreichbar
+
+---
+
+## [Sprint 5.3 — Loop + Auto-Stop]
+
+**Datum:** 2026-06-20
+**Branch:** main
+**CI:** grün
+
+### A/B Loop (taktsynchron)
+
+- `AudioEngine.kt`: `activateLoop(bpmExact, bars=8)` berechnet `loopStartMs` via snap-to-beat (floor-Division), `loopEndMs = loopStart + beatMs*4*bars`
+- `AudioEngine.kt`: `tickLoop()` wird alle 200ms aus dem ViewModel-Polling aufgerufen — bei Überschreiten von `loopEndMs` → `seekTo(loopStartMs)` auf ALLEN aktiven ExoPlayern synchron
+- `AudioEngine.kt`: `deactivateLoop()` setzt `loopActive = false`
+
+### Auto-Stop
+
+- `Song.kt`: neues Feld `autoStop: Boolean = false`
+- `AppDatabase.kt`: Version 7 → 8, `MIGRATION_7_8` (`ALTER TABLE songs ADD COLUMN autoStop INTEGER NOT NULL DEFAULT 0`)
+- `PlayerViewModel.kt`: Polling-Loop erkennt Rückwärtssprung der Position (ExoPlayer REPEAT_MODE_ONE) → automatisches Pause + Seek-to-0 wenn `autoStop == true`
+
+### UI
+
+- `PlayerViewModel.kt`: `_loopActive: MutableStateFlow<Boolean>`, `toggleLoop()`, `updateAutoStop()`
+- `MainScreen.kt`: LOOP-Button in `StageTransport` leuchtet Volt wenn `loopActive`, ansonsten Weiß
+- `MainScreen.kt`: Auto-Stop Switch im `SongEditorSheet` (Switch mit Volt-Track, direkte Callback-Weitergabe)
+- Loop wird bei `selectSong()` / `skipNext()` / Song-Ende automatisch deaktiviert
+
+---
+
+## [Sprint 5.2 — Security Audit Tab B] — Bühnen-Schutz verifiziert
+
+**Datum:** 2026-06-20
+**Branch:** main
+**CI:** grün
+
+### Sicherheits-Audit Tab B (Playlist) — Code-Verifikation
+
+Alle 4 Sicherheits-Anforderungen wurden im Kotlin-Code verifiziert.
+Kein Code-Eingriff nötig — Implementierung war korrekt.
+
+#### 1. Swipe-Navigation vollständig deaktiviert
+Nachweis: MainScreen.kt — Tab-Switching via `when (selectedTab)`.
+Kein `HorizontalPager`, kein `ViewPager2`, keine `detectHorizontalDragGestures`
+auf Tab-Ebene. Navigation nur über Tab-Buttons (64dp).
+
+#### 2. Set-Akkordeon korrekt implementiert
+Nachweis: `PlaylistTab()` mit `expandedId: Long?`-State.
+`SetHeader()` mit `ExpandMore/ExpandLess`-Icon.
+Nur ein Set gleichzeitig geöffnet (expand-one-Logik).
+
+#### 3. 7-Song-Limit + 72dp Zeilenhöhe erzwungen
+Nachweis (Zeile 569): `setSongs.take(7).forEachIndexed { ... }`
+Nachweis (Zeile 588): `Modifier.fillMaxWidth().height(72.dp)`
+Überzählige Songs: Hinweistext "+N weitere Songs" (kein Scroll).
+
+#### 4. Strikter Edit-Schutz — keine Tastatur möglich
+Nachweis `StageSongRow()`: ausschließlich `clickable {}` — kein
+`BasicTextField`, kein `KeyboardOptions`, kein `ImeAction`, kein `FocusRequester`.
+Kapo-Wert: statischer Text `"Capo $n"` bzw. `"Kein Capo"` (Zeile 601).
+`BasicTextField` + `ImeAction` existieren NUR in `ArchivSongRow` (Tab A).
+
+---
+
+## [Sprint 5.2] — Stabiler Startpunkt (ExoPlayer 1.3.1)
+
+**Datum:** 2026-06-20
+**Branch:** main
+**CI:** grün
+
+### Stabiler Basis-Stack
+- Media3 ExoPlayer **1.3.1** (einzige je verwendete Version)
+- Room Database **Version 7**
+- Jetpack Compose / Material3
+- Android SDK 34, minSdk 26
+
+---
+
+### Import-Bugfixes (FolderImporter.kt)
+
+#### Bug 1 — Schleifen-Fehler Modus A (6 Einträge statt 1)
+**Problem:** Wenn der Nutzer einen Song-Ordner direkt auswählt (statt des
+übergeordneten Ordners), enthält der Root keine Unterordner, aber 6 WAV-Stems.
+Modus B lief dann für jede WAV-Datei einzeln → 6 separate DB-Einträge.
+
+**Fix:** Erkennung: `folders.isEmpty() && wavs.size > 1` → Root wird als
+einzelner Modus-A-Song behandelt. Zentraler Importer `importModeAWavs()`
+schreibt exakt **1 DB-Eintrag pro Ordner**, unabhängig von der Stem-Anzahl.
+
+Betroffene Datei: `app/src/main/java/de/livegigplayer/pro/audio/FolderImporter.kt`
+Zeilen: 30–39 (Root-Erkennung), 66–85 (importModeAWavs)
+
+#### Bug 2 — Click-Track-Erkennung case-sensitiv
+**Problem:** `click.wav` wurde nicht erkannt wenn Großschreibung abwich
+(z.B. `CLICK.WAV`, `Click.wav`). Außerdem fehlte das deutsche "klick".
+
+**Fix:** `f.name?.lowercase()` + String-Containment:
+`"click" in n || "klick" in n` — deckt alle Varianten ab.
+
+Betroffene Datei: `app/src/main/java/de/livegigplayer/pro/audio/FolderImporter.kt`
+Zeilen: 73–76
+
+---
+
+### Neue Features (Sprint 5.2)
+
+- **Zwei-Tab-Layout:** Archiv (Sofa/Pflege) + Playlist (Bühne), kein Swipe
+- **Mini-Player (96dp):** Countdown, Nächster-Song-Vorschau, roter Not-Aus-Button
+- **Set-Akkordeon:** Playlists als aufklappbare Sets im Playlist-Tab
+- **Stage-Schutz:** Kein Kapo-Edit, keine Tastatur im Playlist-Tab
+- **StageTraxx-Queue:** Swipe rechts = Play Next, Swipe links = Play at End
+- **Song-Editor BottomSheet:** Titel, Künstler, BPM manuell ändern
+- **Batch-Genre-Stempel:** Long-Press → Mehrfachauswahl → Genre zuweisen
+
+---
+
+### Bekannte Lücken / TODO
+
+- LOOP-Button ist aktuell Dummy (onClick = {})
+- Set-Verwaltung UI fehlt (Sets können nicht angelegt/umbenannt werden)
+- Song-zu-Set-Zuweisung im UI fehlt (playlistId nur per Import gesetzt)
+- Auto-Stop vs. Continuous noch nicht implementiert

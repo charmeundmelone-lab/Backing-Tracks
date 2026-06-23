@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MiniTraxx"
+rootProject.name = "LiveGigPlayerPro"
 include(":app")

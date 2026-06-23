@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
+import de.livegigplayer.pro.data.SongInSet
 
 private val GigBgDeep  = Color(0xFF0A0A0A)
 private val GigBgCard  = Color(0xFF1A1A1A)
@@ -68,6 +69,7 @@ fun GigManagementScreen(vm: GigViewModel) {
         )
     } else {
         GigDetailView(
+            vm       = vm,
             gig      = selectedGig,
             sets     = setsForGig,
             onBack   = { vm.selectGig(null) },
@@ -177,6 +179,7 @@ private fun GigRow(gig: GigEntity, onClick: () -> Unit) {
 
 @Composable
 private fun GigDetailView(
+    vm: GigViewModel,
     gig: GigEntity,
     sets: List<SetEntity>,
     onBack: () -> Unit,
@@ -233,7 +236,7 @@ private fun GigDetailView(
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
                 items(sets, key = { it.setId }) { set ->
-                    SetRow(set = set)
+                    SetCard(set = set, vm = vm)
                 }
             }
         }
@@ -250,26 +253,70 @@ private fun GigDetailView(
 }
 
 @Composable
-private fun SetRow(set: SetEntity) {
-    Row(
+private fun SetCard(set: SetEntity, vm: GigViewModel) {
+    val songs by vm.getSongsInSet(set.setId).collectAsState(emptyList())
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
             .background(GigBgCard, shape = MaterialTheme.shapes.small)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            "%02d".format(set.position + 1),
-            color = GigVolt, fontSize = 18.sp, fontWeight = FontWeight.Black,
-            modifier = Modifier.width(36.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            set.name,
-            color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
+        // Set-Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "%02d".format(set.position + 1),
+                color = GigVolt, fontSize = 18.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.width(36.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                set.name,
+                color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "${songs.size} Songs",
+                color = GigGray, fontSize = 11.sp
+            )
+        }
+
+        // Song-Liste
+        if (songs.isNotEmpty()) {
+            songs.forEach { songInSet ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .padding(start = 52.dp, end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "%02d".format(songInSet.positionInSet + 1),
+                        color = GigGray, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.width(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            songInSet.song.title,
+                            color = GigWhite, fontSize = 13.sp, fontWeight = FontWeight.Normal,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                        val bpm = if (songInSet.song.bpmExact > 0f)
+                            "%.1f BPM".format(songInSet.song.bpmExact)
+                        else "${songInSet.song.bpm} BPM"
+                        Text(bpm, color = GigGray, fontSize = 10.sp)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+        }
     }
 }
 

@@ -7,6 +7,7 @@ import de.livegigplayer.pro.LiveGigPlayerApp
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.SetSongCrossRef
+import de.livegigplayer.pro.data.SongInSet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +40,8 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     fun selectGig(id: Long?) { _selectedGigId.value = id }
 
     fun getSetsForGig(gigId: Long): Flow<List<SetEntity>> = setDao.getSetsForGig(gigId)
+
+    fun getSongsInSet(setId: Long): Flow<List<SongInSet>> = setDao.getSongsInSet(setId)
 
     fun createGig(name: String) {
         viewModelScope.launch(Dispatchers.IO) {

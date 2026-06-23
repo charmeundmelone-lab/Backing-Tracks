@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class GigViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -43,10 +44,14 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     fun getSongsInSet(setId: Long): Flow<List<SongInSet>> = setDao.getSongsInSet(setId)
 
+    // ── Gig / Set / Song CRUD ────────────────────────────────────────────────
+
     fun createGig(name: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            gigDao.insert(GigEntity(name = name))
-        }
+        viewModelScope.launch(Dispatchers.IO) { gigDao.insert(GigEntity(name = name)) }
+    }
+
+    fun deleteGig(gig: GigEntity) {
+        viewModelScope.launch(Dispatchers.IO) { gigDao.delete(gig) }
     }
 
     fun createSetForGig(gigId: Long, name: String, position: Int) {
@@ -55,16 +60,56 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun deleteSet(set: SetEntity) {
+        viewModelScope.launch(Dispatchers.IO) { setDao.deleteSet(set) }
+    }
+
     fun addSongsToSet(setId: Long, songIds: List<Long>) {
         viewModelScope.launch(Dispatchers.IO) {
+            val startPos = (setDao.getMaxPositionInSet(setId) ?: -1) + 1
             songIds.forEachIndexed { index, songId ->
-                setDao.insertCrossRef(
-                    SetSongCrossRef(
-                        setId         = setId,
-                        songId        = songId,
-                        positionInSet = index
-                    )
-                )
+                setDao.insertCrossRef(SetSongCrossRef(setId, songId, startPos + index))
+            }
+            reorderSongsInSet(setId)
+        }
+    }
+
+    fun deleteSongFromSet(setId: Long, songId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            setDao.deleteCrossRef(setId, songId)
+            reorderSongsInSet(setId)
+        }
+    }
+
+    fun markSongCompleted(setId: Long, songId: Long, completed: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) { setDao.markSongCompleted(setId, songId, completed) }
+    }
+
+    fun resetCompletedForSet(setId: Long) {
+        viewModelScope.launch(Dispatchers.IO) { setDao.resetCompletedForSet(setId) }
+    }
+
+    private suspend fun reorderSongsInSet(setId: Long) {
+        setDao.getSongsInSetOnce(setId).forEachIndexed { index, songInSet ->
+            setDao.updateSongPosition(setId, songInSet.song.id, index)
+        }
+    }
+
+    // ── Set-Wiedergabe ────────────────────────────────────────────────────────
+
+    fun loadSetAsQueue(setId: Long, startSongId: Long, playerVm: PlayerViewModel) {
+        viewModelScope.launch {
+            val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
+            val startIdx = songs.indexOfFirst { it.song.id == startSongId }.coerceAtLeast(0)
+            val toPlay = songs.subList(startIdx, songs.size).filter { !it.completedInSet }
+            if (toPlay.isEmpty()) return@launch
+            playerVm.clearQueue()
+            playerVm.selectSong(toPlay.first().song, getApplication())
+            toPlay.drop(1).forEach { playerVm.addToQueueEnd(it.song) }
+            playerVm.onSongCompleted = { completedId ->
+                viewModelScope.launch(Dispatchers.IO) {
+                    setDao.markSongCompleted(setId, completedId, true)
+                }
             }
         }
     }

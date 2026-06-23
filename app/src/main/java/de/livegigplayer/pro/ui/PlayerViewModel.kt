@@ -394,10 +394,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun togglePlayPause() { if (engine.isPlaying) { engine.pause(); _isPlaying.value = false } else { engine.play(); _isPlaying.value = true } }
     fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
     fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication()) else engine.seekTo(0L) }
+    var onSongCompleted: ((songId: Long) -> Unit)? = null
+
     fun skipNext() {
+        val completedId = _currentSong.value?.id
         val queued = dequeueFirst()
-        if (queued != null) { selectSong(queued, getApplication()); return }
+        if (queued != null) {
+            completedId?.let { onSongCompleted?.invoke(it) }
+            selectSong(queued, getApplication())
+            return
+        }
         val next = nextSong.value ?: return
+        completedId?.let { onSongCompleted?.invoke(it) }
         selectSong(next, getApplication(), _currentPlaylistId.value)
     }
     fun toggleMixer()  { _showMixer.value = !_showMixer.value }

@@ -25,7 +25,6 @@ interface SetDao {
     @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
     fun getSetsForGig(gigId: Long): Flow<List<SetEntity>>
 
-    // Variante B aus der Spezifikation: geordneter INNER JOIN mit positionInSet + isCompleted
     @Transaction
     @Query("""
         SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet
@@ -35,6 +34,25 @@ interface SetDao {
         ORDER BY ref.positionInSet ASC
     """)
     fun getSongsInSet(setId: Long): Flow<List<SongInSet>>
+
+    @Transaction
+    @Query("""
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet
+        FROM songs
+        INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
+        WHERE ref.setId = :setId
+        ORDER BY ref.positionInSet ASC
+    """)
+    suspend fun getSongsInSetOnce(setId: Long): List<SongInSet>
+
+    @Query("SELECT MAX(positionInSet) FROM set_song_cross_ref WHERE setId = :setId")
+    suspend fun getMaxPositionInSet(setId: Long): Int?
+
+    @Query("DELETE FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")
+    suspend fun deleteCrossRef(setId: Long, songId: Long)
+
+    @Query("UPDATE set_song_cross_ref SET positionInSet = :position WHERE setId = :setId AND songId = :songId")
+    suspend fun updateSongPosition(setId: Long, songId: Long, position: Int)
 
     @Query("UPDATE set_song_cross_ref SET isCompleted = :completed WHERE setId = :setId AND songId = :songId")
     suspend fun markSongCompleted(setId: Long, songId: Long, completed: Boolean)

@@ -172,7 +172,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
                     0 -> ArchivTab(vm = vm, gigVm = gigVm, isLocked = isLocked)
-                    1 -> GigManagementScreen(vm = gigVm)
+                    1 -> GigManagementScreen(gigVm = gigVm, playerVm = vm)
                 }
             }
 

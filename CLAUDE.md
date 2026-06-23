@@ -101,9 +101,20 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-06-23
-**CI Build:** #208 ✅ — grün
+**CI Build:** #211 ✅ — grün
 **Branch:** `main`
-**Commit:** Sprint 5.20 — Auto-Arm, Set-Tab-Swipes, Toast-Feedback
+**Commit:** Fix Self-Move & Race Conditions in GigViewModel/SetDao
+
+### Sprint 5.21 DONE: Fix Self-Move & Race Conditions (CI #211)
+
+- SetDao: `interface` → `abstract class` für echte `@Transaction open suspend fun`
+- `existsInSet()`: prüft ob Song bereits im Set ist (keine REPLACE-Nebenwirkung)
+- `moveSongSpontaneous()`: updatet NUR `positionInSet` + `isSpontaneous=1`,
+  `isCompleted` bleibt zwingend erhalten
+- `moveSpontaneousNext()` / `moveSpontaneousLater()`: `@Transaction` — gesamte
+  Kette (Shift, Move/Insert, Sanitize) läuft atomar in einer DB-Transaktion
+- `applyMoveSpontaneous()`: Song selbst beim Shift ausgelassen (`id != songId`)
+- GigViewModel: `insertSpontaneousNext/Later` delegieren komplett an DAO
 
 ### Sprint 5.20 DONE: Auto-Arm, Set-Tab-Swipes, Toast-Feedback (CI #208)
 

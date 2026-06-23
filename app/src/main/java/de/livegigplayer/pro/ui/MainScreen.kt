@@ -122,7 +122,7 @@ private val RedStop     = Color(0xFFDC2626)
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 @Composable
-fun MainScreen(vm: PlayerViewModel = viewModel()) {
+fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewModel()) {
     val context       = LocalContext.current
     val currentSong   by vm.currentSong.collectAsState()
     val isPlaying     by vm.isPlaying.collectAsState()
@@ -172,7 +172,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel()) {
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
                     0 -> ArchivTab(vm = vm, isLocked = isLocked)
-                    1 -> PlaylistTab(vm = vm, isLocked = isLocked)
+                    1 -> GigManagementScreen(vm = gigVm)
                 }
             }
 
@@ -668,16 +668,6 @@ private fun SheetField(label: String, value: String, onChange: (String) -> Unit)
     )
 }
 
-// ── Tab B: Playlist ───────────────────────────────────────────────────────────
-@Composable
-private fun PlaylistTab(vm: PlayerViewModel, isLocked: Boolean) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            "Gig & Set-Verwaltung\nkommt in Phase 3",
-            color = Gray, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-    }
-}
 
 @Composable
 private fun SetSongList(

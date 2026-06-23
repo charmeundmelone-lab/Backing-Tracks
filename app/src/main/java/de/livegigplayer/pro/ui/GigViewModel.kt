@@ -8,8 +8,12 @@ import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.SetSongCrossRef
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -21,6 +25,17 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     val allGigs: StateFlow<List<GigEntity>> = gigDao.getAllGigs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _selectedGigId = MutableStateFlow<Long?>(null)
+    val selectedGigId: StateFlow<Long?> = _selectedGigId.asStateFlow()
+
+    val setsForSelectedGig: StateFlow<List<SetEntity>> = _selectedGigId
+        .flatMapLatest { gigId ->
+            if (gigId != null) setDao.getSetsForGig(gigId) else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun selectGig(id: Long?) { _selectedGigId.value = id }
 
     fun createGig(name: String) {
         viewModelScope.launch(Dispatchers.IO) {

@@ -326,22 +326,23 @@ private fun SetCard(
         // Song-Zeilen
         songs.forEach { songInSet ->
             SetSongRow(
-                songInSet   = songInSet,
-                isEditing   = isEditing,
-                onPlay      = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
-                onQueueNext = {
+                songInSet     = songInSet,
+                isCurrentSong = songInSet.song.id == currentSong?.id,
+                isEditing     = isEditing,
+                onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
+                onQueueNext   = {
                     currentSong?.id?.let { cid ->
                         gigVm.insertSpontaneousNext(songInSet.song, cid, playerVm)
                         Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
                     }
                 },
-                onQueueEnd  = {
+                onQueueEnd    = {
                     currentSong?.id?.let { cid ->
                         gigVm.insertSpontaneousLater(songInSet.song, cid, playerVm)
                         Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
                     }
                 },
-                onRemove    = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) }
+                onRemove      = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) }
             )
         }
 
@@ -352,6 +353,7 @@ private fun SetCard(
 @Composable
 private fun SetSongRow(
     songInSet: SongInSet,
+    isCurrentSong: Boolean,
     isEditing: Boolean,
     onPlay: () -> Unit,
     onQueueNext: () -> Unit,
@@ -362,7 +364,7 @@ private fun SetSongRow(
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    val alpha    = if (songInSet.completedInSet) 0.35f else 1f
+    val alpha    = if (songInSet.completedInSet && !isCurrentSong) 0.35f else 1f
     val voltColor = if (songInSet.spontaneousInSet) Color(0xFFFFD700) else GigVolt
     val bpmTxt   = if (songInSet.song.bpmExact > 0f)
         "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
@@ -397,6 +399,7 @@ private fun SetSongRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
+            .background(if (isCurrentSong) GigVolt.copy(alpha = 0.18f) else Color.Transparent)
             .alpha(alpha)
             .pointerInput(isEditing) {
                 if (!isEditing) {

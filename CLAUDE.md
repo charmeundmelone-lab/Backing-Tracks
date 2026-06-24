@@ -50,10 +50,10 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── GigEntity.kt          — Room-Entity (gigId, name)
 │   ├── GigDao.kt             — getAllGigs, insert, delete
 │   ├── SetEntity.kt          — Room-Entity (setId, gigOwnerId, name, position)
-│   ├── SetSongCrossRef.kt    — (setId, songId, positionInSet, isCompleted, isSpontaneous)
-│   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later (@Transaction)
-│   ├── SongInSet.kt          — @Embedded Song + positionInSet + completedInSet + spontaneousInSet
-│   ├── AppDatabase.kt        — RoomDatabase v12, Migrationen bis v12
+│   ├── SetSongCrossRef.kt    — (setId, songId, positionInSet, isCompleted, isSpontaneous, endAction)
+│   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later (@Transaction, Cut&Paste)
+│   ├── SongInSet.kt          — @Embedded Song + positionInSet + completedInSet + spontaneousInSet + endAction
+│   ├── AppDatabase.kt        — RoomDatabase v13, Migrationen bis v13
 │   └── TrackMode.kt          — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
 ├── ui/
 │   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer
@@ -101,7 +101,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v8** — nächste Migration wäre 8→9. Migrationen NIE doppelt anlegen.
+1. **Room v13** — nächste Migration wäre 13→14. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
@@ -109,10 +109,29 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-06-23
-**CI Build:** #213 ✅ — grün
-**Branch:** `main`
-**Commit:** Fix Concurrency & Links-Swipe-Logik (Master-Patch)
+**Datum:** 2026-06-24
+**CI Build:** #219 ✅ — grün
+**Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
+**Commit:** Track-End Actions: endAction in SongInSet, Player-Poll, UI-Toggle
+
+### Sprint 5.22 DONE: Track-End Actions + Cockpit-UI + Q-List-Fix (CI #219)
+
+- **DB v12→13:** `endAction INTEGER NOT NULL DEFAULT 0` in `set_song_cross_ref`
+- **SongInSet:** `val endAction: Int` (0=CUE/arm, 1=STOP, 2=AUTOPLAY)
+- **SetSongCrossRef:** 6. Feld `val endAction: Int = 0`
+- **PlayerViewModel:** `val activeEndAction = MutableStateFlow(0)`;
+  200ms-Poll reagiert mit `when(activeEndAction.value)`: CUE=arm, STOP=pause, AUTOPLAY=play
+- **GigViewModel:** `cycleEndAction()` dreht (0→1→2→0); `armSetIfIdle` + `loadSetAsQueue`
+  setzen `playerVm.activeEndAction` beim Laden; `onSongCompleted`-Callback aktualisiert
+  `activeEndAction` für den nächsten Song
+- **Cockpit-UI:** Aktiver Song in SetSongRow hellblau (GigVolt 18%) hinterlegt;
+  abgespielte Songs auf alpha=0.30; Edit-Mode zeigt endAction-Button (⏸/⏹/▶▶)
+- **Q-List-Fix:** Cut & Paste-Strategie in SetDao — Song wird zuerst gelöscht,
+  dann Liste neu geladen, dann shift + re-insert → keine Selbstkollision mehr
+- **_activeSetId-Bug:** `armSetIfIdle` setzt `_activeSetId` jetzt IMMER (vor dem
+  Early-Return) — war Hauptursache für "Swipe funktioniert nur 1-2 Mal"
+- **Branch-Hygiene:** Alle veralteten `claude/`-Branches gelöscht; `main` ist
+  jetzt Default-Branch auf GitHub
 
 ### Master-Patch DONE: Mutex & firstRegular-Fix (CI #213)
 
@@ -205,12 +224,14 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
-- **Q-List-Bug (PRIO 1):** Spontane Einreihung versagt nach 1–2 Swipes — Songs landen
-  an falscher Position oder gar nicht. Ursache noch unklar; Diagnose via Q&A begonnen.
-  Gezielte Fragen an User: Archiv vs. Set-Swipe? Rechts vs. Links? Song wechselt zwischen Swipes?
+- **Q-List testen (PRIO 1):** Cut&Paste + _activeSetId-Fix sind implementiert — in echter
+  Gig-Situation testen ob Swipes jetzt zuverlässig funktionieren (vorher: versagte nach 1-2 Mal)
+- **Follow-Me Gear:** Beim manuellen Antippen eines Songs im Set-Tab sollen Spontan-Songs
+  hinter den angetippten Song umsortiert werden (`handleManualSelectionShift` in SetDao)
+- **endAction Live-Icon im Player:** Kleines Icon im Player-Screen (⏸/⏹/▶▶) das den
+  aktuellen endAction anzeigt und per Tippen durchschaltet
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
-- **Playlist-Tab Queue-Swipe:** Swipe rechts/links auf Stage-Songs
 
 ### Loop-Editor — Archiviert
 

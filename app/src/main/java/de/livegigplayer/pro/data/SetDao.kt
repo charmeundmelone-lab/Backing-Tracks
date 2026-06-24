@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -45,7 +46,6 @@ abstract class SetDao {
     """)
     abstract suspend fun getSongsInSetOnce(setId: Long): List<SongInSet>
 
-    // Plain query without @Transaction — safe to call from inside @Transaction methods
     @Query("""
         SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet, ref.endAction AS endAction
         FROM songs
@@ -54,6 +54,12 @@ abstract class SetDao {
         ORDER BY ref.positionInSet ASC
     """)
     abstract suspend fun getSongsInSetOncePlain(setId: Long): List<SongInSet>
+
+    @Query("SELECT * FROM set_song_cross_ref WHERE setId = :setId ORDER BY positionInSet ASC")
+    protected abstract suspend fun getRawCrossRefs(setId: Long): List<SetSongCrossRef>
+
+    @Update(onConflict = OnConflictStrategy.REPLACE)
+    protected abstract suspend fun updateRawCrossRefs(refs: List<SetSongCrossRef>)
 
     @Query("SELECT MAX(positionInSet) FROM set_song_cross_ref WHERE setId = :setId")
     abstract suspend fun getMaxPositionInSet(setId: Long): Int?
@@ -79,36 +85,61 @@ abstract class SetDao {
     @Query("UPDATE set_song_cross_ref SET isSpontaneous = :spontaneous WHERE setId = :setId AND songId = :songId")
     abstract suspend fun updateSpontaneous(setId: Long, songId: Long, spontaneous: Boolean)
 
-    // ── Spontaneous insertion — fully in-memory, single read pass, no nested @Transaction ──
+    // ── Rechts-Swipe: Song direkt nach dem aktuellen Song einfügen ────────────
 
-    // Right-swipe: insert directly after the currently playing song
     @Transaction
     open suspend fun moveSpontaneousNext(setId: Long, songId: Long, currentSongId: Long) {
-        val songs = getSongsInSetOncePlain(setId).toMutableList()
-        val songIdx = songs.indexOfFirst { it.song.id == songId }
-        if (songIdx < 0) return
-        val song = songs.removeAt(songIdx)
-        val anchorIdx = songs.indexOfFirst { it.song.id == currentSongId }
+        val refs = getRawCrossRefs(setId).toMutableList()
+        val targetIdx = refs.indexOfFirst { it.songId == songId }
+        if (targetIdx < 0) return
+
+        val targetRef = refs.removeAt(targetIdx)
+
+        val anchorIdx = refs.indexOfFirst { it.songId == currentSongId }
         val insertIdx = if (anchorIdx >= 0) {
             anchorIdx + 1
         } else {
-            val firstUnplayed = songs.indexOfFirst { !it.completedInSet }
-            if (firstUnplayed >= 0) firstUnplayed + 1 else 0
+            val firstUnplayed = refs.indexOfFirst { !it.isCompleted }
+            if (firstUnplayed >= 0) firstUnplayed else 0
         }
-        songs.add(insertIdx.coerceIn(0, songs.size), song)
-        updateSpontaneous(setId, songId, true)
-        songs.forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
+
+        val updatedRef = targetRef.copy(isSpontaneous = true)
+        refs.add(insertIdx.coerceIn(0, refs.size), updatedRef)
+
+        val sanitized = refs.mapIndexed { i, ref -> ref.copy(positionInSet = i) }
+        updateRawCrossRefs(sanitized)
     }
 
-    // Left-swipe: append to end of set
+    // ── Links-Swipe: Song an die Grenze der Spontan-Zone (vor erstem regulären) einfügen ──
+
     @Transaction
     open suspend fun moveSpontaneousLater(setId: Long, songId: Long, currentSongId: Long) {
-        val songs = getSongsInSetOncePlain(setId).toMutableList()
-        val songIdx = songs.indexOfFirst { it.song.id == songId }
-        if (songIdx < 0) return
-        val song = songs.removeAt(songIdx)
-        songs.add(song)
-        updateSpontaneous(setId, songId, true)
-        songs.forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
+        val refs = getRawCrossRefs(setId).toMutableList()
+        val targetIdx = refs.indexOfFirst { it.songId == songId }
+        if (targetIdx < 0) return
+
+        val targetRef = refs.removeAt(targetIdx)
+
+        val anchorIdx = refs.indexOfFirst { it.songId == currentSongId }
+        val startSearchIdx = if (anchorIdx >= 0) {
+            anchorIdx + 1
+        } else {
+            val firstUnplayed = refs.indexOfFirst { !it.isCompleted }
+            if (firstUnplayed >= 0) firstUnplayed else 0
+        }
+
+        var insertIdx = refs.size
+        for (i in startSearchIdx until refs.size) {
+            if (!refs[i].isCompleted && !refs[i].isSpontaneous) {
+                insertIdx = i
+                break
+            }
+        }
+
+        val updatedRef = targetRef.copy(isSpontaneous = true)
+        refs.add(insertIdx.coerceIn(0, refs.size), updatedRef)
+
+        val sanitized = refs.mapIndexed { i, ref -> ref.copy(positionInSet = i) }
+        updateRawCrossRefs(sanitized)
     }
 }

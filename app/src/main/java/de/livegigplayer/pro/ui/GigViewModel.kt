@@ -106,6 +106,11 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { setDao.resetCompletedForSet(setId) }
     }
 
+    fun cycleEndAction(setId: Long, songId: Long, currentEndAction: Int) {
+        val next = (currentEndAction + 1) % 3
+        viewModelScope.launch(Dispatchers.IO) { setDao.updateEndAction(setId, songId, next) }
+    }
+
     fun sanitizeSetPositions(setId: Long) {
         viewModelScope.launch(Dispatchers.IO) { sanitizeSetPositionsInternal(setId) }
     }
@@ -125,9 +130,14 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
             val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
             playerVm.selectSong(first.song, getApplication(), isGigSet = true)
+            playerVm.activeEndAction.value = withContext(Dispatchers.IO) {
+                setDao.getEndAction(setId, first.song.id) ?: 0
+            }
             playerVm.onSongCompleted = { completedId ->
                 viewModelScope.launch(Dispatchers.IO) {
                     setDao.markSongCompleted(setId, completedId, true)
+                    val newId = playerVm.currentSong.value?.id ?: return@launch
+                    playerVm.activeEndAction.value = setDao.getEndAction(setId, newId) ?: 0
                 }
             }
         }
@@ -144,10 +154,13 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             if (toPlay.isEmpty()) return@launch
             playerVm.clearQueue()
             playerVm.selectSong(toPlay.first().song, getApplication(), isGigSet = true)
+            playerVm.activeEndAction.value = toPlay.first().endAction
             toPlay.drop(1).forEach { playerVm.addToQueueEnd(it.song) }
             playerVm.onSongCompleted = { completedId ->
                 viewModelScope.launch(Dispatchers.IO) {
                     setDao.markSongCompleted(setId, completedId, true)
+                    val newId = playerVm.currentSong.value?.id ?: return@launch
+                    playerVm.activeEndAction.value = setDao.getEndAction(setId, newId) ?: 0
                 }
             }
         }

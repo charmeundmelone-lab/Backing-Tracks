@@ -154,11 +154,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     val next = nextSong.value
                     when {
                         next != null -> {
-                            // Nächster Song vorhanden → immer weiter (unabhängig von autoStop)
-                            Log.d("PlayerViewModel", "Auto-Advance: Song-Ende → '${next.title}'")
-                            skipNext()
-                            engine.play()
-                            _isPlaying.value = true
+                            Log.d("PlayerViewModel", "Auto-Advance: Song-Ende → '${next.title}' (endAction=${activeEndAction.value})")
+                            when (activeEndAction.value) {
+                                1 -> { engine.pause(); _isPlaying.value = false }                   // STOP
+                                0 -> { skipNext(); _isPlaying.value = false }                       // CUE (arm, kein Play)
+                                else -> { skipNext(); engine.play(); _isPlaying.value = true }       // AUTOPLAY
+                            }
                         }
                         _currentSong.value?.autoStop == true -> {
                             // Kein nächster Song + autoStop=true → Stopp
@@ -434,6 +435,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
     fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication(), isGigSet = _isGigSetMode.value) else engine.seekTo(0L) }
     var onSongCompleted: ((songId: Long) -> Unit)? = null
+    val activeEndAction = MutableStateFlow(0) // 0=CUE, 1=STOP, 2=AUTOPLAY — set by GigViewModel
 
     fun skipNext() {
         val completedId = _currentSong.value?.id

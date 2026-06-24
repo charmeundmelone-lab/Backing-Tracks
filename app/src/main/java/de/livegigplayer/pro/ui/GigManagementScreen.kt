@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -342,7 +343,8 @@ private fun SetCard(
                         Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
                     }
                 },
-                onRemove      = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) }
+                onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) },
+                onCycleEndAction  = { gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction) }
             )
         }
 
@@ -358,13 +360,15 @@ private fun SetSongRow(
     onPlay: () -> Unit,
     onQueueNext: () -> Unit,
     onQueueEnd: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onCycleEndAction: () -> Unit = {}
 ) {
     var dragX by remember { mutableStateOf(0f) }
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    val alpha    = if (songInSet.completedInSet && !isCurrentSong) 0.35f else 1f
+    val alpha    = if (songInSet.completedInSet && !isCurrentSong) 0.30f else 1f
+    val endActionLabel = when (songInSet.endAction) { 1 -> "⏹" ; 2 -> "▶▶" ; else -> "⏸" }
     val voltColor = if (songInSet.spontaneousInSet) Color(0xFFFFD700) else GigVolt
     val bpmTxt   = if (songInSet.song.bpmExact > 0f)
         "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
@@ -441,6 +445,9 @@ private fun SetSongRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (isEditing) {
+            TextButton(onClick = onCycleEndAction, modifier = Modifier.defaultMinSize(minWidth = 40.dp)) {
+                Text(endActionLabel, fontSize = 14.sp, color = GigGray)
+            }
             IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Filled.Close, contentDescription = "Aus Set entfernen",
                     tint = GigRed, modifier = Modifier.size(18.dp))

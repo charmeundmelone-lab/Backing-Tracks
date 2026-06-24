@@ -27,7 +27,7 @@ abstract class SetDao {
 
     @Transaction
     @Query("""
-        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet, ref.endAction AS endAction
         FROM songs
         INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
         WHERE ref.setId = :setId
@@ -37,7 +37,7 @@ abstract class SetDao {
 
     @Transaction
     @Query("""
-        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet, ref.endAction AS endAction
         FROM songs
         INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
         WHERE ref.setId = :setId
@@ -59,6 +59,12 @@ abstract class SetDao {
 
     @Query("UPDATE set_song_cross_ref SET isCompleted = 0 WHERE setId = :setId")
     abstract suspend fun resetCompletedForSet(setId: Long)
+
+    @Query("SELECT endAction FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")
+    abstract suspend fun getEndAction(setId: Long, songId: Long): Int?
+
+    @Query("UPDATE set_song_cross_ref SET endAction = :endAction WHERE setId = :setId AND songId = :songId")
+    abstract suspend fun updateEndAction(setId: Long, songId: Long, endAction: Int)
 
     // ── Atomare Spontan-Einreihung (Cut & Paste) ─────────────────────────────
 

@@ -42,5 +42,6 @@ data class SongInSet(
     @Embedded val song: Song,
     val positionInSet:   Int,
     val completedInSet:  Boolean,
-    val spontaneousInSet: Boolean
+    val spontaneousInSet: Boolean,
+    val endAction:       Int
 )

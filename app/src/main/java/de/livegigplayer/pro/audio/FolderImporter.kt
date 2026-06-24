@@ -27,17 +27,6 @@ object FolderImporter {
 
         Log.d(TAG, "${folders.size} Unterordner (Modus A), ${wavs.size} WAV-Dateien direkt (Modus B)")
 
-        // Bug-Fix: Kein Unterordner, aber mehrere WAVs → Root selbst ist ein Song-Ordner (Modus A)
-        if (folders.isEmpty() && wavs.size > 1) {
-            val rootName = root.name ?: ""
-            if (rootName.isNotBlank()) {
-                Log.d(TAG, "Kein Unterordner, Root '$rootName' wird als Modus-A-Song behandelt")
-                onProgress(rootName)
-                importModeAWavs(context, dao, rootUri.toString(), rootName, wavs)
-                return
-            }
-        }
-
         // Modus A: Unterordner = Multi-Stem-Songs
         for (folder in folders) {
             val rawName = folder.name ?: continue

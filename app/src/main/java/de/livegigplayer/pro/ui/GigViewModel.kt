@@ -130,8 +130,8 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     // ── Auto-Arm: lädt ersten ungespielten Song in Player (ohne Auto-Play) ──────
 
     fun armSetIfIdle(setId: Long, playerVm: PlayerViewModel) {
-        _activeSetId.value = setId
         if (playerVm.currentSong.value != null) return
+        _activeSetId.value = setId
         viewModelScope.launch {
             val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
             val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
@@ -176,8 +176,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     private val queueMutex = Mutex()
 
-    fun insertSpontaneousNext(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
-        val setId = _activeSetId.value ?: return
+    fun insertSpontaneousNext(setId: Long, song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
                 setDao.moveSpontaneousNext(setId, song.id, currentSongId)
@@ -186,8 +185,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun insertSpontaneousLater(song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
-        val setId = _activeSetId.value ?: return
+    fun insertSpontaneousLater(setId: Long, song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
                 setDao.moveSpontaneousLater(setId, song.id, currentSongId)

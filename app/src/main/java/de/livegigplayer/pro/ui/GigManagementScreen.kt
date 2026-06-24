@@ -333,13 +333,13 @@ private fun SetCard(
                 onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
                 onQueueNext   = {
                     currentSong?.id?.let { cid ->
-                        gigVm.insertSpontaneousNext(songInSet.song, cid, playerVm)
+                        gigVm.insertSpontaneousNext(set.setId, songInSet.song, cid, playerVm)
                         Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
                     }
                 },
                 onQueueEnd    = {
                     currentSong?.id?.let { cid ->
-                        gigVm.insertSpontaneousLater(songInSet.song, cid, playerVm)
+                        gigVm.insertSpontaneousLater(set.setId, songInSet.song, cid, playerVm)
                         Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
                     }
                 },

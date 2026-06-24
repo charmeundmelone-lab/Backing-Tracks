@@ -45,6 +45,16 @@ abstract class SetDao {
     """)
     abstract suspend fun getSongsInSetOnce(setId: Long): List<SongInSet>
 
+    // Plain query without @Transaction — safe to call from inside @Transaction methods
+    @Query("""
+        SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet, ref.endAction AS endAction
+        FROM songs
+        INNER JOIN set_song_cross_ref ref ON songs.id = ref.songId
+        WHERE ref.setId = :setId
+        ORDER BY ref.positionInSet ASC
+    """)
+    protected abstract suspend fun getSongsInSetOncePlain(setId: Long): List<SongInSet>
+
     @Query("SELECT MAX(positionInSet) FROM set_song_cross_ref WHERE setId = :setId")
     abstract suspend fun getMaxPositionInSet(setId: Long): Int?
 
@@ -66,35 +76,39 @@ abstract class SetDao {
     @Query("UPDATE set_song_cross_ref SET endAction = :endAction WHERE setId = :setId AND songId = :songId")
     abstract suspend fun updateEndAction(setId: Long, songId: Long, endAction: Int)
 
-    // ── Atomare Spontan-Einreihung ────────────────────────────────────────────
+    @Query("UPDATE set_song_cross_ref SET isSpontaneous = :spontaneous WHERE setId = :setId AND songId = :songId")
+    abstract suspend fun updateSpontaneous(setId: Long, songId: Long, spontaneous: Boolean)
 
-    @Query("UPDATE set_song_cross_ref SET positionInSet = positionInSet + 1 WHERE setId = :setId AND positionInSet >= :fromPos")
-    abstract suspend fun shiftPositionsUp(setId: Long, fromPos: Int)
+    // ── Spontaneous insertion — fully in-memory, single read pass, no nested @Transaction ──
 
-    // Rechts-Swipe: sofort nach dem aktuell spielenden Song einschieben
+    // Right-swipe: insert directly after the currently playing song
     @Transaction
     open suspend fun moveSpontaneousNext(setId: Long, songId: Long, currentSongId: Long) {
-        deleteCrossRef(setId, songId)
-        val songs = getSongsInSetOnce(setId)
-        val anchor = songs.find { it.song.id == currentSongId }?.positionInSet
-            ?: songs.firstOrNull { !it.completedInSet }?.positionInSet
-            ?: -1
-        insertSpontaneousAt(setId, songId, anchor + 1)
+        val songs = getSongsInSetOncePlain(setId).toMutableList()
+        val songIdx = songs.indexOfFirst { it.song.id == songId }
+        if (songIdx < 0) return
+        val song = songs.removeAt(songIdx)
+        val anchorIdx = songs.indexOfFirst { it.song.id == currentSongId }
+        val insertIdx = if (anchorIdx >= 0) {
+            anchorIdx + 1
+        } else {
+            val firstUnplayed = songs.indexOfFirst { !it.completedInSet }
+            if (firstUnplayed >= 0) firstUnplayed + 1 else 0
+        }
+        songs.add(insertIdx.coerceIn(0, songs.size), song)
+        updateSpontaneous(setId, songId, true)
+        songs.forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
     }
 
-    // Links-Swipe: ans Ende des Sets anhängen (robust, degeneriert nicht)
+    // Left-swipe: append to end of set
     @Transaction
     open suspend fun moveSpontaneousLater(setId: Long, songId: Long, currentSongId: Long) {
-        deleteCrossRef(setId, songId)
-        val songs = getSongsInSetOnce(setId)
-        val endPos = (songs.maxOfOrNull { it.positionInSet } ?: -1) + 1
-        insertSpontaneousAt(setId, songId, endPos)
-    }
-
-    private suspend fun insertSpontaneousAt(setId: Long, songId: Long, pos: Int) {
-        shiftPositionsUp(setId, pos)
-        insertCrossRef(SetSongCrossRef(setId, songId, pos, isCompleted = false, isSpontaneous = true))
-        // Lücken schließen: alle Positionen von 0..n-1 neu vergeben
-        getSongsInSetOnce(setId).forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
+        val songs = getSongsInSetOncePlain(setId).toMutableList()
+        val songIdx = songs.indexOfFirst { it.song.id == songId }
+        if (songIdx < 0) return
+        val song = songs.removeAt(songIdx)
+        songs.add(song)
+        updateSpontaneous(setId, songId, true)
+        songs.forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
     }
 }

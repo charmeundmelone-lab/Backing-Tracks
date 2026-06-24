@@ -66,45 +66,35 @@ abstract class SetDao {
     @Query("UPDATE set_song_cross_ref SET endAction = :endAction WHERE setId = :setId AND songId = :songId")
     abstract suspend fun updateEndAction(setId: Long, songId: Long, endAction: Int)
 
-    // ── Atomare Spontan-Einreihung (Cut & Paste) ─────────────────────────────
+    // ── Atomare Spontan-Einreihung ────────────────────────────────────────────
 
-    @Query("SELECT isCompleted FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")
-    abstract suspend fun getCompletedStatus(setId: Long, songId: Long): Boolean?
+    @Query("UPDATE set_song_cross_ref SET positionInSet = positionInSet + 1 WHERE setId = :setId AND positionInSet >= :fromPos")
+    abstract suspend fun shiftPositionsUp(setId: Long, fromPos: Int)
 
-    @Query("UPDATE set_song_cross_ref SET positionInSet = positionInSet + 1 WHERE setId = :setId AND positionInSet >= :insertPos")
-    abstract suspend fun shiftPositionsUp(setId: Long, insertPos: Int)
-
+    // Rechts-Swipe: sofort nach dem aktuell spielenden Song einschieben
     @Transaction
     open suspend fun moveSpontaneousNext(setId: Long, songId: Long, currentSongId: Long) {
-        val wasCompleted = cutIfExists(setId, songId)
+        deleteCrossRef(setId, songId)
         val songs = getSongsInSetOnce(setId)
-        val currentPos = songs.find { it.song.id == currentSongId }?.positionInSet
-            ?: (songs.maxOfOrNull { it.positionInSet } ?: -1)
-        pasteAndSanitize(setId, songId, currentPos + 1, wasCompleted)
+        val anchor = songs.find { it.song.id == currentSongId }?.positionInSet
+            ?: songs.firstOrNull { !it.completedInSet }?.positionInSet
+            ?: -1
+        insertSpontaneousAt(setId, songId, anchor + 1)
     }
 
+    // Links-Swipe: ans Ende des Sets anhängen (robust, degeneriert nicht)
     @Transaction
     open suspend fun moveSpontaneousLater(setId: Long, songId: Long, currentSongId: Long) {
-        val wasCompleted = cutIfExists(setId, songId)
-        val songs = getSongsInSetOnce(setId)
-        val firstRegular = songs.firstOrNull {
-            !it.completedInSet && !it.spontaneousInSet && it.song.id != currentSongId
-        }
-        val insertPos = firstRegular?.positionInSet
-            ?: ((songs.maxOfOrNull { it.positionInSet } ?: -1) + 1)
-        pasteAndSanitize(setId, songId, insertPos, wasCompleted)
-    }
-
-    private suspend fun cutIfExists(setId: Long, songId: Long): Boolean {
-        val wasCompleted = getCompletedStatus(setId, songId) ?: false
         deleteCrossRef(setId, songId)
-        return wasCompleted
+        val songs = getSongsInSetOnce(setId)
+        val endPos = (songs.maxOfOrNull { it.positionInSet } ?: -1) + 1
+        insertSpontaneousAt(setId, songId, endPos)
     }
 
-    private suspend fun pasteAndSanitize(setId: Long, songId: Long, insertPos: Int, wasCompleted: Boolean) {
-        shiftPositionsUp(setId, insertPos)
-        insertCrossRef(SetSongCrossRef(setId, songId, insertPos, isCompleted = wasCompleted, isSpontaneous = true))
-        val updated = getSongsInSetOnce(setId)
-        updated.forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
+    private suspend fun insertSpontaneousAt(setId: Long, songId: Long, pos: Int) {
+        shiftPositionsUp(setId, pos)
+        insertCrossRef(SetSongCrossRef(setId, songId, pos, isCompleted = false, isSpontaneous = true))
+        // Lücken schließen: alle Positionen von 0..n-1 neu vergeben
+        getSongsInSetOnce(setId).forEachIndexed { i, s -> updateSongPosition(setId, s.song.id, i) }
     }
 }

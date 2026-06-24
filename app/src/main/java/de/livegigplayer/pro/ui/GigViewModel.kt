@@ -182,7 +182,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
                 setDao.moveSpontaneousNext(setId, song.id, currentSongId)
-                reloadQueueFromSet(setId, currentSongId, playerVm)
+                reloadQueueFromSet(setId, playerVm)
             }
         }
     }
@@ -191,14 +191,16 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
                 setDao.moveSpontaneousLater(setId, song.id, currentSongId)
-                reloadQueueFromSet(setId, currentSongId, playerVm)
+                reloadQueueFromSet(setId, playerVm)
             }
         }
     }
 
-    private suspend fun reloadQueueFromSet(setId: Long, currentSongId: Long, playerVm: PlayerViewModel) {
+    private suspend fun reloadQueueFromSet(setId: Long, playerVm: PlayerViewModel) {
         val updated = setDao.getSongsInSetOnce(setId)
-        val remaining = updated.filter { !it.completedInSet && it.song.id != currentSongId }
+        // currentSong zum Zeitpunkt des Reloads lesen — nicht den veralteten Wert vom Swipe-Moment
+        val currentId = playerVm.currentSong.value?.id ?: -1L
+        val remaining = updated.filter { !it.completedInSet && it.song.id != currentId }
         withContext(Dispatchers.Main) {
             playerVm.clearQueue()
             remaining.forEach { playerVm.addToQueueEnd(it.song) }

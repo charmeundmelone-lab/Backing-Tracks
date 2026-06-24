@@ -394,14 +394,14 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                     onOpenSheet     = { editSheet = song },
                     onDelete        = { vm.deleteSong(song) },
                     onQueueNext     = {
-                        if (activeSetId != null && currentSong != null) {
-                            gigVm.insertSpontaneousNext(activeSetId!!, song, currentSong!!.id, vm)
+                        if (activeSetId != null) {
+                            gigVm.insertSpontaneousNext(activeSetId!!, song, currentSong?.id ?: -1L, vm)
                             Toast.makeText(context, "★ ${song.title} → nächster", Toast.LENGTH_SHORT).show()
                         } else vm.addToQueueNext(song)
                     },
                     onQueueEnd      = {
-                        if (activeSetId != null && currentSong != null) {
-                            gigVm.insertSpontaneousLater(activeSetId!!, song, currentSong!!.id, vm)
+                        if (activeSetId != null) {
+                            gigVm.insertSpontaneousLater(activeSetId!!, song, currentSong?.id ?: -1L, vm)
                             Toast.makeText(context, "★ ${song.title} → später", Toast.LENGTH_SHORT).show()
                         } else vm.addToQueueEnd(song)
                     }

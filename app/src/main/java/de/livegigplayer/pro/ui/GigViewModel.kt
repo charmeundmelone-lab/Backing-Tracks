@@ -131,10 +131,12 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     fun armSetIfIdle(setId: Long, playerVm: PlayerViewModel) {
         if (playerVm.currentSong.value != null) return
-        _activeSetId.value = setId
         viewModelScope.launch {
             val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
             val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
+            // Nur setzen wenn dieses Set tatsächlich Songs hat — verhindert dass ein
+            // leeres Set (kein return@launch nötig) _activeSetId überschreibt
+            _activeSetId.value = setId
             playerVm.selectSong(first.song, getApplication(), isGigSet = true)
             playerVm.activeEndAction.value = withContext(Dispatchers.IO) {
                 setDao.getEndAction(setId, first.song.id) ?: 0

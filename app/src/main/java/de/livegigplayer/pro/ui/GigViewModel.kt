@@ -178,32 +178,32 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     private val queueMutex = Mutex()
 
-    fun insertSpontaneousNext(setId: Long, song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
+    fun insertSpontaneousNext(setId: Long, song: Song, playerVm: PlayerViewModel) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
-                setDao.moveSpontaneousNext(setId, song.id, currentSongId)
+                val trueCurrentSongId = playerVm.currentSong.value?.id ?: -1L
+                setDao.moveSpontaneousNext(setId, song.id, trueCurrentSongId)
                 reloadQueueFromSet(setId, playerVm)
             }
         }
     }
 
-    fun insertSpontaneousLater(setId: Long, song: Song, currentSongId: Long, playerVm: PlayerViewModel) {
+    fun insertSpontaneousLater(setId: Long, song: Song, playerVm: PlayerViewModel) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
-                setDao.moveSpontaneousLater(setId, song.id, currentSongId)
+                val trueCurrentSongId = playerVm.currentSong.value?.id ?: -1L
+                setDao.moveSpontaneousLater(setId, song.id, trueCurrentSongId)
                 reloadQueueFromSet(setId, playerVm)
             }
         }
     }
 
     private suspend fun reloadQueueFromSet(setId: Long, playerVm: PlayerViewModel) {
-        val updated = setDao.getSongsInSetOnce(setId)
-        // currentSong zum Zeitpunkt des Reloads lesen — nicht den veralteten Wert vom Swipe-Moment
+        val updated = setDao.getSongsInSetOncePlain(setId)
         val currentId = playerVm.currentSong.value?.id ?: -1L
-        val remaining = updated.filter { !it.completedInSet && it.song.id != currentId }
+        val remaining = updated.filter { !it.completedInSet && it.song.id != currentId }.map { it.song }
         withContext(Dispatchers.Main) {
-            playerVm.clearQueue()
-            remaining.forEach { playerVm.addToQueueEnd(it.song) }
+            playerVm.updateQueueAtomic(remaining)
         }
     }
 }

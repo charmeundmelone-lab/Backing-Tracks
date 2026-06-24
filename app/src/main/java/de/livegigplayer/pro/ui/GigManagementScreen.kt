@@ -332,11 +332,11 @@ private fun SetCard(
                 isEditing     = isEditing,
                 onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
                 onQueueNext   = {
-                    gigVm.insertSpontaneousNext(set.setId, songInSet.song, currentSong?.id ?: -1L, playerVm)
+                    gigVm.insertSpontaneousNext(set.setId, songInSet.song, playerVm)
                     Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
                 },
                 onQueueEnd    = {
-                    gigVm.insertSpontaneousLater(set.setId, songInSet.song, currentSong?.id ?: -1L, playerVm)
+                    gigVm.insertSpontaneousLater(set.setId, songInSet.song, playerVm)
                     Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
                 },
                 onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) },

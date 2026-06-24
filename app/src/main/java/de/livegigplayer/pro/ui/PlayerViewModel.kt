@@ -117,6 +117,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun addToQueueNext(song: Song) { _queue.value = listOf(song) + _queue.value.filter { it.id != song.id } }
     fun addToQueueEnd(song: Song)  { _queue.value = _queue.value.filter { it.id != song.id } + listOf(song) }
     fun clearQueue()               { _queue.value = emptyList() }
+    fun updateQueueAtomic(newQueue: List<Song>) { if (_queue.value != newQueue) _queue.value = newQueue }
     private fun dequeueFirst(): Song? {
         val first = _queue.value.firstOrNull() ?: return null
         _queue.value = _queue.value.drop(1)

@@ -53,7 +53,7 @@ abstract class SetDao {
         WHERE ref.setId = :setId
         ORDER BY ref.positionInSet ASC
     """)
-    protected abstract suspend fun getSongsInSetOncePlain(setId: Long): List<SongInSet>
+    abstract suspend fun getSongsInSetOncePlain(setId: Long): List<SongInSet>
 
     @Query("SELECT MAX(positionInSet) FROM set_song_cross_ref WHERE setId = :setId")
     abstract suspend fun getMaxPositionInSet(setId: Long): Int?

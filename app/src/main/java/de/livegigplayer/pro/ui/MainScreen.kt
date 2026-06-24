@@ -87,6 +87,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -482,8 +483,15 @@ private fun ArchivSongRow(
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
     var pendingAction         by remember { mutableStateOf<(() -> Unit)?>(null) }
 
+    // rememberUpdatedState: der pointerInput-Block (Key = selectionMode/isLocked)
+    // startet beim Swipen nicht neu. Ohne das bleiben onQueueNext/onQueueEnd auf
+    // den damaligen activeSetId eingefroren → Song landet im falschen / alten Set.
+    val latestNext      by rememberUpdatedState(onQueueNext)
+    val latestEnd       by rememberUpdatedState(onQueueEnd)
+    val latestCompleted by rememberUpdatedState(isCompletedInActiveSet)
+
     fun guarded(action: () -> Unit) {
-        if (isCompletedInActiveSet) { pendingAction = action; showAlreadyPlayedDialog = true }
+        if (latestCompleted) { pendingAction = action; showAlreadyPlayedDialog = true }
         else action()
     }
 
@@ -543,8 +551,8 @@ private fun ArchivSongRow(
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         if (!isLocked && !selectionMode) {
-                            if (dragX > 80f) guarded(onQueueNext)
-                            else if (dragX < -80f) guarded(onQueueEnd)
+                            if (dragX > 80f) guarded(latestNext)
+                            else if (dragX < -80f) guarded(latestEnd)
                         }
                         dragX = 0f
                     },

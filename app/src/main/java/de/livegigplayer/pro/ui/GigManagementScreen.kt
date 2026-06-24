@@ -43,8 +43,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -324,24 +326,27 @@ private fun SetCard(
             }
         }
 
-        // Song-Zeilen
+        // Song-Zeilen — key() bindet UI-State (dragX, Dialog) an die Song-Identität,
+        // nicht an die Listenposition. Verhindert Verwechslung beim Umsortieren.
         songs.forEach { songInSet ->
-            SetSongRow(
-                songInSet     = songInSet,
-                isCurrentSong = songInSet.song.id == currentSong?.id,
-                isEditing     = isEditing,
-                onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
-                onQueueNext   = {
-                    gigVm.insertSpontaneousNext(set.setId, songInSet.song, playerVm)
-                    Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
-                },
-                onQueueEnd    = {
-                    gigVm.insertSpontaneousLater(set.setId, songInSet.song, playerVm)
-                    Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
-                },
-                onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) },
-                onCycleEndAction  = { gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction) }
-            )
+            key(songInSet.song.id) {
+                SetSongRow(
+                    songInSet     = songInSet,
+                    isCurrentSong = songInSet.song.id == currentSong?.id,
+                    isEditing     = isEditing,
+                    onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
+                    onQueueNext   = {
+                        gigVm.insertSpontaneousNext(set.setId, songInSet.song, playerVm)
+                        Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
+                    },
+                    onQueueEnd    = {
+                        gigVm.insertSpontaneousLater(set.setId, songInSet.song, playerVm)
+                        Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
+                    },
+                    onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) },
+                    onCycleEndAction  = { gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction) }
+                )
+            }
         }
 
         if (songs.isNotEmpty()) Spacer(modifier = Modifier.height(6.dp))
@@ -363,6 +368,14 @@ private fun SetSongRow(
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
+    // rememberUpdatedState: hält die Callbacks/Flags aktuell, auch wenn der
+    // pointerInput-Block (Key = isEditing) nicht neu startet. Ohne das würden
+    // onQueueNext/onQueueEnd auf den Song der ERSTEN Komposition eingefroren bleiben.
+    val latestNext      by rememberUpdatedState(onQueueNext)
+    val latestEnd       by rememberUpdatedState(onQueueEnd)
+    val latestPlay      by rememberUpdatedState(onPlay)
+    val latestCompleted by rememberUpdatedState(songInSet.completedInSet)
+
     val alpha    = if (songInSet.completedInSet && !isCurrentSong) 0.30f else 1f
     val endActionLabel = when (songInSet.endAction) { 1 -> "⏹" ; 2 -> "▶▶" ; else -> "⏸" }
     val voltColor = if (songInSet.spontaneousInSet) Color(0xFFFFD700) else GigVolt
@@ -372,7 +385,7 @@ private fun SetSongRow(
     val subtitle = "$pre$bpmTxt  |  ${songInSet.song.duration}"
 
     fun guarded(action: () -> Unit) {
-        if (songInSet.completedInSet) { pendingAction = action; showAlreadyPlayedDialog = true }
+        if (latestCompleted) { pendingAction = action; showAlreadyPlayedDialog = true }
         else action()
     }
 
@@ -406,8 +419,8 @@ private fun SetSongRow(
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             when {
-                                dragX > 80f  -> guarded(onQueueNext)
-                                dragX < -80f -> guarded(onQueueEnd)
+                                dragX > 80f  -> guarded(latestNext)
+                                dragX < -80f -> guarded(latestEnd)
                             }
                             dragX = 0f
                         },
@@ -415,7 +428,7 @@ private fun SetSongRow(
                     ) { _, delta -> dragX += delta }
                 }
             }
-            .clickable(enabled = !isEditing, onClick = { guarded(onPlay) })
+            .clickable(enabled = !isEditing, onClick = { guarded(latestPlay) })
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

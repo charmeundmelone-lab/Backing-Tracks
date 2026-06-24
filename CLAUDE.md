@@ -106,13 +106,61 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
 5. **versionCode** kommt aus der CI-Build-Nummer (`-PversionCode=${{ github.run_number }}`). Lokaler Build → 1.
+6. **pointerInput Stale-Capture (KRITISCH)** — `detectHorizontalDragGestures` läuft in
+   einem suspend-Block, der NUR bei Key-Änderung neu startet. Callbacks/State, die im
+   `onDragEnd` benutzt werden, MÜSSEN über `rememberUpdatedState` geführt werden, sonst
+   frieren sie auf die erste Komposition ein. War die Hauptursache für "Swipe wird
+   random / trifft falschen Song". Siehe SetSongRow & ArchivSongRow.
+7. **Compose-Listen-Identität** — Songs in `SetCard` per `key(songInSet.song.id)`
+   gewrappt, damit lokaler State (`dragX`, Dialoge) an die Song-Identität gebunden ist,
+   nicht an die Listenposition.
+8. **SetDao Swipe-Mutationen** — `moveSpontaneousNext/Later` lesen alle CrossRefs
+   einmal (`getRawCrossRefs`), sortieren in-memory um und schreiben EINMAL atomar
+   (`updateRawCrossRefs`, `@Update` Batch). KEINE `forEachIndexed { updateSongPosition }`-
+   Schleifen mehr (O(N) Queries → Index-Kollisionen).
 
 ## Letzter Stand
 
 **Datum:** 2026-06-24
-**CI Build:** #219 ✅ — grün
+**CI Build:** Commit `6de5488` ✅ — grün
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Track-End Actions: endAction in SongInSet, Player-Poll, UI-Toggle
+**Commit:** Swipe-Root-Cause-Fix (rememberUpdatedState + key) — Q-List funktioniert
+jetzt zuverlässig (vom User live bestätigt: "es funktioniert perfekt!")
+
+### Sprint 5.23 DONE: Q-List ENDGÜLTIG gefixt (Commit 6de5488)
+
+Die Q-List (Wunschsong-Swipes) hatte über mehrere Builds hinweg das Symptom:
+"funktioniert anfangs, wird mit Wiederholung random, trifft den falschen Song".
+Alle vorherigen Fixes haben an der DB gearbeitet — der eigentliche Bug saß aber
+in der Compose-Gesten-Ebene. Live vom User bestätigt: jetzt perfekt.
+
+**ROOT CAUSE — Stale Lambda Capture in `pointerInput` (Commit 6de5488):**
+- `detectHorizontalDragGestures` läuft in einem suspend-Block, der nur bei
+  Key-Änderung (`isEditing` / `selectionMode`) neu startet — beim Swipen NIE.
+- Dadurch waren `onQueueNext`/`onQueueEnd` + `songInSet` auf die ERSTE Komposition
+  eingefroren. Nach jedem Umsortieren feuerte die Geste an Position X die Aktion
+  für den ursprünglich dort gewesenen Song → zunehmend "random".
+- In `ArchivSongRow` erklärt das eingefrorene `activeSetId` die früheren
+  "landet im falschen Set"-Reports.
+- **Fix:** `onQueueNext/onQueueEnd/onPlay` + completed-Flag in SetSongRow &
+  ArchivSongRow über `rememberUpdatedState` → Geste nutzt immer Live-Werte.
+- **Fix:** `SetCard` wrappt jede `SetSongRow` in `key(songInSet.song.id)`.
+
+**Vorbereitende DB-Layer-Fixes (waren echte latente Bugs, nicht umsonst):**
+- **Commit a5a212e:** Nested `@Transaction` eliminiert — `getSongsInSetOncePlain`
+  (ohne `@Transaction`) für Aufrufe innerhalb anderer `@Transaction`-Methoden.
+- **Commit 20311d3:** `PlayerViewModel.updateQueueAtomic()` ersetzt
+  clearQueue+addToQueueEnd-Schleife (kein ExoPlayer-Buffer-Flush mehr);
+  `trueCurrentSongId` wird innerhalb `queueMutex` aus `playerVm.currentSong.value`
+  gelesen, nicht mehr aus dem (lagging) UI-State; UI-Aufrufe ohne currentSongId-Param.
+- **Commit b824ac1 (Meisterstück):** `moveSpontaneousNext/Later` lesen alle
+  CrossRefs einmal (`getRawCrossRefs`), sortieren in-memory um, schreiben EINMAL
+  atomar (`updateRawCrossRefs` = `@Update` Batch). Links-Swipe fügt an der
+  Q-Zonen-Grenze ein (nach Spontan-Songs, vor erstem regulären ungespielten Song),
+  nicht mehr blind ans Set-Ende.
+
+**Bonus-Fix:** FolderImporter behandelt WAV-only-Ordner (keine Unterordner)
+korrekt als Einzel-Songs (Modus B), nicht mehr als einen Modus-A-Song (Commit 90f2dce).
 
 ### Sprint 5.22 DONE: Track-End Actions + Cockpit-UI + Q-List-Fix (CI #219)
 
@@ -224,14 +272,25 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
-- **Q-List testen (PRIO 1):** Cut&Paste + _activeSetId-Fix sind implementiert — in echter
-  Gig-Situation testen ob Swipes jetzt zuverlässig funktionieren (vorher: versagte nach 1-2 Mal)
+- ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
+  bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
+  `pointerInput` (Commit 6de5488). Nicht mehr offen.
+- **armSetIfIdle onSongCompleted-Set-Lag (LATENT, PRIO 2):** Beim Wechsel zwischen
+  Sets bleibt `playerVm.onSongCompleted` auf das zuerst geöffnete Set gebunden, weil
+  `armSetIfIdle` per `if (currentSong != null) return` früh aussteigt und den Callback
+  nicht neu setzt. → markSongCompleted/activeEndAction können auf das falsche Set
+  zeigen, wenn man Set A öffnet, dann Set B. Lösung: Callback unabhängig vom
+  Early-Return setzen, oder activeSetId-gebundenen Callback verwenden.
 - **Follow-Me Gear:** Beim manuellen Antippen eines Songs im Set-Tab sollen Spontan-Songs
   hinter den angetippten Song umsortiert werden (`handleManualSelectionShift` in SetDao)
 - **endAction Live-Icon im Player:** Kleines Icon im Player-Screen (⏸/⏹/▶▶) das den
   aktuellen endAction anzeigt und per Tippen durchschaltet
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
+- **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`
+  und Reste der alten Shift-Strategie prüfen, ob noch gebraucht (Batch-Write hat sie
+  größtenteils ersetzt). Nicht löschen ohne Nutzungs-Check (z.B. addSongsToSet,
+  deleteSongFromSet rufen sanitize noch auf).
 
 ### Loop-Editor — Archiviert
 

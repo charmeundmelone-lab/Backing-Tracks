@@ -81,7 +81,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { setDao.deleteSet(set) }
     }
 
-    fun addSongsToSet(setId: Long, songIds: List<Long>) {
+    fun addSongsToSet(setId: Long, songIds: List<Long>, playerVm: PlayerViewModel? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
                 val startPos = (setDao.getMaxPositionInSet(setId) ?: -1) + 1
@@ -89,15 +89,19 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
                     setDao.insertCrossRef(SetSongCrossRef(setId, songId, startPos + index))
                 }
                 sanitizeSetPositionsInternal(setId)
+                if (playerVm != null && setId == _activeSetId.value)
+                    reloadQueueFromSet(setId, playerVm)
             }
         }
     }
 
-    fun deleteSongFromSet(setId: Long, songId: Long) {
+    fun deleteSongFromSet(setId: Long, songId: Long, playerVm: PlayerViewModel? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {
                 setDao.deleteCrossRef(setId, songId)
                 sanitizeSetPositionsInternal(setId)
+                if (playerVm != null && setId == _activeSetId.value)
+                    reloadQueueFromSet(setId, playerVm)
             }
         }
     }

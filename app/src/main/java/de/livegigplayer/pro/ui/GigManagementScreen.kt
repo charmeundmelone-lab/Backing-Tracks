@@ -343,8 +343,12 @@ private fun SetCard(
                         gigVm.insertSpontaneousLater(set.setId, songInSet.song, playerVm)
                         Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
                     },
-                    onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id) },
-                    onCycleEndAction  = { gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction) }
+                    onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id, playerVm) },
+                    onCycleEndAction  = {
+                        gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction)
+                        if (songInSet.song.id == currentSong?.id)
+                            playerVm.activeEndAction.value = (songInSet.endAction + 1) % 3
+                    }
                 )
             }
         }

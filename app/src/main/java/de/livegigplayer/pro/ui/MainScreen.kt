@@ -204,8 +204,11 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onCycleEndAction = {
                     val sid = activeSetId
                     val song = currentSong
-                    if (sid != null && song != null)
+                    if (sid != null && song != null) {
+                        val next = (activeEndAction + 1) % 3
+                        vm.activeEndAction.value = next   // sofort im UI sichtbar
                         gigVm.cycleEndAction(sid, song.id, activeEndAction)
+                    }
                 }
             )
             // A/B Loop Panel — nur im Archiv-Modus (nicht im Gig-Set-Modus)
@@ -438,7 +441,7 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             songCount  = selectedIds.size,
             songIds    = orderedIds,
             onConfirm  = { setId ->
-                gigVm.addSongsToSet(setId, orderedIds)
+                gigVm.addSongsToSet(setId, orderedIds, vm)
                 vm.clearSelection()
                 showSetPicker = false
             },
@@ -835,10 +838,10 @@ private fun GlobalPlayer(
             // Countdown links — tnum verhindert Breitenflackern beim Ticken
             Text(
                 text = timeStr,
-                modifier = Modifier.wrapContentWidth().padding(end = 14.dp),
+                modifier = Modifier.wrapContentWidth().padding(end = 12.dp),
                 style = TextStyle(
                     color = Volt,
-                    fontSize = 20.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     fontFeatureSettings = "tnum"
@@ -848,7 +851,7 @@ private fun GlobalPlayer(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = song?.title ?: "Kein Song geladen",
-                    color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                    color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -862,7 +865,7 @@ private fun GlobalPlayer(
                     Text(
                         text = nextText,
                         color = if (nextSong != null) Color(0xFFBBBBBB) else Gray,
-                        fontSize = 13.sp,
+                        fontSize = 15.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                 }

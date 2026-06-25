@@ -141,10 +141,14 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             // Nur setzen wenn dieses Set tatsächlich Songs hat — verhindert dass ein
             // leeres Set (kein return@launch nötig) _activeSetId überschreibt
             _activeSetId.value = setId
+            playerVm.clearQueue()
             playerVm.selectSong(first.song, getApplication(), isGigSet = true)
             playerVm.activeEndAction.value = withContext(Dispatchers.IO) {
                 setDao.getEndAction(setId, first.song.id) ?: 0
             }
+            // Queue mit allen verbleibenden ungespielten Songs befüllen
+            songs.filter { !it.completedInSet && it.song.id != first.song.id }
+                .forEach { playerVm.addToQueueEnd(it.song) }
             playerVm.onSongCompleted = { completedId ->
                 viewModelScope.launch(Dispatchers.IO) {
                     setDao.markSongCompleted(setId, completedId, true)

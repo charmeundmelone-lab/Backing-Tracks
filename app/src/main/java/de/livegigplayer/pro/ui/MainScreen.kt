@@ -145,6 +145,8 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val isExitPending     by vm.isExitPending.collectAsState()
     val currentPlaylistId by vm.currentPlaylistId.collectAsState()
     val isGigSetMode      by vm.isGigSetMode.collectAsState()
+    val activeEndAction   by vm.activeEndAction.collectAsState()
+    val activeSetId       by gigVm.activeSetId.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
     var isLocked         by remember { mutableStateOf(false) }
@@ -194,10 +196,17 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 durationMs       = durationMs,
                 loopStartMs      = loopStartMs,
                 loopEndMs        = loopEndMs,
+                activeEndAction  = activeEndAction,
                 onPlayPause      = { vm.togglePlayPause() },
                 onStop           = { vm.stopPlayback() },
                 onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
-                onSetLoopButton  = { vm.onSetLoopButtonPressed() }
+                onSetLoopButton  = { vm.onSetLoopButtonPressed() },
+                onCycleEndAction = {
+                    val sid = activeSetId
+                    val song = currentSong
+                    if (sid != null && song != null)
+                        gigVm.cycleEndAction(sid, song.id, activeEndAction)
+                }
             )
             // A/B Loop Panel — nur im Archiv-Modus (nicht im Gig-Set-Modus)
             if (!isGigSetMode) LoopPanel(
@@ -801,8 +810,10 @@ private fun GlobalPlayer(
     isInSetMode: Boolean, isGigSetMode: Boolean,
     positionMs: Long, durationMs: Long,
     loopStartMs: Long?, loopEndMs: Long?,
+    activeEndAction: Int = 0,
     onPlayPause: () -> Unit, onStop: () -> Unit,
-    onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit
+    onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit,
+    onCycleEndAction: () -> Unit = {}
 ) {
     val progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
     val remainMs = (durationMs - positionMs).coerceAtLeast(0L)
@@ -815,18 +826,23 @@ private fun GlobalPlayer(
             modifier = Modifier.fillMaxWidth().height(3.dp),
             color = Volt, trackColor = BgTrack, drawStopIndicator = {}
         )
-        // Links: Countdown | Rechts: Aktueller + Nächster Song
+        // Links: Countdown | Mitte: Aktueller + Nächster Song | Rechts: EndAction (GigMode)
         Row(
             modifier = Modifier.fillMaxWidth()
-                .padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Countdown links — nur so breit wie nötig
+            // Countdown links — tnum verhindert Breitenflackern beim Ticken
             Text(
                 text = timeStr,
-                color = Volt, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                modifier = Modifier.wrapContentWidth().padding(end = 14.dp)
+                modifier = Modifier.wrapContentWidth().padding(end = 14.dp),
+                style = TextStyle(
+                    color = Volt,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontFeatureSettings = "tnum"
+                )
             )
             // Song-Infos — bekommt den gesamten restlichen Platz
             Column(modifier = Modifier.weight(1f)) {
@@ -835,21 +851,37 @@ private fun GlobalPlayer(
                     color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.SkipNext, contentDescription = null,
-                        tint = White, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
+                        tint = Gray, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     val nextText = if (nextSong != null) {
                         val capo = if (nextSong.capoPosition > 0) " · Capo ${nextSong.capoPosition}" else ""
                         "${nextSong.title}$capo"
                     } else "—"
                     Text(
                         text = nextText,
-                        color = if (nextSong != null) White else Gray,
-                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        color = if (nextSong != null) Color(0xFFBBBBBB) else Gray,
+                        fontSize = 13.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+            // EndAction-Button — nur im Gig-Set-Modus, 48dp Touch-Target
+            if (isGigSetMode && song != null) {
+                val (endIcon, endTint) = when (activeEndAction) {
+                    1    -> Icons.Filled.Stop     to RedStop
+                    2    -> Icons.Filled.PlayArrow to Volt
+                    else -> Icons.Filled.Pause    to Color(0xFF64B5F6) // CUE = hellblau
+                }
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable(onClick = onCycleEndAction),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(endIcon, contentDescription = "End-Action umschalten",
+                        tint = endTint, modifier = Modifier.size(24.dp))
                 }
             }
         }

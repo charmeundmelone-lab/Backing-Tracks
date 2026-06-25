@@ -121,11 +121,27 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-06-24
-**CI Build:** Commit `6de5488` ✅ — grün
+**Datum:** 2026-06-25
+**CI Build:** Commit `1fa2af4` — pushed, CI läuft
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Swipe-Root-Cause-Fix (rememberUpdatedState + key) — Q-List funktioniert
-jetzt zuverlässig (vom User live bestätigt: "es funktioniert perfekt!")
+**Commit:** PlayerInfoBar komprimiert + endAction Live-Button eingebaut
+
+### Sprint 5.24 DONE: Compact PlayerInfoBar + endAction Live-Button (Commit 1fa2af4)
+
+Ziel: maximale Setlist-Sichtbarkeit auf der Bühne bei gleichzeitig perfekter
+Bedienbarkeit der Info-Leiste.
+
+**Änderungen in `GlobalPlayer` (MainScreen.kt):**
+- Info Bar `padding vertical` 8→4dp (−8dp Gesamthöhe, mehr Platz für Setliste)
+- `Spacer(4dp)` zwischen Titel und Nächste-Song-Zeile entfernt
+- Countdown-Zeit: `fontFeatureSettings = "tnum"` — Breite flackert beim Ticken nicht
+  mehr (tabular numerals)
+- Nächste-Song-Icon: 14dp/Gray (war 16dp/White, dezenter)
+- **Neuer endAction-Live-Button** (nur im GigSetMode, rechts in der Info Bar):
+  - `Box(48dp)` Touch-Target nach Material-Mindestmaß, Icon 24dp zentriert
+  - CUE (0) = hellblau ⏸, STOP (1) = rot ⏹, AUTOPLAY (2) = Volt-gelb ▶
+  - Tippen → `gigVm.cycleEndAction(activeSetId, currentSong.id, activeEndAction)`
+  - `activeEndAction` + `onCycleEndAction` neu in `GlobalPlayer`-Signatur
 
 ### Sprint 5.23 DONE: Q-List ENDGÜLTIG gefixt (Commit 6de5488)
 
@@ -283,8 +299,8 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   Early-Return setzen, oder activeSetId-gebundenen Callback verwenden.
 - **Follow-Me Gear:** Beim manuellen Antippen eines Songs im Set-Tab sollen Spontan-Songs
   hinter den angetippten Song umsortiert werden (`handleManualSelectionShift` in SetDao)
-- **endAction Live-Icon im Player:** Kleines Icon im Player-Screen (⏸/⏹/▶▶) das den
-  aktuellen endAction anzeigt und per Tippen durchschaltet
+- ✅ **endAction Live-Button (ERLEDIGT):** In der PlayerInfoBar rechts (GigSetMode),
+  48dp Touch-Target, Farb-kodiert, tippar zum Durchschalten (Commit 1fa2af4)
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
 - **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`

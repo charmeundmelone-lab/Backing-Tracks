@@ -17,6 +17,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -197,6 +199,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 loopStartMs      = loopStartMs,
                 loopEndMs        = loopEndMs,
                 activeEndAction  = activeEndAction,
+                onSeekTo         = { ms -> vm.seekTo(ms) },
                 onPlayPause      = { vm.togglePlayPause() },
                 onStop           = { vm.stopPlayback() },
                 onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
@@ -814,21 +817,60 @@ private fun GlobalPlayer(
     positionMs: Long, durationMs: Long,
     loopStartMs: Long?, loopEndMs: Long?,
     activeEndAction: Int = 0,
+    onSeekTo: (Long) -> Unit = {},
     onPlayPause: () -> Unit, onStop: () -> Unit,
     onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit,
     onCycleEndAction: () -> Unit = {}
 ) {
+    var isSeeking by remember { mutableStateOf(false) }
+    var seekFraction by remember { mutableStateOf(0f) }
     val progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
-    val remainMs = (durationMs - positionMs).coerceAtLeast(0L)
+    val displayFraction = if (isSeeking) seekFraction else progress
+    val remainMs = if (isSeeking) ((1f - seekFraction) * durationMs).toLong().coerceAtLeast(0L)
+                  else (durationMs - positionMs).coerceAtLeast(0L)
     val remSec   = remainMs / 1000
     val timeStr  = if (song == null) "--:--" else "-%02d:%02d".format(remSec / 60, remSec % 60)
 
     Column(modifier = Modifier.fillMaxWidth().background(BgPlayer)) {
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(3.dp),
-            color = Volt, trackColor = BgTrack, drawStopIndicator = {}
-        )
+        // Seek-Bar: dünne Linie, interaktiv bei Berührung
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(20.dp)
+                .pointerInput(durationMs, song) {
+                    if (durationMs <= 0L || song == null) return@pointerInput
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            isSeeking = true
+                            seekFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            seekFraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                            change.consume()
+                        },
+                        onDragEnd    = { onSeekTo((seekFraction * durationMs).toLong()); isSeeking = false },
+                        onDragCancel = { isSeeking = false }
+                    )
+                }
+                .pointerInput(durationMs, song) {
+                    if (durationMs <= 0L || song == null) return@pointerInput
+                    detectTapGestures { offset ->
+                        onSeekTo(((offset.x / size.width.toFloat()).coerceIn(0f, 1f) * durationMs).toLong())
+                    }
+                }
+        ) {
+            val w      = size.width
+            val cy     = size.height / 2f
+            val trackH = if (isSeeking) 5.dp.toPx() else 3.dp.toPx()
+            val half   = trackH / 2f
+            val filled = (w * displayFraction).coerceIn(0f, w)
+
+            drawRect(color = BgTrack, topLeft = Offset(0f, cy - half), size = Size(w, trackH))
+            if (filled > 0f)
+                drawRect(color = Volt,   topLeft = Offset(0f, cy - half), size = Size(filled, trackH))
+            if (isSeeking)
+                drawCircle(color = Volt, radius = 6.dp.toPx(), center = Offset(filled, cy))
+        }
         // Links: Countdown | Mitte: Aktueller + Nächster Song | Rechts: EndAction (GigMode)
         Row(
             modifier = Modifier.fillMaxWidth()

@@ -434,6 +434,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun togglePlayPause() { if (engine.isPlaying) { engine.pause(); _isPlaying.value = false } else { engine.play(); _isPlaying.value = true } }
     fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
+    fun seekTo(ms: Long)  { engine.seekTo(ms.coerceIn(0L, _durationMs.value)) }
     fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication(), isGigSet = _isGigSetMode.value) else engine.seekTo(0L) }
     var onSongCompleted: ((songId: Long) -> Unit)? = null
     val activeEndAction = MutableStateFlow(0) // 0=CUE, 1=STOP, 2=AUTOPLAY — set by GigViewModel

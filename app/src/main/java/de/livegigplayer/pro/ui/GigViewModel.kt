@@ -134,28 +134,28 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     // ── Auto-Arm: lädt ersten ungespielten Song in Player (ohne Auto-Play) ──────
 
     fun armSetIfIdle(setId: Long, playerVm: PlayerViewModel) {
-        if (playerVm.currentSong.value != null) return
         viewModelScope.launch {
             val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
             val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
-            // Nur setzen wenn dieses Set tatsächlich Songs hat — verhindert dass ein
-            // leeres Set (kein return@launch nötig) _activeSetId überschreibt
+            // Aktives Set und Callback immer aktualisieren, auch wenn Player bereits
+            // einen Song geladen hat — verhindert Set-Lag beim Wechsel zwischen Sets
             _activeSetId.value = setId
+            playerVm.onSongCompleted = { completedId ->
+                viewModelScope.launch(Dispatchers.IO) {
+                    val activeSet = _activeSetId.value ?: return@launch
+                    setDao.markSongCompleted(activeSet, completedId, true)
+                    val newId = playerVm.currentSong.value?.id ?: return@launch
+                    playerVm.activeEndAction.value = setDao.getEndAction(activeSet, newId) ?: 0
+                }
+            }
+            if (playerVm.currentSong.value != null) return@launch
             playerVm.clearQueue()
             playerVm.selectSong(first.song, getApplication(), isGigSet = true)
             playerVm.activeEndAction.value = withContext(Dispatchers.IO) {
                 setDao.getEndAction(setId, first.song.id) ?: 0
             }
-            // Queue mit allen verbleibenden ungespielten Songs befüllen
             songs.filter { !it.completedInSet && it.song.id != first.song.id }
                 .forEach { playerVm.addToQueueEnd(it.song) }
-            playerVm.onSongCompleted = { completedId ->
-                viewModelScope.launch(Dispatchers.IO) {
-                    setDao.markSongCompleted(setId, completedId, true)
-                    val newId = playerVm.currentSong.value?.id ?: return@launch
-                    playerVm.activeEndAction.value = setDao.getEndAction(setId, newId) ?: 0
-                }
-            }
         }
     }
 
@@ -174,9 +174,10 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             toPlay.drop(1).forEach { playerVm.addToQueueEnd(it.song) }
             playerVm.onSongCompleted = { completedId ->
                 viewModelScope.launch(Dispatchers.IO) {
-                    setDao.markSongCompleted(setId, completedId, true)
+                    val activeSet = _activeSetId.value ?: return@launch
+                    setDao.markSongCompleted(activeSet, completedId, true)
                     val newId = playerVm.currentSong.value?.id ?: return@launch
-                    playerVm.activeEndAction.value = setDao.getEndAction(setId, newId) ?: 0
+                    playerVm.activeEndAction.value = setDao.getEndAction(activeSet, newId) ?: 0
                 }
             }
         }

@@ -1,10 +1,20 @@
 # Live-Gig-Player Pro — Projektkontext für Claude
 
+## SESSION-START — ZUERST LESEN (PFLICHT)
+
+**Diese CLAUDE.md ist die einzige Quelle der Wahrheit.** Kein GitHub-Search, keine Issue-Suche, kein Raten. Alle TODOs, der aktuelle Stand und die Branch-Regel stehen hier unten.
+
+1. Branch prüfen: `git branch` → muss `* main` zeigen. Falls nicht: `git checkout main`
+2. Letzten Stand lesen: Abschnitt "Letzter Stand" weiter unten.
+3. Offene TODOs lesen: Abschnitt "Offene TODOs (nächste Session)" weiter unten.
+4. CI-Status prüfen (GitHub Actions, letzter Build auf `main`).
+
 ## Branch-Regel (WICHTIG)
 
 **Einziger erlaubter Branch: `main`**
 
 Kein Feature-Branching. Alle Commits direkt auf `main`.
+Es gibt KEINE anderen aktiven Branches. Alte `claude/`-Branches existieren nicht mehr.
 
 Vor dem Start immer prüfen:
 ```bash
@@ -153,8 +163,9 @@ Drei unabhängige Bugfixes aus APK-Test-Feedback:
   Jetzt funktionieren alle drei Modi korrekt.
 
 **Branch-Hygiene:**
-- Lokale `claude/kind-hawking-h4833c` und `claude/session-continuation-cyr80i` Branches gelöscht
+- Alle alten `claude/`-Branches gelöscht (lokal + remote)
 - `.claude/active-branch` = `main`, session-start-hook verifiziert
+- Einzige Remote-Branches: `origin/main` und `origin/apk-dist`
 
 ### Sprint 5.24 DONE: Compact PlayerInfoBar + endAction Live-Button (Commit 1fa2af4)
 

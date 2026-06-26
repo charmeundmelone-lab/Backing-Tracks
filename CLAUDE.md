@@ -132,9 +132,9 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-06-26
-**CI Build:** Commit `b237093` — CI Build #238
+**CI Build:** Commit `7e92dff` — CI Build läuft
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** armSetIfIdle Queue-Fix + PlayerInfoBar Lesbarkeit + endAction Reaktivität
+**Commit:** Fix Set-Lag — armSetIfIdle setzt _activeSetId und Callback immer
 
 ### Sprint 5.25 DONE: PlayerInfoBar-Lesbarkeit + endAction-Reaktivität + Queue-Fix (Commit b237093)
 
@@ -332,12 +332,10 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.
-- **armSetIfIdle onSongCompleted-Set-Lag (LATENT, PRIO 2):** Beim Wechsel zwischen
-  Sets bleibt `playerVm.onSongCompleted` auf das zuerst geöffnete Set gebunden, weil
-  `armSetIfIdle` per `if (currentSong != null) return` früh aussteigt und den Callback
-  nicht neu setzt. → markSongCompleted/activeEndAction können auf das falsche Set
-  zeigen, wenn man Set A öffnet, dann Set B. Lösung: Callback unabhängig vom
-  Early-Return setzen, oder activeSetId-gebundenen Callback verwenden.
+- ✅ **armSetIfIdle Set-Lag (ERLEDIGT, Commit 7e92dff):** `_activeSetId` und
+  `onSongCompleted`-Callback werden jetzt immer gesetzt (nicht erst nach dem
+  Early-Return). Callback liest `_activeSetId.value` zur Laufzeit statt
+  eingefrorenem `setId`. Gleiches Muster konsistent in `loadSetAsQueue`.
 - **Follow-Me Gear:** Beim manuellen Antippen eines Songs im Set-Tab sollen Spontan-Songs
   hinter den angetippten Song umsortiert werden (`handleManualSelectionShift` in SetDao)
 - ✅ **endAction Live-Button (ERLEDIGT):** In der PlayerInfoBar rechts (GigSetMode),

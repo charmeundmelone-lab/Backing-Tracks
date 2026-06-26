@@ -121,10 +121,40 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-06-25
-**CI Build:** Commit `1fa2af4` — pushed, CI läuft
+**Datum:** 2026-06-26
+**CI Build:** Commit `b237093` — CI Build #238
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** PlayerInfoBar komprimiert + endAction Live-Button eingebaut
+**Commit:** armSetIfIdle Queue-Fix + PlayerInfoBar Lesbarkeit + endAction Reaktivität
+
+### Sprint 5.25 DONE: PlayerInfoBar-Lesbarkeit + endAction-Reaktivität + Queue-Fix (Commit b237093)
+
+Drei unabhängige Bugfixes aus APK-Test-Feedback:
+
+**1. Schriftgrößen PlayerInfoBar (MainScreen.kt):**
+- Zeitanzeige (Countdown): 20→14sp (war zu groß, hat Platz gestohlen)
+- Songtitel (aktueller Song): 18→22sp (jetzt dominant, auf der Bühne gut lesbar)
+- Nächster Song: 13→15sp (dezent größer)
+
+**2. endAction-Button sofort reaktiv (MainScreen.kt + GigManagementScreen.kt):**
+- PlayerInfoBar `onCycleEndAction`-Lambda setzt jetzt AUCH `vm.activeEndAction.value`
+  direkt (neben DB-Update via `gigVm.cycleEndAction()`) → sofortige UI-Reaktion,
+  kein Round-Trip über DB nötig
+- SetSongRow Edit-Mode `cycleEndAction`-Button: setzt AUCH `playerVm.activeEndAction.value`
+  wenn der geänderte Song der aktuell spielende ist → Edit-Modus und PlayerInfoBar bleiben synchron
+- `addSongsToSet`/`deleteSongFromSet` übergeben jetzt `playerVm` → `reloadQueueFromSet()`
+  wird aufgerufen → "Nächster Song"-Anzeige aktualisiert sich nach Playlist-Änderungen
+
+**3. armSetIfIdle Queue-Fix — ROOT CAUSE CUE-Modus (GigViewModel.kt):**
+- `armSetIfIdle` befüllte `_queue` NIE: nach `selectSong(first)` war die Queue leer.
+  Wenn der erste Song endete, war `nextSong == null` → ExoPlayer blieb in REPEAT_MODE_ONE
+  hängen und spielte endlos → CUE/STOP/AUTOPLAY wirkten alle gleich (kein Übergang).
+- Fix: nach `selectSong(first.song)` werden alle verbleibenden ungespielten Songs
+  per `playerVm.addToQueueEnd()` eingefügt — identisch zu `loadSetAsQueue`.
+  Jetzt funktionieren alle drei Modi korrekt.
+
+**Branch-Hygiene:**
+- Lokale `claude/kind-hawking-h4833c` und `claude/session-continuation-cyr80i` Branches gelöscht
+- `.claude/active-branch` = `main`, session-start-hook verifiziert
 
 ### Sprint 5.24 DONE: Compact PlayerInfoBar + endAction Live-Button (Commit 1fa2af4)
 
@@ -301,6 +331,10 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   hinter den angetippten Song umsortiert werden (`handleManualSelectionShift` in SetDao)
 - ✅ **endAction Live-Button (ERLEDIGT):** In der PlayerInfoBar rechts (GigSetMode),
   48dp Touch-Target, Farb-kodiert, tippar zum Durchschalten (Commit 1fa2af4)
+- ✅ **endAction Reaktivität (ERLEDIGT):** Button in PlayerInfoBar + Edit-Mode setzt
+  `vm.activeEndAction.value` sofort (nicht nur DB) → keine Verzögerung mehr (Commit 2929298)
+- ✅ **CUE-Modus / armSetIfIdle Queue-Fix (ERLEDIGT):** `armSetIfIdle` befüllt jetzt
+  korrekt die Queue → alle drei Modi (CUE/STOP/AUTOPLAY) funktionieren (Commit b237093)
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
 - **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`

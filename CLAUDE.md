@@ -61,7 +61,8 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── GigDao.kt             — getAllGigs, insert, delete
 │   ├── SetEntity.kt          — Room-Entity (setId, gigOwnerId, name, position)
 │   ├── SetSongCrossRef.kt    — (setId, songId, positionInSet, isCompleted, isSpontaneous, endAction)
-│   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later (@Transaction, Cut&Paste)
+│   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later + reorderSongs
+│   │                            (@Transaction, Cut&Paste / Batch-Write-Pattern)
 │   ├── SongInSet.kt          — @Embedded Song + positionInSet + completedInSet + spontaneousInSet + endAction
 │   ├── AppDatabase.kt        — RoomDatabase v13, Migrationen bis v13
 │   └── TrackMode.kt          — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
@@ -69,8 +70,10 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer
 │   ├── PlayerViewModel.kt    — AndroidViewModel: StateFlow, Queue, Loop, AutoStop, isGigSetMode
 │   ├── GigViewModel.kt       — Gig/Set/Song CRUD, armSetIfIdle, loadSetAsQueue,
-│   │                            insertSpontaneousNext/Later (Mutex-serialisiert)
-│   └── GigManagementScreen.kt — GigCard, SetCard, SetSongRow (Swipe-Handler)
+│   │                            insertSpontaneousNext/Later (Mutex-serialisiert),
+│   │                            reorderSongsInSet (Sortier-Modus)
+│   └── GigManagementScreen.kt — GigCard, SetCard, SetSongRow (Swipe-Handler),
+│                                 SetSongRowSortable (Drag-Handle im Sortier-Modus)
 ├── ui/theme/
 │   └── Theme.kt              — LiveGigPlayerTheme (dark)
 ├── LiveGigPlayerApp.kt       — Application-Klasse, DB-Singleton
@@ -128,13 +131,54 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
    einmal (`getRawCrossRefs`), sortieren in-memory um und schreiben EINMAL atomar
    (`updateRawCrossRefs`, `@Update` Batch). KEINE `forEachIndexed { updateSongPosition }`-
    Schleifen mehr (O(N) Queries → Index-Kollisionen).
+9. **Sortier-Modus (Drag & Drop) — kein LazyColumn** — `SetSongRowSortable` in
+   `SetCard` liegt in einer normalen `Box`, nicht in einer `LazyColumn`, weil
+   `Modifier.animateItemPlacement()` nur dort existiert. Stattdessen: feste
+   Zeilenhöhe (72dp) + `localOrder`-Liste (State) + `animateFloatAsState` pro
+   Zeile für die Y-Position, manueller Offset fürs gezogene Element. Drag-Handle
+   (`DragIndicator`-Icon) ist mit `songId` gekeyt (stabil über die ganze Geste),
+   Callbacks laufen über `rememberUpdatedState` — sonst derselbe Stale-Capture-Bug
+   wie in Gotcha 6. Persistiert wird atomar über `SetDao.reorderSongs`
+   (gleiches Batch-Write-Pattern wie `moveSpontaneousNext/Later`).
 
 ## Letzter Stand
 
-**Datum:** 2026-06-26
-**CI Build:** Commit `7e92dff` — CI Build läuft
+**Datum:** 2026-07-17
+**CI Build:** Commit `332f52c` — grün (Run #244)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix Set-Lag — armSetIfIdle setzt _activeSetId und Callback immer
+**Commit:** Sortier-Modus für Songs im Set (Drag-Handle)
+
+### Sprint 5.26 DONE: Sortier-Modus für Songs im Set (Commit 332f52c)
+
+User-Wunsch: Songs innerhalb eines Sets manuell umsortieren können (nicht nur
+Spontan-Einfügung). Nach gemeinsamer Options-Diskussion (Drag-Handle vs.
+Auf/Ab-Pfeile vs. Verschieben-Dialog) auf Drag-Handle mit dediziertem
+Sortier-Modus entschieden — vom User live an der APK bestätigt: "funktioniert
+schon mal super".
+
+- **SetDao:** neue `reorderSongs(setId, orderedSongIds)` — liest alle CrossRefs
+  einmal, mappt sie in der übergebenen Reihenfolge neu durch, schreibt EINMAL
+  atomar über `updateRawCrossRefs` (identisches Pattern zu
+  `moveSpontaneousNext/Later`, siehe Gotcha 8).
+- **GigViewModel:** `reorderSongsInSet()` — Mutex-geschützt wie die anderen
+  Queue-Mutationen, reloaded die Player-Queue wenn das aktive Set betroffen ist.
+- **GigManagementScreen — SetCard:** neuer lokaler `sortMode`-State pro Set.
+  Toggle-Button im Set-Header: `SwapVert`-Icon ("Sortieren") ⇄ `Check`-Icon
+  ("Fertig", GigVolt-getönt) — Ein/Ausstieg immer eindeutig sichtbar.
+  Schließt sich mit dem Gig-weiten Edit-Mode gegenseitig aus
+  (`LaunchedEffect(isEditing)`). `BackHandler` beendet den Modus zusätzlich
+  über die System-Zurück-Taste/-Geste, damit man nicht aus Versehen den
+  ganzen Screen verlässt.
+- **SetSongRowSortable (neu, separat von SetSongRow):** zeigt bei aktivem
+  Sortier-Modus an ALLEN Zeilen gleichzeitig einen `DragIndicator`-Handle
+  rechts. Ziehen verschiebt den Song live (animierte Nachbar-Zeilen, siehe
+  Gotcha 9), Loslassen persistiert über `reorderSongsInSet`. Bewusst als
+  eigene Composable gehalten statt in `SetSongRow` integriert, um den
+  bestehenden (fragilen, siehe Gotcha 6) Swipe-Code nicht anzufassen.
+- **Design-Entscheidungen aus der Diskussion:** Auf/Ab-Pfeile und
+  Verschieben-Dialog wurden verworfen (zu viele Taps bzw. zu wenig "live"
+  fürs Bühnen-Gefühl); 4-Buttons-Variante (▲▼⏫⏬) wegen Platzproblem auf
+  72dp-Zeilen verworfen zugunsten des Drag-Handles.
 
 ### Sprint 5.25 DONE: PlayerInfoBar-Lesbarkeit + endAction-Reaktivität + Queue-Fix (Commit b237093)
 
@@ -344,6 +388,9 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   `vm.activeEndAction.value` sofort (nicht nur DB) → keine Verzögerung mehr (Commit 2929298)
 - ✅ **CUE-Modus / armSetIfIdle Queue-Fix (ERLEDIGT):** `armSetIfIdle` befüllt jetzt
   korrekt die Queue → alle drei Modi (CUE/STOP/AUTOPLAY) funktionieren (Commit b237093)
+- ✅ **Songs im Set umsortieren (ERLEDIGT):** Sortier-Modus mit Drag-Handle,
+  vom User live an der APK bestätigt ("funktioniert schon mal super",
+  Commit 332f52c). Nicht mehr offen.
 - **Set-Umbenennen:** Sets können noch nicht umbenannt werden
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
 - **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`

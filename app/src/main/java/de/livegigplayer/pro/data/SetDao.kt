@@ -142,4 +142,15 @@ abstract class SetDao {
         val sanitized = refs.mapIndexed { i, ref -> ref.copy(positionInSet = i) }
         updateRawCrossRefs(sanitized)
     }
+
+    // ── Manuelles Umsortieren (Drag & Drop im Sortier-Modus) ───────────────────
+
+    @Transaction
+    open suspend fun reorderSongs(setId: Long, orderedSongIds: List<Long>) {
+        val refsBySongId = getRawCrossRefs(setId).associateBy { it.songId }
+        val sanitized = orderedSongIds.mapIndexedNotNull { i, songId ->
+            refsBySongId[songId]?.copy(positionInSet = i)
+        }
+        updateRawCrossRefs(sanitized)
+    }
 }

@@ -1,8 +1,11 @@
 package de.livegigplayer.pro.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.defaultMinSize
@@ -25,11 +29,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,16 +57,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.SongInSet
+import kotlin.math.roundToInt
 
 private val GigBgDeep  = Color(0xFF0A0A0A)
 private val GigBgCard  = Color(0xFF1A1A1A)
@@ -299,9 +310,40 @@ private fun SetCard(
     val context     = LocalContext.current
     val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
     val currentSong by playerVm.currentSong.collectAsState()
+    val density     = LocalDensity.current
+    val rowHeightPx = with(density) { 72.dp.toPx() }
+
+    var sortMode    by remember(set.setId) { mutableStateOf(false) }
+    var localOrder  by remember(set.setId) { mutableStateOf(emptyList<Long>()) }
+    var draggingId  by remember(set.setId) { mutableStateOf<Long?>(null) }
+    var dragOffset  by remember(set.setId) { mutableStateOf(0f) }
 
     LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
     LaunchedEffect(set.setId) { gigVm.armSetIfIdle(set.setId, playerVm) }
+
+    // Sortier-Modus wird sauber beendet, wenn der Gig-weite Edit-Mode
+    // aufgemacht wird — verhindert Überlappung zweier Bearbeitungs-Modi.
+    LaunchedEffect(isEditing) { if (isEditing) sortMode = false }
+
+    // Lokale Reihenfolge folgt dem DB-Flow, außer während eines aktiven Drags —
+    // sonst würde der gezogene Song wegspringen, sobald der Flow die noch
+    // alte Reihenfolge nachliefert.
+    LaunchedEffect(songs, draggingId) {
+        if (draggingId == null) localOrder = songs.map { it.song.id }
+    }
+
+    fun exitSortMode() {
+        gigVm.reorderSongsInSet(set.setId, localOrder, playerVm)
+        sortMode = false
+        draggingId = null
+        dragOffset = 0f
+    }
+
+    if (sortMode) {
+        BackHandler { exitSortMode() }
+    }
+
+    val songMap = remember(songs) { songs.associateBy { it.song.id } }
 
     Column(modifier = Modifier
         .fillMaxWidth()
@@ -318,6 +360,16 @@ private fun SetCard(
             Text(set.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${songs.size}", color = GigGray, fontSize = 12.sp)
+            if (!isEditing && songs.size > 1) {
+                IconButton(onClick = { if (sortMode) exitSortMode() else sortMode = true }) {
+                    Icon(
+                        if (sortMode) Icons.Filled.Check else Icons.Filled.SwapVert,
+                        contentDescription = if (sortMode) "Fertig" else "Sortieren",
+                        tint = if (sortMode) GigVolt else GigGray,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
             if (isEditing) {
                 IconButton(onClick = onDeleteSet) {
                     Icon(Icons.Filled.Delete, contentDescription = "Set löschen",
@@ -326,34 +378,149 @@ private fun SetCard(
             }
         }
 
-        // Song-Zeilen — key() bindet UI-State (dragX, Dialog) an die Song-Identität,
-        // nicht an die Listenposition. Verhindert Verwechslung beim Umsortieren.
-        songs.forEach { songInSet ->
-            key(songInSet.song.id) {
-                SetSongRow(
-                    songInSet     = songInSet,
-                    isCurrentSong = songInSet.song.id == currentSong?.id,
-                    isEditing     = isEditing,
-                    onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
-                    onQueueNext   = {
-                        gigVm.insertSpontaneousNext(set.setId, songInSet.song, playerVm)
-                        Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
-                    },
-                    onQueueEnd    = {
-                        gigVm.insertSpontaneousLater(set.setId, songInSet.song, playerVm)
-                        Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
-                    },
-                    onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id, playerVm) },
-                    onCycleEndAction  = {
-                        gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction)
-                        if (songInSet.song.id == currentSong?.id)
-                            playerVm.activeEndAction.value = (songInSet.endAction + 1) % 3
+        if (sortMode) {
+            // Song-Zeilen frei positioniert per Drag-Offset — kein LazyColumn nötig,
+            // Zeilenhöhe ist fix (72dp), Reihenfolge wird über localOrder gesteuert.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp * localOrder.size)
+            ) {
+                localOrder.forEachIndexed { index, songId ->
+                    val songInSet = songMap[songId] ?: return@forEachIndexed
+                    key(songId) {
+                        val isDragging = draggingId == songId
+                        val targetOffset = index * rowHeightPx
+                        val animatedOffset by animateFloatAsState(
+                            targetValue = targetOffset, label = "reorderOffset"
+                        )
+                        val offsetPx = if (isDragging) targetOffset + dragOffset else animatedOffset
+
+                        SetSongRowSortable(
+                            songInSet       = songInSet,
+                            displayPosition = index,
+                            isDragging      = isDragging,
+                            modifier        = Modifier
+                                .offset { IntOffset(0, offsetPx.roundToInt()) }
+                                .zIndex(if (isDragging) 1f else 0f),
+                            onDragStart = { draggingId = songId; dragOffset = 0f },
+                            onDrag = { delta ->
+                                dragOffset += delta
+                                val currentIdx = localOrder.indexOf(songId)
+                                val newIdx = ((currentIdx * rowHeightPx + dragOffset) / rowHeightPx)
+                                    .roundToInt().coerceIn(0, localOrder.size - 1)
+                                if (newIdx != currentIdx) {
+                                    val mutable = localOrder.toMutableList()
+                                    mutable.removeAt(currentIdx)
+                                    mutable.add(newIdx, songId)
+                                    localOrder = mutable
+                                    dragOffset -= (newIdx - currentIdx) * rowHeightPx
+                                }
+                            },
+                            onDragEnd = {
+                                draggingId = null
+                                dragOffset = 0f
+                                gigVm.reorderSongsInSet(set.setId, localOrder, playerVm)
+                            }
+                        )
                     }
-                )
+                }
+            }
+        } else {
+            // Song-Zeilen — key() bindet UI-State (dragX, Dialog) an die Song-Identität,
+            // nicht an die Listenposition. Verhindert Verwechslung beim Umsortieren.
+            songs.forEach { songInSet ->
+                key(songInSet.song.id) {
+                    SetSongRow(
+                        songInSet     = songInSet,
+                        isCurrentSong = songInSet.song.id == currentSong?.id,
+                        isEditing     = isEditing,
+                        onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
+                        onQueueNext   = {
+                            gigVm.insertSpontaneousNext(set.setId, songInSet.song, playerVm)
+                            Toast.makeText(context, "★ ${songInSet.song.title} → nächster", Toast.LENGTH_SHORT).show()
+                        },
+                        onQueueEnd    = {
+                            gigVm.insertSpontaneousLater(set.setId, songInSet.song, playerVm)
+                            Toast.makeText(context, "★ ${songInSet.song.title} → später", Toast.LENGTH_SHORT).show()
+                        },
+                        onRemove          = { gigVm.deleteSongFromSet(set.setId, songInSet.song.id, playerVm) },
+                        onCycleEndAction  = {
+                            gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction)
+                            if (songInSet.song.id == currentSong?.id)
+                                playerVm.activeEndAction.value = (songInSet.endAction + 1) % 3
+                        }
+                    )
+                }
             }
         }
 
         if (songs.isNotEmpty()) Spacer(modifier = Modifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun SetSongRowSortable(
+    songInSet: SongInSet,
+    displayPosition: Int,
+    isDragging: Boolean,
+    modifier: Modifier = Modifier,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit
+) {
+    // rememberUpdatedState: das pointerInput unten ist mit songInSet.song.id geschlüsselt
+    // (bleibt über die ganze Drag-Geste stabil) — die Callbacks selbst müssen aber bei
+    // jeder Neuordnung aktuell bleiben, sonst genau der Stale-Capture-Bug aus SetSongRow.
+    val latestDragStart by rememberUpdatedState(onDragStart)
+    val latestDrag       by rememberUpdatedState(onDrag)
+    val latestDragEnd    by rememberUpdatedState(onDragEnd)
+
+    val bpmTxt   = if (songInSet.song.bpmExact > 0f)
+        "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
+    val pre      = if (songInSet.song.artist.isNotEmpty()) "${songInSet.song.artist}  ·  " else ""
+    val subtitle = "$pre$bpmTxt  |  ${songInSet.song.duration}"
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .background(if (isDragging) GigVolt.copy(alpha = 0.22f) else Color.Transparent)
+            .then(if (isDragging) Modifier.shadow(6.dp) else Modifier)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.width(36.dp), contentAlignment = Alignment.CenterStart) {
+            Text(
+                "%02d".format(displayPosition + 1),
+                color = GigVolt, fontSize = 24.sp, fontWeight = FontWeight.Black
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(songInSet.song.title, color = GigWhite, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = GigGray, fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(
+            Icons.Filled.DragIndicator,
+            contentDescription = "Song verschieben",
+            tint = if (isDragging) GigVolt else GigGray,
+            modifier = Modifier
+                .size(44.dp)
+                .padding(8.dp)
+                .pointerInput(songInSet.song.id) {
+                    detectVerticalDragGestures(
+                        onDragStart  = { latestDragStart() },
+                        onDragEnd    = { latestDragEnd() },
+                        onDragCancel = { latestDragEnd() }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        latestDrag(dragAmount)
+                    }
+                }
+        )
     }
 }
 

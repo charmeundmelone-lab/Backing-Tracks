@@ -207,6 +207,18 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Manuelles Umsortieren (Drag & Drop im Sortier-Modus) ────────────────
+
+    fun reorderSongsInSet(setId: Long, orderedSongIds: List<Long>, playerVm: PlayerViewModel? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            queueMutex.withLock {
+                setDao.reorderSongs(setId, orderedSongIds)
+                if (playerVm != null && setId == _activeSetId.value)
+                    reloadQueueFromSet(setId, playerVm)
+            }
+        }
+    }
+
     private suspend fun reloadQueueFromSet(setId: Long, playerVm: PlayerViewModel) {
         val updated = setDao.getSongsInSetOncePlain(setId)
         val currentId = playerVm.currentSong.value?.id ?: -1L

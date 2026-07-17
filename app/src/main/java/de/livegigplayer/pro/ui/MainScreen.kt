@@ -36,9 +36,6 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Check
@@ -96,13 +93,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -149,8 +144,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val isGigSetMode      by vm.isGigSetMode.collectAsState()
     val activeEndAction   by vm.activeEndAction.collectAsState()
     val activeSetId       by gigVm.activeSetId.collectAsState()
+    val loopHint          by vm.loopHint.collectAsState()
 
-    var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Playlist
+    var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Sets
     var isLocked         by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -158,6 +154,13 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     ) { uri ->
         if (uri == null) Toast.makeText(context, "❌ Kein Ordner gewählt (URI=null)", Toast.LENGTH_LONG).show()
         else { Toast.makeText(context, "✅ Ordner erkannt – starte Import…", Toast.LENGTH_SHORT).show(); vm.importFolder(context, uri) }
+    }
+
+    // Kurzer, wiederholter Hinweis beim A/B-Loop-Setzen — der LOOP-Button hat je
+    // nach Kontext drei verschiedene Bedeutungen (Archiv A/B-Setzer, Set-Modus
+    // Ein/Aus-Schalter, Live-Exit), ohne Erklärung im UI selbst nicht ersichtlich.
+    LaunchedEffect(loopHint) {
+        loopHint?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show(); vm.clearLoopHint() }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -179,7 +182,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
                     0 -> ArchivTab(vm = vm, gigVm = gigVm, isLocked = isLocked)
-                    1 -> GigManagementScreen(gigVm = gigVm, playerVm = vm)
+                    1 -> GigManagementScreen(gigVm = gigVm, playerVm = vm, isLocked = isLocked)
                 }
             }
 
@@ -287,7 +290,7 @@ private fun TopBar(
                 modifier = Modifier.size(30.dp))
         }
         IconButton(onClick = { onTabSelect(1) }, modifier = Modifier.size(52.dp)) {
-            Icon(Icons.Filled.QueueMusic, contentDescription = "Playlist",
+            Icon(Icons.Filled.QueueMusic, contentDescription = "Sets",
                 tint = if (selectedTab == 1) Volt else Gray,
                 modifier = Modifier.size(30.dp))
         }
@@ -360,9 +363,9 @@ private fun TopBar(
 private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolean) {
     val context       = LocalContext.current
     val songs         by vm.filteredSongs.collectAsState()
+    val allSongs      by vm.songs.collectAsState()
     val currentSong   by vm.currentSong.collectAsState()
     val selectedIds   by vm.selectedIds.collectAsState()
-    val editingSongId by vm.editingSongId.collectAsState()
     val importStatus  by vm.importStatus.collectAsState()
     val searchQuery   by vm.searchQuery.collectAsState()
     val selectionMode = selectedIds.isNotEmpty()
@@ -384,44 +387,62 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             onChange = { vm.setSearchQuery(it) }
         )
 
-        LazyColumn(
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            if (songs.isEmpty() && importStatus.isNotEmpty()) {
-                item { Text(importStatus, color = Gray, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
+        if (songs.isEmpty()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.LibraryMusic, contentDescription = null,
+                        tint = Gray, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        if (allSongs.isEmpty()) "Noch keine Songs importiert" else "Keine Treffer",
+                        color = Gray, fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        when {
+                            allSongs.isEmpty() && importStatus.isNotEmpty() -> importStatus
+                            allSongs.isEmpty() -> "Tippe oben auf + um einen Ordner zu importieren"
+                            else -> "Suchbegriff anpassen oder Suche schließen"
+                        },
+                        color = Gray, fontSize = 12.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp)
+                    )
+                }
             }
-            itemsIndexed(songs) { index, song ->
-                val isCompletedInActiveSet = song.id in completedSongIdsInSet
-                ArchivSongRow(
-                    index                  = index + 1,
-                    song                   = song,
-                    selected               = song.id == currentSong?.id,
-                    isBatchSelected        = song.id in selectedIds,
-                    isEditing              = song.id == editingSongId,
-                    isLocked               = isLocked,
-                    selectionMode          = selectionMode,
-                    isCompletedInActiveSet = isCompletedInActiveSet,
-                    onPlay          = { if (!isLocked) vm.selectSong(song, context) },
-                    onToggleSelect  = { vm.toggleSelect(song.id) },
-                    onActivateBatch = { vm.toggleSelect(song.id) },
-                    onTitleSave     = { newTitle -> vm.updateTitle(song, newTitle) },
-                    onEditStart     = { vm.startEditing(song.id) },
-                    onOpenSheet     = { editSheet = song },
-                    onDelete        = { vm.deleteSong(song) },
-                    onQueueNext     = {
-                        if (activeSetId != null) {
-                            gigVm.insertSpontaneousNext(activeSetId!!, song, vm)
-                            Toast.makeText(context, "★ ${song.title} → nächster", Toast.LENGTH_SHORT).show()
-                        } else vm.addToQueueNext(song)
-                    },
-                    onQueueEnd      = {
-                        if (activeSetId != null) {
-                            gigVm.insertSpontaneousLater(activeSetId!!, song, vm)
-                            Toast.makeText(context, "★ ${song.title} → später", Toast.LENGTH_SHORT).show()
-                        } else vm.addToQueueEnd(song)
-                    }
-                )
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                itemsIndexed(songs) { index, song ->
+                    val isCompletedInActiveSet = song.id in completedSongIdsInSet
+                    ArchivSongRow(
+                        index                  = index + 1,
+                        song                   = song,
+                        selected               = song.id == currentSong?.id,
+                        isBatchSelected        = song.id in selectedIds,
+                        isLocked               = isLocked,
+                        selectionMode          = selectionMode,
+                        isCompletedInActiveSet = isCompletedInActiveSet,
+                        onPlay          = { if (!isLocked) vm.selectSong(song, context) },
+                        onToggleSelect  = { vm.toggleSelect(song.id) },
+                        onActivateBatch = { vm.toggleSelect(song.id) },
+                        onOpenSheet     = { editSheet = song },
+                        onDelete        = { vm.deleteSong(song) },
+                        onQueueNext     = {
+                            if (activeSetId != null) {
+                                gigVm.insertSpontaneousNext(activeSetId!!, song, vm)
+                                Toast.makeText(context, "★ ${song.title} → nächster", Toast.LENGTH_SHORT).show()
+                            } else vm.addToQueueNext(song)
+                        },
+                        onQueueEnd      = {
+                            if (activeSetId != null) {
+                                gigVm.insertSpontaneousLater(activeSetId!!, song, vm)
+                                Toast.makeText(context, "★ ${song.title} → später", Toast.LENGTH_SHORT).show()
+                            } else vm.addToQueueEnd(song)
+                        }
+                    )
+                }
             }
         }
 
@@ -482,17 +503,13 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
 @Composable
 private fun ArchivSongRow(
     index: Int, song: Song,
-    selected: Boolean, isBatchSelected: Boolean, isEditing: Boolean,
+    selected: Boolean, isBatchSelected: Boolean,
     isLocked: Boolean, selectionMode: Boolean,
     isCompletedInActiveSet: Boolean = false,
     onPlay: () -> Unit, onToggleSelect: () -> Unit, onActivateBatch: () -> Unit,
-    onTitleSave: (String) -> Unit, onEditStart: () -> Unit,
     onOpenSheet: () -> Unit, onDelete: () -> Unit,
     onQueueNext: () -> Unit, onQueueEnd: () -> Unit
 ) {
-    val editFR = remember { FocusRequester() }
-    LaunchedEffect(isEditing) { if (isEditing) editFR.requestFocus() }
-
     var dragX                 by remember { mutableStateOf(0f) }
     var showDeleteDialog      by remember { mutableStateOf(false) }
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
@@ -556,6 +573,8 @@ private fun ArchivSongRow(
         )
     }
 
+    val interactive = !isLocked && !selectionMode
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -581,6 +600,10 @@ private fun ArchivSongRow(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (interactive) {
+            Icon(Icons.Filled.ChevronLeft, contentDescription = null,
+                tint = Gray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
+        }
         Text(
             text = index.toString().padStart(2, '0'),
             color = if (isBatchSelected || selected) Volt else VoltDim,
@@ -590,30 +613,11 @@ private fun ArchivSongRow(
         Spacer(modifier = Modifier.width(8.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            if (isEditing) {
-                var editText by remember(song.id) { mutableStateOf(song.title) }
-                BasicTextField(
-                    value = editText, onValueChange = { editText = it }, singleLine = true,
-                    textStyle = TextStyle(color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold),
-                    cursorBrush = SolidColor(Volt),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { onTitleSave(editText) }),
-                    modifier = Modifier.fillMaxWidth().focusRequester(editFR)
-                )
-            } else {
-                Text(
-                    text = song.title, color = White, fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold, lineHeight = 18.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.combinedClickable(
-                        onClick = {
-                            if (selectionMode) onToggleSelect()
-                            else if (!isLocked) { if (selected) onEditStart() else onPlay() }
-                        },
-                        onLongClick = { if (!isLocked && !selectionMode) onActivateBatch() }
-                    )
-                )
-            }
+            Text(
+                text = song.title, color = White, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold, lineHeight = 18.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
             val bpmTxt = if (song.bpmExact > 0f) "%.1f BPM".format(song.bpmExact) else "${song.bpm} BPM"
             val pre    = if (song.artist.isNotEmpty()) "${song.artist}  ·  " else ""
             val suf    = if (song.genre.isNotEmpty()) "  ·  ${song.genre}" else ""
@@ -621,22 +625,27 @@ private fun ArchivSongRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
-        // Edit + Delete icons (hidden in batch/selection mode)
+        if (interactive) {
+            Icon(Icons.Filled.ChevronRight, contentDescription = null,
+                tint = Gray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
+        }
+
+        // Bearbeiten + Löschen (ausgeblendet im Batch-/Auswahl-Modus)
         if (!selectionMode) {
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(2.dp))
             Column(
-                modifier = Modifier.width(24.dp).height(72.dp),
+                modifier = Modifier.height(72.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceEvenly
             ) {
-                Icon(
-                    Icons.Filled.Edit, contentDescription = "Bearbeiten",
-                    tint = Gray, modifier = Modifier.size(18.dp).clickable { onOpenSheet() }
-                )
-                Icon(
-                    Icons.Filled.Delete, contentDescription = "Löschen",
-                    tint = RedStop, modifier = Modifier.size(18.dp).clickable { showDeleteDialog = true }
-                )
+                IconButton(onClick = onOpenSheet, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Bearbeiten",
+                        tint = Gray, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { showDeleteDialog = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Löschen",
+                        tint = RedStop, modifier = Modifier.size(18.dp))
+                }
             }
         }
     }
@@ -1253,6 +1262,8 @@ private fun fmtMs(ms: Long): String {
 // ── Genre Bar ─────────────────────────────────────────────────────────────────
 @Composable
 private fun GenreBar(count: Int, onGenre: (String) -> Unit, onClear: () -> Unit, onAddToSet: () -> Unit) {
+    var showCustomDialog by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxWidth().background(BgDeep)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1290,7 +1301,44 @@ private fun GenreBar(count: Int, onGenre: (String) -> Unit, onClear: () -> Unit,
                         overflow = TextOverflow.Ellipsis)
                 }
             }
+            IconButton(
+                onClick = { showCustomDialog = true },
+                modifier = Modifier.size(36.dp).background(BgCard, shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(Icons.Filled.AddCircleOutline, contentDescription = "Eigenes Genre",
+                    tint = Volt, modifier = Modifier.size(18.dp))
+            }
         }
+    }
+
+    if (showCustomDialog) {
+        var text by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCustomDialog = false },
+            containerColor   = BgCard,
+            title = { Text("Eigenes Genre", color = White, fontWeight = FontWeight.Bold) },
+            text  = {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it }, singleLine = true,
+                    placeholder = { Text("z. B. Jazz", color = Gray, fontSize = 13.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Volt, unfocusedBorderColor = Gray,
+                        focusedTextColor = White, unfocusedTextColor = White,
+                        cursorColor = Volt
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = text.isNotBlank(),
+                    onClick = { onGenre(text.trim()); showCustomDialog = false }
+                ) { Text("Übernehmen", color = Volt, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomDialog = false }) { Text("Abbrechen", color = Gray) }
+            }
+        )
     }
 }
 

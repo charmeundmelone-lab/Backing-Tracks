@@ -73,8 +73,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _selectedIds   = MutableStateFlow<Set<Long>>(emptySet())
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
 
-    private val _editingSongId = MutableStateFlow<Long?>(null)
-    val editingSongId: StateFlow<Long?> = _editingSongId.asStateFlow()
+    // Einmaliger Hinweistext fürs LOOP-Verhalten (UI zeigt ihn als Toast und leert ihn danach)
+    private val _loopHint = MutableStateFlow<String?>(null)
+    val loopHint: StateFlow<String?> = _loopHint.asStateFlow()
+    fun clearLoopHint() { _loopHint.value = null }
 
     private val _queue           = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
@@ -211,8 +213,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     if (preStart != null && preEnd != null) {
                         _loopState.value = LoopState.LOOPING
                         engine.activateLoopDirect(preStart, preEnd)
+                    } else {
+                        _loopHint.value = "Kein Loop für diesen Song gespeichert"
                     }
-                    // Kein gespeicherter Loop → kein Effekt
                 }
                 LoopState.LOOPING -> {
                     engine.deactivateLoop()
@@ -238,6 +241,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     _loopState.value      = LoopState.A_SET
                     _isLoopModified.value = true
                     engine.preloadLoopStart(currentPosMs)
+                    _loopHint.value = "Punkt A gesetzt — nochmal LOOP tippen für Punkt B"
                 }
             }
             LoopState.A_SET -> {
@@ -250,6 +254,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 _loopState.value = LoopState.LOOPING
                 engine.activateLoopDirect(start, end)
                 updateIsLoopModified()
+                _loopHint.value = "Loop läuft — nochmal LOOP tippen zum Beenden"
             }
             LoopState.LOOPING -> {
                 engine.deactivateLoop()
@@ -426,7 +431,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 var count = 0
                 FolderImporter.import(context, uri, dao) { name -> _scanProgress.value = name; count++ }
-                _importStatus.value = if (count == 0) "Keine Songs gefunden – übergeordneten Ordner wählen." else "$count Songs importiert."
+                _importStatus.value = if (count == 0)
+                    "Keine Songs gefunden. Erwartet wird entweder ein Ordner mit Unterordnern " +
+                    "(je ein Song, WAV-Stems + optional eine Click-Datei drin) oder ein Ordner " +
+                    "mit einzelnen WAV-Dateien direkt drin — übergeordneten Ordner wählen, falls " +
+                    "die Struktur nicht passt."
+                else "$count Songs importiert."
             } catch (e: Exception) { Log.e("ImportFolder", "failed", e); _importStatus.value = "Fehler: ${e.message}" }
             finally { _isScanning.value = false; _scanProgress.value = "" }
         }
@@ -461,11 +471,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { _selectedIds.value.forEach { id -> songs.value.find { it.id == id }?.let { dao.update(it.copy(genre = genre)) } }; clearSelection() }
     }
 
-    fun startEditing(id: Long)   { _editingSongId.value = id }
-    fun stopEditing()            { _editingSongId.value = null }
     fun updateTitle(song: Song, newTitle: String) {
-        if (newTitle.isBlank()) { stopEditing(); return }
-        val u = song.copy(title = newTitle.trim()); stopEditing()
+        if (newTitle.isBlank()) return
+        val u = song.copy(title = newTitle.trim())
         viewModelScope.launch { dao.update(u) }
         if (_currentSong.value?.id == song.id) _currentSong.value = u
     }

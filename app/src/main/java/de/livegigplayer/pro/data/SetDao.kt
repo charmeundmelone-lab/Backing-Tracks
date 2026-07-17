@@ -82,7 +82,7 @@ abstract class SetDao {
     @Query("UPDATE set_song_cross_ref SET isCompleted = :completed WHERE setId = :setId AND songId = :songId")
     abstract suspend fun markSongCompleted(setId: Long, songId: Long, completed: Boolean)
 
-    @Query("UPDATE set_song_cross_ref SET isCompleted = 0 WHERE setId = :setId")
+    @Query("UPDATE set_song_cross_ref SET isCompleted = 0, isSpontaneous = 0 WHERE setId = :setId")
     abstract suspend fun resetCompletedForSet(setId: Long)
 
     @Query("SELECT endAction FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")

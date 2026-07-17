@@ -26,17 +26,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -82,34 +85,31 @@ private val GigGray    = Color(0xFF777777)
 private val GigRed     = Color(0xFFDC2626)
 
 @Composable
-fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel) {
+fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel, isLocked: Boolean = false) {
     val allGigs       by gigVm.allGigs.collectAsState()
     val selectedGigId by gigVm.selectedGigId.collectAsState()
     val setsForGig    by gigVm.setsForSelectedGig.collectAsState()
 
     val selectedGig = allGigs.find { it.gigId == selectedGigId }
-    var isEditing by remember { mutableStateOf(false) }
 
     if (selectedGig == null) {
         GigListView(
-            gigs         = allGigs,
-            isEditing    = isEditing,
-            onToggleEdit = { isEditing = !isEditing },
-            onSelect     = { gigVm.selectGig(it.gigId) },
-            onCreate     = { gigVm.createGig(it) },
-            onDelete     = { gigVm.deleteGig(it) }
+            gigs      = allGigs,
+            isLocked  = isLocked,
+            onSelect  = { gigVm.selectGig(it.gigId) },
+            onCreate  = { gigVm.createGig(it) },
+            onDelete  = { gigVm.deleteGig(it) }
         )
     } else {
         GigDetailView(
-            gigVm        = gigVm,
-            playerVm     = playerVm,
-            gig          = selectedGig,
-            sets         = setsForGig,
-            isEditing    = isEditing,
-            onToggleEdit = { isEditing = !isEditing },
-            onBack       = { gigVm.selectGig(null) },
-            onCreate     = { gigVm.createSetForGig(selectedGig.gigId, it, setsForGig.size) },
-            onDeleteSet  = { gigVm.deleteSet(it) }
+            gigVm     = gigVm,
+            playerVm  = playerVm,
+            gig       = selectedGig,
+            sets      = setsForGig,
+            isLocked  = isLocked,
+            onBack    = { gigVm.selectGig(null) },
+            onCreate  = { gigVm.createSetForGig(selectedGig.gigId, it, setsForGig.size) },
+            onDeleteSet = { gigVm.deleteSet(it) }
         )
     }
 }
@@ -119,8 +119,7 @@ fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel) {
 @Composable
 private fun GigListView(
     gigs: List<GigEntity>,
-    isEditing: Boolean,
-    onToggleEdit: () -> Unit,
+    isLocked: Boolean,
     onSelect: (GigEntity) -> Unit,
     onCreate: (String) -> Unit,
     onDelete: (GigEntity) -> Unit
@@ -134,19 +133,9 @@ private fun GigListView(
         ) {
             Text("Gigs", color = GigWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f).padding(start = 8.dp))
-            if (!isEditing) {
-                IconButton(onClick = { showDialog = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "Neuer Gig",
-                        tint = GigVolt, modifier = Modifier.size(26.dp))
-                }
-            }
-            IconButton(onClick = onToggleEdit) {
-                Icon(
-                    if (isEditing) Icons.Filled.Check else Icons.Filled.Edit,
-                    contentDescription = if (isEditing) "Fertig" else "Bearbeiten",
-                    tint = if (isEditing) GigVolt else GigGray,
-                    modifier = Modifier.size(22.dp)
-                )
+            IconButton(onClick = { showDialog = true }, enabled = !isLocked) {
+                Icon(Icons.Filled.Add, contentDescription = "Neuer Gig",
+                    tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt, modifier = Modifier.size(26.dp))
             }
         }
 
@@ -169,10 +158,10 @@ private fun GigListView(
             ) {
                 items(gigs, key = { it.gigId }) { gig ->
                     GigRow(
-                        gig       = gig,
-                        isEditing = isEditing,
-                        onClick   = { if (!isEditing) onSelect(gig) },
-                        onDelete  = { onDelete(gig) }
+                        gig      = gig,
+                        isLocked = isLocked,
+                        onClick  = { onSelect(gig) },
+                        onDelete = { onDelete(gig) }
                     )
                 }
             }
@@ -187,7 +176,27 @@ private fun GigListView(
 }
 
 @Composable
-private fun GigRow(gig: GigEntity, isEditing: Boolean, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun GigRow(gig: GigEntity, isLocked: Boolean, onClick: () -> Unit, onDelete: () -> Unit) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            containerColor   = GigBgCard,
+            title = { Text("Gig löschen?", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text  = { Text("\"${gig.name}\" inklusive aller Sets wirklich löschen? " +
+                "Das kann nicht rückgängig gemacht werden.", color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteDialog = false; onDelete() }) {
+                    Text("Löschen", color = GigRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Abbrechen", color = GigGray) }
+            }
+        )
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth().height(64.dp)
@@ -197,19 +206,16 @@ private fun GigRow(gig: GigEntity, isEditing: Boolean, onClick: () -> Unit, onDe
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(Icons.Filled.MusicNote, contentDescription = null,
-            tint = if (isEditing) GigGray else GigVolt, modifier = Modifier.size(20.dp))
+            tint = GigVolt, modifier = Modifier.size(20.dp))
         Spacer(modifier = Modifier.width(12.dp))
         Text(gig.name, color = GigWhite, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (isEditing) {
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "Gig löschen",
-                    tint = GigRed, modifier = Modifier.size(22.dp))
-            }
-        } else {
-            Icon(Icons.Filled.ChevronRight, contentDescription = null,
-                tint = GigGray, modifier = Modifier.size(24.dp))
+        IconButton(onClick = { showDeleteDialog = true }, enabled = !isLocked, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.Delete, contentDescription = "Gig löschen",
+                tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigRed, modifier = Modifier.size(18.dp))
         }
+        Icon(Icons.Filled.ChevronRight, contentDescription = null,
+            tint = GigGray, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -221,8 +227,7 @@ private fun GigDetailView(
     playerVm: PlayerViewModel,
     gig: GigEntity,
     sets: List<SetEntity>,
-    isEditing: Boolean,
-    onToggleEdit: () -> Unit,
+    isLocked: Boolean,
     onBack: () -> Unit,
     onCreate: (String) -> Unit,
     onDeleteSet: (SetEntity) -> Unit
@@ -242,7 +247,6 @@ private fun GigDetailView(
     LaunchedEffect(sets, draggingSetId) {
         if (draggingSetId == null) localSetOrder = sets.map { it.setId }
     }
-    LaunchedEffect(isEditing) { if (isEditing) sortSetsMode = false }
 
     fun exitSortSetsMode() {
         gigVm.reorderSets(gig.gigId, localSetOrder)
@@ -268,30 +272,33 @@ private fun GigDetailView(
             }
             Text(gig.name, color = GigWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            if (!isEditing) {
-                IconButton(onClick = { showDialog = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "Neues Set",
-                        tint = GigVolt, modifier = Modifier.size(26.dp))
-                }
-                if (sets.size > 1) {
-                    IconButton(onClick = { if (sortSetsMode) exitSortSetsMode() else sortSetsMode = true }) {
-                        Icon(
-                            if (sortSetsMode) Icons.Filled.Check else Icons.Filled.SwapVert,
-                            contentDescription = if (sortSetsMode) "Fertig" else "Sets sortieren",
-                            tint = if (sortSetsMode) GigVolt else GigGray,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
+            IconButton(onClick = { showDialog = true }, enabled = !isLocked) {
+                Icon(Icons.Filled.Add, contentDescription = "Neues Set",
+                    tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt, modifier = Modifier.size(26.dp))
+            }
+            if (sets.size > 1) {
+                IconButton(
+                    onClick  = { if (sortSetsMode) exitSortSetsMode() else sortSetsMode = true },
+                    enabled  = !isLocked || sortSetsMode
+                ) {
+                    Icon(
+                        if (sortSetsMode) Icons.Filled.Check else Icons.Filled.SwapVert,
+                        contentDescription = if (sortSetsMode) "Fertig" else "Sets sortieren",
+                        tint = when {
+                            sortSetsMode -> GigVolt
+                            isLocked     -> GigGray.copy(alpha = 0.4f)
+                            else         -> GigGray
+                        },
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
             }
-            IconButton(onClick = onToggleEdit) {
-                Icon(
-                    if (isEditing) Icons.Filled.Check else Icons.Filled.Edit,
-                    contentDescription = if (isEditing) "Fertig" else "Bearbeiten",
-                    tint = if (isEditing) GigVolt else GigGray,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+        }
+
+        if (sortSetsMode) {
+            Text("Sets werden sortiert — ziehe am Handle, dann Häkchen zum Speichern",
+                color = GigVolt, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
         }
 
         if (sets.isEmpty()) {
@@ -362,13 +369,13 @@ private fun GigDetailView(
             ) {
                 items(sets, key = { it.setId }) { set ->
                     SetCard(
-                        set             = set,
-                        gigVm           = gigVm,
-                        playerVm        = playerVm,
-                        isEditing       = isEditing,
-                        onDeleteSet     = { onDeleteSet(set) },
-                        onRenameSet     = { renameTarget = set },
-                        onResetCompleted = { gigVm.resetCompletedForSet(set.setId) }
+                        set               = set,
+                        gigVm             = gigVm,
+                        playerVm          = playerVm,
+                        isLocked          = isLocked,
+                        onDeleteSet       = { onDeleteSet(set) },
+                        onRenameSet       = { renameTarget = set },
+                        onResetCompleted  = { gigVm.resetCompletedForSet(set.setId) }
                     )
                 }
             }
@@ -452,7 +459,7 @@ private fun SetCard(
     set: SetEntity,
     gigVm: GigViewModel,
     playerVm: PlayerViewModel,
-    isEditing: Boolean,
+    isLocked: Boolean,
     onDeleteSet: () -> Unit,
     onRenameSet: () -> Unit,
     onResetCompleted: () -> Unit
@@ -463,17 +470,16 @@ private fun SetCard(
     val density     = LocalDensity.current
     val rowHeightPx = with(density) { 72.dp.toPx() }
 
-    var sortMode    by remember(set.setId) { mutableStateOf(false) }
-    var localOrder  by remember(set.setId) { mutableStateOf(emptyList<Long>()) }
-    var draggingId  by remember(set.setId) { mutableStateOf<Long?>(null) }
-    var dragOffset  by remember(set.setId) { mutableStateOf(0f) }
+    var sortMode         by remember(set.setId) { mutableStateOf(false) }
+    var editSongsMode    by remember(set.setId) { mutableStateOf(false) }
+    var localOrder       by remember(set.setId) { mutableStateOf(emptyList<Long>()) }
+    var draggingId       by remember(set.setId) { mutableStateOf<Long?>(null) }
+    var dragOffset       by remember(set.setId) { mutableStateOf(0f) }
+    var menuExpanded     by remember(set.setId) { mutableStateOf(false) }
+    var showDeleteDialog by remember(set.setId) { mutableStateOf(false) }
 
     LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
     LaunchedEffect(set.setId) { gigVm.armSetIfIdle(set.setId, playerVm) }
-
-    // Sortier-Modus wird sauber beendet, wenn der Gig-weite Edit-Mode
-    // aufgemacht wird — verhindert Überlappung zweier Bearbeitungs-Modi.
-    LaunchedEffect(isEditing) { if (isEditing) sortMode = false }
 
     // Lokale Reihenfolge folgt dem DB-Flow, außer während eines aktiven Drags —
     // sonst würde der gezogene Song wegspringen, sobald der Flow die noch
@@ -495,6 +501,25 @@ private fun SetCard(
 
     val songMap = remember(songs) { songs.associateBy { it.song.id } }
 
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            containerColor   = GigBgCard,
+            title = { Text("Set löschen?", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text  = { Text("\"${set.name}\" mit allen ${songs.size} zugeordneten Songs wirklich löschen? " +
+                "Die Songs bleiben im Archiv erhalten, ihre Reihenfolge und Markierungen in diesem Set gehen verloren.",
+                color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteDialog = false; onDeleteSet() }) {
+                    Text("Löschen", color = GigRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Abbrechen", color = GigGray) }
+            }
+        )
+    }
+
     Column(modifier = Modifier
         .fillMaxWidth()
         .background(GigBgCard, shape = MaterialTheme.shapes.small)
@@ -510,32 +535,71 @@ private fun SetCard(
             Text(set.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${songs.size}", color = GigGray, fontSize = 12.sp)
-            if (!isEditing) {
-                IconButton(onClick = onResetCompleted) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Completed zurücksetzen",
-                        tint = GigGray, modifier = Modifier.size(20.dp))
-                }
-            }
-            if (!isEditing && songs.size > 1) {
-                IconButton(onClick = { if (sortMode) exitSortMode() else sortMode = true }) {
+
+            if (songs.size > 1) {
+                IconButton(
+                    onClick = {
+                        if (sortMode) exitSortMode() else { sortMode = true; editSongsMode = false }
+                    },
+                    enabled = !isLocked || sortMode
+                ) {
                     Icon(
                         if (sortMode) Icons.Filled.Check else Icons.Filled.SwapVert,
                         contentDescription = if (sortMode) "Fertig" else "Sortieren",
-                        tint = if (sortMode) GigVolt else GigGray,
+                        tint = when { sortMode -> GigVolt; isLocked -> GigGray.copy(alpha = 0.4f); else -> GigGray },
                         modifier = Modifier.size(22.dp)
                     )
                 }
             }
-            if (isEditing) {
-                IconButton(onClick = onRenameSet) {
-                    Icon(Icons.Filled.Edit, contentDescription = "Set umbenennen",
-                        tint = GigGray, modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = onDeleteSet) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Set löschen",
-                        tint = GigRed, modifier = Modifier.size(20.dp))
+            if (songs.isNotEmpty()) {
+                IconButton(
+                    onClick = {
+                        editSongsMode = if (editSongsMode) false else { sortMode = false; true }
+                    },
+                    enabled = !isLocked || editSongsMode
+                ) {
+                    Icon(
+                        if (editSongsMode) Icons.Filled.Check else Icons.Filled.Edit,
+                        contentDescription = if (editSongsMode) "Fertig" else "Songs bearbeiten",
+                        tint = when { editSongsMode -> GigVolt; isLocked -> GigGray.copy(alpha = 0.4f); else -> GigGray },
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
+            Box {
+                IconButton(onClick = { menuExpanded = true }, enabled = !isLocked) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Weitere Optionen",
+                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigGray, modifier = Modifier.size(20.dp))
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    containerColor = GigBgCard
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Umbenennen", color = GigWhite) },
+                        onClick = { menuExpanded = false; onRenameSet() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Completed zurücksetzen", color = GigWhite) },
+                        onClick = { menuExpanded = false; onResetCompleted() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Löschen", color = GigRed) },
+                        onClick = { menuExpanded = false; showDeleteDialog = true }
+                    )
+                }
+            }
+        }
+
+        if (sortMode) {
+            Text("Songs werden sortiert — ziehe am Handle, dann Häkchen zum Speichern",
+                color = GigVolt, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+        } else if (editSongsMode) {
+            Text("Song-Bearbeitung aktiv — End-Aktion & Entfernen sichtbar",
+                color = GigVolt, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
         }
 
         if (sortMode) {
@@ -594,7 +658,8 @@ private fun SetCard(
                     SetSongRow(
                         songInSet     = songInSet,
                         isCurrentSong = songInSet.song.id == currentSong?.id,
-                        isEditing     = isEditing,
+                        isEditing     = editSongsMode,
+                        isLocked      = isLocked,
                         onPlay        = { gigVm.loadSetAsQueue(set.setId, songInSet.song.id, playerVm) },
                         onQueueNext   = {
                             gigVm.insertSpontaneousNext(set.setId, songInSet.song, playerVm)
@@ -689,6 +754,7 @@ private fun SetSongRow(
     songInSet: SongInSet,
     isCurrentSong: Boolean,
     isEditing: Boolean,
+    isLocked: Boolean,
     onPlay: () -> Unit,
     onQueueNext: () -> Unit,
     onQueueEnd: () -> Unit,
@@ -697,10 +763,11 @@ private fun SetSongRow(
 ) {
     var dragX by remember { mutableStateOf(0f) }
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
+    var showRemoveDialog by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // rememberUpdatedState: hält die Callbacks/Flags aktuell, auch wenn der
-    // pointerInput-Block (Key = isEditing) nicht neu startet. Ohne das würden
+    // pointerInput-Block (Key = isEditing/isLocked) nicht neu startet. Ohne das würden
     // onQueueNext/onQueueEnd auf den Song der ERSTEN Komposition eingefroren bleiben.
     val latestNext      by rememberUpdatedState(onQueueNext)
     val latestEnd       by rememberUpdatedState(onQueueEnd)
@@ -739,14 +806,36 @@ private fun SetSongRow(
         )
     }
 
+    if (showRemoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveDialog = false },
+            containerColor   = GigBgCard,
+            title  = { Text("Aus Set entfernen?", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text   = { Text("\"${songInSet.song.title}\" aus diesem Set entfernen? " +
+                "Der Song bleibt im Archiv erhalten.", color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showRemoveDialog = false; onRemove() }) {
+                    Text("Entfernen", color = GigRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveDialog = false }) {
+                    Text("Abbrechen", color = GigGray)
+                }
+            }
+        )
+    }
+
+    val interactive = !isEditing && !isLocked
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
             .background(if (isCurrentSong) GigVolt.copy(alpha = 0.18f) else Color.Transparent)
             .alpha(alpha)
-            .pointerInput(isEditing) {
-                if (!isEditing) {
+            .pointerInput(isEditing, isLocked) {
+                if (interactive) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             when {
@@ -759,10 +848,14 @@ private fun SetSongRow(
                     ) { _, delta -> dragX += delta }
                 }
             }
-            .clickable(enabled = !isEditing, onClick = { guarded(latestPlay) })
+            .clickable(enabled = interactive, onClick = { guarded(latestPlay) })
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (interactive) {
+            Icon(Icons.Filled.ChevronLeft, contentDescription = null,
+                tint = GigGray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
+        }
         Box(modifier = Modifier.width(44.dp), contentAlignment = Alignment.CenterStart) {
             Text(
                 "%02d".format(songInSet.positionInSet + 1),
@@ -788,10 +881,13 @@ private fun SetSongRow(
             TextButton(onClick = onCycleEndAction, modifier = Modifier.defaultMinSize(minWidth = 40.dp)) {
                 Text(endActionLabel, fontSize = 14.sp, color = GigGray)
             }
-            IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = { showRemoveDialog = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Filled.Close, contentDescription = "Aus Set entfernen",
                     tint = GigRed, modifier = Modifier.size(18.dp))
             }
+        } else if (interactive) {
+            Icon(Icons.Filled.ChevronRight, contentDescription = null,
+                tint = GigGray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
         }
     }
 }

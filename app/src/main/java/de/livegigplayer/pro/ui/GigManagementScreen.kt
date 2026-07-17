@@ -269,10 +269,6 @@ private fun GigDetailView(
             Text(gig.name, color = GigWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (!isEditing) {
-                IconButton(onClick = { gigVm.resetCompletedForSet(sets.firstOrNull()?.setId ?: -1) }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Completed zurücksetzen",
-                        tint = GigGray, modifier = Modifier.size(22.dp))
-                }
                 IconButton(onClick = { showDialog = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "Neues Set",
                         tint = GigVolt, modifier = Modifier.size(26.dp))
@@ -366,12 +362,13 @@ private fun GigDetailView(
             ) {
                 items(sets, key = { it.setId }) { set ->
                     SetCard(
-                        set          = set,
-                        gigVm        = gigVm,
-                        playerVm     = playerVm,
-                        isEditing    = isEditing,
-                        onDeleteSet  = { onDeleteSet(set) },
-                        onRenameSet  = { renameTarget = set }
+                        set             = set,
+                        gigVm           = gigVm,
+                        playerVm        = playerVm,
+                        isEditing       = isEditing,
+                        onDeleteSet     = { onDeleteSet(set) },
+                        onRenameSet     = { renameTarget = set },
+                        onResetCompleted = { gigVm.resetCompletedForSet(set.setId) }
                     )
                 }
             }
@@ -457,7 +454,8 @@ private fun SetCard(
     playerVm: PlayerViewModel,
     isEditing: Boolean,
     onDeleteSet: () -> Unit,
-    onRenameSet: () -> Unit
+    onRenameSet: () -> Unit,
+    onResetCompleted: () -> Unit
 ) {
     val context     = LocalContext.current
     val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
@@ -512,6 +510,12 @@ private fun SetCard(
             Text(set.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${songs.size}", color = GigGray, fontSize = 12.sp)
+            if (!isEditing) {
+                IconButton(onClick = onResetCompleted) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Completed zurücksetzen",
+                        tint = GigGray, modifier = Modifier.size(20.dp))
+                }
+            }
             if (!isEditing && songs.size > 1) {
                 IconButton(onClick = { if (sortMode) exitSortMode() else sortMode = true }) {
                     Icon(

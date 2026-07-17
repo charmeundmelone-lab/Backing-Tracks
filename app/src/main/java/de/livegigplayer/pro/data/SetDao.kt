@@ -23,8 +23,17 @@ abstract class SetDao {
     @Query("UPDATE sets SET position = :position WHERE setId = :setId")
     abstract suspend fun updatePosition(setId: Long, position: Int)
 
+    @Query("UPDATE sets SET name = :name WHERE setId = :setId")
+    abstract suspend fun renameSet(setId: Long, name: String)
+
     @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
     abstract fun getSetsForGig(gigId: Long): Flow<List<SetEntity>>
+
+    @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
+    protected abstract suspend fun getRawSets(gigId: Long): List<SetEntity>
+
+    @Update(onConflict = OnConflictStrategy.REPLACE)
+    protected abstract suspend fun updateRawSets(sets: List<SetEntity>)
 
     @Transaction
     @Query("""
@@ -152,5 +161,16 @@ abstract class SetDao {
             refsBySongId[songId]?.copy(positionInSet = i)
         }
         updateRawCrossRefs(sanitized)
+    }
+
+    // ── Manuelles Umsortieren der Sets innerhalb eines Gigs ────────────────────
+
+    @Transaction
+    open suspend fun reorderSets(gigId: Long, orderedSetIds: List<Long>) {
+        val setsById = getRawSets(gigId).associateBy { it.setId }
+        val sanitized = orderedSetIds.mapIndexedNotNull { i, setId ->
+            setsById[setId]?.copy(position = i)
+        }
+        updateRawSets(sanitized)
     }
 }

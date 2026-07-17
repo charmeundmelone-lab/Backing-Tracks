@@ -227,7 +227,35 @@ private fun GigDetailView(
     onCreate: (String) -> Unit,
     onDeleteSet: (SetEntity) -> Unit
 ) {
-    var showDialog by remember { mutableStateOf(false) }
+    var showDialog   by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<SetEntity?>(null) }
+
+    val density        = LocalDensity.current
+    val setSlotHeight  = 70.dp
+    val setRowHeightPx = with(density) { setSlotHeight.toPx() }
+
+    var sortSetsMode   by remember(gig.gigId) { mutableStateOf(false) }
+    var localSetOrder  by remember(gig.gigId) { mutableStateOf(emptyList<Long>()) }
+    var draggingSetId  by remember(gig.gigId) { mutableStateOf<Long?>(null) }
+    var setDragOffset  by remember(gig.gigId) { mutableStateOf(0f) }
+
+    LaunchedEffect(sets, draggingSetId) {
+        if (draggingSetId == null) localSetOrder = sets.map { it.setId }
+    }
+    LaunchedEffect(isEditing) { if (isEditing) sortSetsMode = false }
+
+    fun exitSortSetsMode() {
+        gigVm.reorderSets(gig.gigId, localSetOrder)
+        sortSetsMode = false
+        draggingSetId = null
+        setDragOffset = 0f
+    }
+
+    if (sortSetsMode) {
+        BackHandler { exitSortSetsMode() }
+    }
+
+    val setMap = remember(sets) { sets.associateBy { it.setId } }
 
     Column(modifier = Modifier.fillMaxSize().background(GigBgDeep)) {
         Row(
@@ -248,6 +276,16 @@ private fun GigDetailView(
                 IconButton(onClick = { showDialog = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "Neues Set",
                         tint = GigVolt, modifier = Modifier.size(26.dp))
+                }
+                if (sets.size > 1) {
+                    IconButton(onClick = { if (sortSetsMode) exitSortSetsMode() else sortSetsMode = true }) {
+                        Icon(
+                            if (sortSetsMode) Icons.Filled.Check else Icons.Filled.SwapVert,
+                            contentDescription = if (sortSetsMode) "Fertig" else "Sets sortieren",
+                            tint = if (sortSetsMode) GigVolt else GigGray,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
             IconButton(onClick = onToggleEdit) {
@@ -271,6 +309,55 @@ private fun GigDetailView(
                     Text("Tippe + um ein Set anzulegen", color = GigGray, fontSize = 12.sp)
                 }
             }
+        } else if (sortSetsMode) {
+            // Set-Zeilen frei positioniert per Drag-Offset — gleiches Muster wie
+            // SetSongRowSortable, nur eine Ebene höher (Sets statt Songs im Set).
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .height(setSlotHeight * localSetOrder.size)
+            ) {
+                localSetOrder.forEachIndexed { index, setId ->
+                    val set = setMap[setId] ?: return@forEachIndexed
+                    key(setId) {
+                        val isDragging = draggingSetId == setId
+                        val targetOffset = index * setRowHeightPx
+                        val animatedOffset by animateFloatAsState(
+                            targetValue = targetOffset, label = "setReorderOffset"
+                        )
+                        val offsetPx = if (isDragging) targetOffset + setDragOffset else animatedOffset
+
+                        SetRowSortable(
+                            set             = set,
+                            displayPosition = index,
+                            isDragging      = isDragging,
+                            modifier        = Modifier
+                                .offset { IntOffset(0, offsetPx.roundToInt()) }
+                                .zIndex(if (isDragging) 1f else 0f),
+                            onDragStart = { draggingSetId = setId; setDragOffset = 0f },
+                            onDrag = { delta ->
+                                setDragOffset += delta
+                                val currentIdx = localSetOrder.indexOf(setId)
+                                val newIdx = ((currentIdx * setRowHeightPx + setDragOffset) / setRowHeightPx)
+                                    .roundToInt().coerceIn(0, localSetOrder.size - 1)
+                                if (newIdx != currentIdx) {
+                                    val mutable = localSetOrder.toMutableList()
+                                    mutable.removeAt(currentIdx)
+                                    mutable.add(newIdx, setId)
+                                    localSetOrder = mutable
+                                    setDragOffset -= (newIdx - currentIdx) * setRowHeightPx
+                                }
+                            },
+                            onDragEnd = {
+                                draggingSetId = null
+                                setDragOffset = 0f
+                                gigVm.reorderSets(gig.gigId, localSetOrder)
+                            }
+                        )
+                    }
+                }
+            }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
@@ -283,7 +370,8 @@ private fun GigDetailView(
                         gigVm        = gigVm,
                         playerVm     = playerVm,
                         isEditing    = isEditing,
-                        onDeleteSet  = { onDeleteSet(set) }
+                        onDeleteSet  = { onDeleteSet(set) },
+                        onRenameSet  = { renameTarget = set }
                     )
                 }
             }
@@ -295,6 +383,69 @@ private fun GigDetailView(
             onConfirm = { onCreate(it); showDialog = false },
             onDismiss = { showDialog = false })
     }
+
+    renameTarget?.let { target ->
+        CreateNameDialog(
+            title        = "Set umbenennen",
+            placeholder  = "Name des Sets …",
+            initialValue = target.name,
+            confirmLabel = "Speichern",
+            onConfirm    = { gigVm.renameSet(target.setId, it); renameTarget = null },
+            onDismiss    = { renameTarget = null }
+        )
+    }
+}
+
+@Composable
+private fun SetRowSortable(
+    set: SetEntity,
+    displayPosition: Int,
+    isDragging: Boolean,
+    modifier: Modifier = Modifier,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit
+) {
+    val latestDragStart by rememberUpdatedState(onDragStart)
+    val latestDrag       by rememberUpdatedState(onDrag)
+    val latestDragEnd    by rememberUpdatedState(onDragEnd)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .background(
+                if (isDragging) GigVolt.copy(alpha = 0.22f) else GigBgCard,
+                shape = MaterialTheme.shapes.small
+            )
+            .then(if (isDragging) Modifier.shadow(6.dp) else Modifier)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("%02d".format(displayPosition + 1), color = GigVolt,
+            fontSize = 18.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(36.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(set.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(
+            Icons.Filled.DragIndicator,
+            contentDescription = "Set verschieben",
+            tint = if (isDragging) GigVolt else GigGray,
+            modifier = Modifier
+                .size(44.dp)
+                .padding(8.dp)
+                .pointerInput(set.setId) {
+                    detectVerticalDragGestures(
+                        onDragStart  = { latestDragStart() },
+                        onDragEnd    = { latestDragEnd() },
+                        onDragCancel = { latestDragEnd() }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        latestDrag(dragAmount)
+                    }
+                }
+        )
+    }
 }
 
 // ── Set-Karte mit Songs ───────────────────────────────────────────────────────
@@ -305,7 +456,8 @@ private fun SetCard(
     gigVm: GigViewModel,
     playerVm: PlayerViewModel,
     isEditing: Boolean,
-    onDeleteSet: () -> Unit
+    onDeleteSet: () -> Unit,
+    onRenameSet: () -> Unit
 ) {
     val context     = LocalContext.current
     val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
@@ -371,6 +523,10 @@ private fun SetCard(
                 }
             }
             if (isEditing) {
+                IconButton(onClick = onRenameSet) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Set umbenennen",
+                        tint = GigGray, modifier = Modifier.size(18.dp))
+                }
                 IconButton(onClick = onDeleteSet) {
                     Icon(Icons.Filled.Delete, contentDescription = "Set löschen",
                         tint = GigRed, modifier = Modifier.size(20.dp))
@@ -641,9 +797,11 @@ private fun SetSongRow(
 @Composable
 private fun CreateNameDialog(
     title: String, placeholder: String,
+    initialValue: String = "",
+    confirmLabel: String = "Erstellen",
     onConfirm: (String) -> Unit, onDismiss: () -> Unit
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = GigBgCard,
         title  = { Text(title, color = GigWhite, fontWeight = FontWeight.Bold) },
@@ -661,7 +819,7 @@ private fun CreateNameDialog(
         },
         confirmButton = {
             TextButton(enabled = text.isNotBlank(), onClick = { onConfirm(text.trim()) }) {
-                Text("Erstellen", color = GigVolt, fontWeight = FontWeight.Bold)
+                Text(confirmLabel, color = GigVolt, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

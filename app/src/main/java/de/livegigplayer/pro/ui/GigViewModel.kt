@@ -81,6 +81,15 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { setDao.deleteSet(set) }
     }
 
+    fun renameSet(setId: Long, name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) { setDao.renameSet(setId, name.trim()) }
+    }
+
+    fun reorderSets(gigId: Long, orderedSetIds: List<Long>) {
+        viewModelScope.launch(Dispatchers.IO) { setDao.reorderSets(gigId, orderedSetIds) }
+    }
+
     fun addSongsToSet(setId: Long, songIds: List<Long>, playerVm: PlayerViewModel? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {

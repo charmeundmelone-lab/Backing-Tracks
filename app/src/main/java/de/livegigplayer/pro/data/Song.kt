@@ -27,5 +27,6 @@ data class Song(
     val autoStop: Boolean = false,
     val loopStartMs: Long = 0L,
     val loopEndMs: Long = 0L,
-    val lyrics: String = ""
+    val lyrics: String = "",
+    val lyricsStartMs: Long = 0L
 )

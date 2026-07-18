@@ -92,6 +92,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (_currentSong.value?.id == song.id) _currentSong.value = u
     }
 
+    // Einmalig gesetzter Start-Anker (z.B. Ende einer langen Intro) — Teleprompter
+    // scrollt bis dahin nicht los, unabhängig von Songdauer/BPM. Siehe LyricsOverlay.
+    fun updateLyricsStartMs(song: Song, ms: Long) {
+        val u = song.copy(lyricsStartMs = ms)
+        viewModelScope.launch { dao.updateLyricsStartMs(song.id, ms) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = u
+    }
+
     private val _queue           = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
 

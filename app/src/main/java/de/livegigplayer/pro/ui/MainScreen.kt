@@ -251,12 +251,13 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
 
         // Lyrics-Teleprompter — Hochkant, Auto-Scroll an echter Wiedergabeposition
         LyricsOverlay(
-            visible    = showLyrics,
-            song       = currentSong,
-            positionMs = positionMs,
-            durationMs = durationMs,
-            isPlaying  = isPlaying,
-            onClose    = { vm.closeLyrics() }
+            visible          = showLyrics,
+            song             = currentSong,
+            positionMs       = positionMs,
+            durationMs       = durationMs,
+            isPlaying        = isPlaying,
+            onClose          = { vm.closeLyrics() },
+            onSetLyricsStart = { ms -> currentSong?.let { vm.updateLyricsStartMs(it, ms) } }
         )
 
         // Scan overlay

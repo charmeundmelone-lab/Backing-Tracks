@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -58,6 +60,10 @@ private val LyricsVolt  = Color(0xFFE8FF00)
 private val LyricsGray  = Color(0xFF777777)
 private val LyricsWhite = Color(0xFFFFFFFF)
 
+// Struktur-Label wie "[Chorus]" oder "[Verse 1]" — keine Akkorde, nur Songaufbau.
+// Wird als eigene, farblich abgesetzte Überschrift gerendert statt als Lyric-Zeile.
+private val sectionTagRegex = Regex("^\\[(.+)]$")
+
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
@@ -70,6 +76,9 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
  * durch, unabhängig von der genau eingetragenen BPM. Tap irgendwo im Textbereich
  * synct auf die nächste noch nicht erreichte Zeile nach. Scroll bewegt sich
  * ausschließlich vorwärts/abwärts (siehe targetScrollPx-Klemmung in LyricsContent).
+ * `song.lyricsStartMs` ist ein einmalig gesetzter Start-Anker (Flag-Button im
+ * Header) für Songs mit langer Intro, die live abweichend von der Studio-BPM
+ * gespielt wird — bis dahin scrollt der Text gar nicht los.
  */
 @Composable
 fun LyricsOverlay(
@@ -78,7 +87,8 @@ fun LyricsOverlay(
     positionMs: Long,
     durationMs: Long,
     isPlaying: Boolean,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onSetLyricsStart: (Long) -> Unit = {}
 ) {
     val activity = LocalContext.current.findActivity()
     DisposableEffect(visible) {
@@ -92,11 +102,12 @@ fun LyricsOverlay(
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         if (song != null) {
             LyricsContent(
-                song       = song,
-                positionMs = positionMs,
-                durationMs = durationMs,
-                isPlaying  = isPlaying,
-                onClose    = onClose
+                song             = song,
+                positionMs       = positionMs,
+                durationMs       = durationMs,
+                isPlaying        = isPlaying,
+                onClose          = onClose,
+                onSetLyricsStart = onSetLyricsStart
             )
         }
     }
@@ -108,9 +119,11 @@ private fun LyricsContent(
     positionMs: Long,
     durationMs: Long,
     isPlaying: Boolean,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onSetLyricsStart: (Long) -> Unit
 ) {
-    val lines = remember(song.id, song.lyrics) { song.lyrics.lines() }
+    val context = LocalContext.current
+    val lines   = remember(song.id, song.lyrics) { song.lyrics.lines() }
 
     val scrollState   = rememberScrollState()
     val scope         = rememberCoroutineScope()
@@ -118,8 +131,10 @@ private fun LyricsContent(
     val linePositions = remember(song.id) { mutableMapOf<Int, Float>() }
 
     // Sync-Anker (Zeit, Scroll-Px), ab dem die aktuelle Scroll-Rate berechnet wird.
-    // Wird beim Songwechsel und bei jedem Tap-to-Sync neu gesetzt.
-    var anchorPositionMs by remember(song.id) { mutableStateOf(0L) }
+    // Startet am gespeicherten Start-Anker (song.lyricsStartMs, Default 0) — bis dahin
+    // bleibt der Text stehen, z.B. während einer langen Intro. Wird bei jedem
+    // Tap-to-Sync und beim Setzen eines neuen Start-Ankers neu gesetzt.
+    var anchorPositionMs by remember(song.id) { mutableStateOf(song.lyricsStartMs) }
     var anchorScrollPx   by remember(song.id) { mutableStateOf(0f) }
     // Zuletzt gesetztes Scroll-Ziel — wird NIE verringert (Anforderung: nur abwärts, nie zurück).
     var targetScrollPx   by remember(song.id) { mutableStateOf(0f) }
@@ -158,6 +173,18 @@ private fun LyricsContent(
         scope.launch { scrollState.animateScrollTo(targetScrollPx.roundToInt()) }
     }
 
+    // Einmalig gesetzter Start-Anker: "Gesang beginnt genau jetzt" — kompensiert
+    // Intros, die live länger/kürzer laufen als es die BPM-Rechnung annehmen würde.
+    // Wird persistiert, damit es bei künftigen Plays automatisch stimmt.
+    fun setLyricsStart() {
+        anchorPositionMs = latestPositionMs
+        anchorScrollPx   = 0f
+        targetScrollPx   = 0f
+        scope.launch { scrollState.scrollTo(0) }
+        onSetLyricsStart(latestPositionMs)
+        Toast.makeText(context, "Start-Anker gesetzt — läuft ab jetzt automatisch von hier los", Toast.LENGTH_SHORT).show()
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(LyricsBg)) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             // Header
@@ -175,6 +202,10 @@ private fun LyricsContent(
                         Icon(Icons.Filled.Pause, contentDescription = null, tint = LyricsGray, modifier = Modifier.size(14.dp))
                         Text(" pausiert", color = LyricsGray, fontSize = 11.sp)
                     }
+                }
+                IconButton(onClick = { setLyricsStart() }) {
+                    Icon(Icons.Filled.Flag, contentDescription = "Start-Anker hier setzen (Intro überspringen)",
+                        tint = LyricsGray, modifier = Modifier.size(20.dp))
                 }
                 IconButton(onClick = onClose) {
                     Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = LyricsGray)
@@ -194,10 +225,23 @@ private fun LyricsContent(
                     .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
                 lines.forEachIndexed { index, line ->
-                    if (line.isBlank()) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                    } else {
-                        Text(
+                    val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
+                    when {
+                        line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
+                        sectionLabel != null -> Text(
+                            text = sectionLabel.uppercase(),
+                            color = LyricsVolt,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 20.dp, bottom = 6.dp)
+                                .onGloballyPositioned { coords ->
+                                    linePositions[index] = coords.positionInParent().y
+                                }
+                        )
+                        else -> Text(
                             text = line,
                             color = LyricsWhite,
                             fontSize = 26.sp,

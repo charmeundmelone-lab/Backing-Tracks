@@ -88,7 +88,9 @@ app/src/main/java/de/livegigplayer/pro/
 │   │                             nicht im Set sind)
 │   └── LyricsOverlay.kt      — Vollbild-Teleprompter (nur Lyrics, keine Akkorde), Hochkant
 │                                erzwungen solange sichtbar, Auto-Scroll an echte
-│                                Wiedergabeposition gekoppelt, Tap-to-Sync (siehe Gotcha 12)
+│                                Wiedergabeposition gekoppelt, Tap-to-Sync, Start-Anker
+│                                (Flag-Button, lyricsStartMs), Struktur-Labels "[Chorus]"
+│                                etc. als eigene Überschrift gerendert (siehe Gotcha 12)
 ├── ui/theme/
 │   └── Theme.kt              — LiveGigPlayerTheme (dark)
 ├── LiveGigPlayerApp.kt       — Application-Klasse, DB-Singleton
@@ -112,7 +114,8 @@ app/src/main/java/de/livegigplayer/pro/
 | playlistId | Long | Zugehöriges Set (0 = keins) |
 | audioFilePath | String | SAF-Pfad (treeUri||folderName) |
 | duration | String | Anzeigedauer (z.B. "3:42") |
-| lyrics | String | Songtext ohne Akkorde, fürs Teleprompter-Overlay (v14) |
+| lyrics | String | Songtext ohne Akkorde, mit optionalen Struktur-Labels wie `[Chorus]` (v14) |
+| lyricsStartMs | Long | Einmalig gesetzter Teleprompter-Start-Anker, z.B. nach langer Intro (v15) |
 
 ## Build-Setup
 
@@ -130,7 +133,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v14** — nächste Migration wäre 14→15. Migrationen NIE doppelt anlegen.
+1. **Room v15** — nächste Migration wäre 15→16. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
@@ -198,15 +201,57 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
     - Auto-Öffnen nur EINMAL pro frisch angewähltem Song (`lyricsAutoShownForSongId`
       in `PlayerViewModel`, zurückgesetzt in `selectSong`) — sonst würde jedes
       Pause/Play-Toggle den Screen erneut aufreißen.
+    - **Start-Anker (`song.lyricsStartMs`, Flag-Button im Header):** löst das
+      Problem, dass eine live gespielte Version oft eine andere (oft längere)
+      Intro hat als die BPM-Rechnung annimmt — die reine Positions-Proportion
+      würde sonst schon während der Intro lostippen. Flag-Button setzt
+      `anchorPositionMs = aktuelle Position`, `anchorScrollPx = 0` und
+      persistiert das einmalig pro Song (`SongDao.updateLyricsStartMs`) — ab
+      dann läuft's bei jedem künftigen Play automatisch richtig los, ohne
+      dass man live etwas tippen muss. Tap-to-Sync bleibt zusätzlich als
+      Korrektur-Fallback bestehen, falls die Version doch mal abweicht.
+    - **Struktur-Labels ohne Akkorde:** Zeilen im Format `[Chorus]`/`[Verse 1]`
+      im Lyrics-Text werden per `sectionTagRegex` erkannt und als eigene,
+      Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
+      — bewusst NICHT aus dem Text entfernt wie Akkord-Zeilen, weil es reine
+      Songstruktur ist, kein Akkord.
 
 ## Letzter Stand
 
 **Datum:** 2026-07-18
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.30)
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.30/5.31)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Lyrics-Teleprompter (Room v13→14) — neues Feature, noch ungetestet auf echtem Gerät
+**Commit:** Start-Anker (Intro-Skip) + Struktur-Labels im Teleprompter (Room v14→15) — noch ungetestet auf echtem Gerät
 
-### Sprint 5.30 DONE (ungetestet): Lyrics-Teleprompter mit Auto-Scroll + Tap-to-Sync (Room v13→14)
+### Sprint 5.31 DONE (ungetestet): Teleprompter — Start-Anker gegen Intro-Drift + Struktur-Labels (Room v14→15)
+
+User-Feedback nach erstem Live-Test von Sprint 5.30: Lyrics laufen korrekt von oben nach
+unten (funktioniert!), aber zwei Probleme: (1) Songstruktur (Vers/Chorus/Bridge) ist
+optisch nicht erkennbar, weil beim PDF-Cleanup alle `[...]`-Marker mit rausgefiltert
+wurden; (2) die Live-Version hat eine andere (längere) Intro als die BPM-Rechnung
+zugrunde legt, dadurch läuft der Text während der Intro schon los, statt zu warten.
+
+- **DB:** `Song.lyricsStartMs: Long = 0L`, Migration `MIGRATION_14_15` (`ALTER TABLE
+  songs ADD COLUMN lyricsStartMs INTEGER NOT NULL DEFAULT 0`),
+  `SongDao.updateLyricsStartMs()`, `PlayerViewModel.updateLyricsStartMs()`.
+- **LyricsOverlay — Start-Anker:** neuer Flag-Icon-Button im Header. Tippen setzt
+  `anchorPositionMs`/`anchorScrollPx` auf (aktuelle Position, 0) und persistiert das
+  einmalig pro Song — ab dann läuft der Scroll bei jedem künftigen Play automatisch
+  erst ab diesem Zeitpunkt los (z.B. nach einer langen Intro), ganz ohne live
+  Tippen. Tap-to-Sync bleibt als Korrektur-Fallback bestehen (Empfehlung aus
+  3 Optionen, die dem User vorgelegt wurden — "einmalig setzen, keine Aufmerksamkeit
+  während des Auftritts nötig" hat gegen "durchgehend mittippen" gewonnen).
+- **LyricsOverlay — Struktur-Labels:** `sectionTagRegex` erkennt Zeilen wie
+  `[Chorus]`/`[Verse 1]` im Lyrics-Text und rendert sie als eigene Volt-farbene
+  Überschrift statt als normale weiße Lyric-Zeile — bewusst NICHT entfernt wie
+  Akkorde, weil reine Songstruktur kein Akkord ist.
+- **PDF-Cleanup-Skript angepasst:** behält jetzt `[...]`-Marker (vorher überall
+  rausgefiltert), aktualisierte Lyrics-Datei an den User geschickt zum erneuten
+  Einfügen ins Lyrics-Feld.
+- **Nicht verifiziert:** Wie Sprint 5.30 kein Gradle-Build in dieser Session
+  möglich — nur manuell gegengelesen.
+
+### Sprint 5.30 DONE: Lyrics-Teleprompter mit Auto-Scroll + Tap-to-Sync (Room v13→14) — Commit 05a4c00, CI grün, Live-getestet
 
 User-Wunsch: Reinen Songtext (keine Akkorde) im Hochkant-Vollbild anzeigen, der
 automatisch aufgeht, sobald ein Song mit hinterlegten Lyrics gestartet wird, und
@@ -571,13 +616,15 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
-- ⚠️ **Lyrics-Teleprompter auf echtem Gerät testen (PRIO 1):** Sprint 5.30 wurde
-  ohne Gradle-Build implementiert (Netzwerk-Policy blockiert `dl.google.com` in
-  der Sandbox). Vor allem prüfen: DB-Migration 13→14 greift sauber, Auto-Öffnen
-  beim ersten Play, Frame-Loop-Performance (60fps-`scrollTo` parallel zum
-  200ms-Positions-Poll), Tap-to-Sync-Treffergenauigkeit, Hochkant-Sperre wird
-  beim Schließen korrekt zurückgesetzt (sonst bleibt die ganze App danach
-  Hochkant-gesperrt).
+- ✅ **Lyrics-Teleprompter Grundfunktion (ERLEDIGT):** Sprint 5.30 vom User live
+  getestet — Auto-Scroll von oben nach unten funktioniert. Zwei Nachbesserungen
+  daraus wurden in Sprint 5.31 umgesetzt (Start-Anker + Struktur-Labels).
+- ⚠️ **Sprint 5.31 auf echtem Gerät testen (PRIO 1):** Wie 5.30 ohne Gradle-Build
+  implementiert (Netzwerk-Policy blockiert `dl.google.com` in der Sandbox). Vor
+  allem prüfen: DB-Migration 14→15 greift sauber, Flag-Button setzt den Start-
+  Anker korrekt und der Scroll bleibt bis dahin wirklich bei 0 stehen, Struktur-
+  Labels rendern sichtbar abgesetzt (Volt, nicht wie normale Lyric-Zeilen),
+  Tap-to-Sync funktioniert weiterhin nach dem Setzen eines Start-Ankers.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

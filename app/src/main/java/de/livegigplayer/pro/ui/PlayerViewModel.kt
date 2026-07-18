@@ -59,6 +59,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val trackMode: StateFlow<TrackMode?> = _trackMode.asStateFlow()
     private val _showMixer     = MutableStateFlow(false)
     val showMixer: StateFlow<Boolean> = _showMixer.asStateFlow()
+    private val _showLyrics    = MutableStateFlow(false)
+    val showLyrics: StateFlow<Boolean> = _showLyrics.asStateFlow()
+    // Verhindert, dass der Lyrics-Screen bei jedem Play/Pause-Toggle erneut
+    // automatisch aufgeht — nur beim ERSTEN Play eines frisch angewählten Songs.
+    private var lyricsAutoShownForSongId: Long? = null
     private val _positionMs    = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
     private val _durationMs    = MutableStateFlow(0L)
@@ -77,6 +82,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _loopHint = MutableStateFlow<String?>(null)
     val loopHint: StateFlow<String?> = _loopHint.asStateFlow()
     fun clearLoopHint() { _loopHint.value = null }
+
+    fun openLyrics()  { _showLyrics.value = true }
+    fun closeLyrics() { _showLyrics.value = false }
+
+    fun updateLyrics(song: Song, lyrics: String) {
+        val u = song.copy(lyrics = lyrics)
+        viewModelScope.launch { dao.update(u) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = u
+    }
 
     private val _queue           = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
@@ -387,6 +401,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectSong(song: Song, context: Context, sourcePlaylistId: Long? = null, isGigSet: Boolean = false) {
         resetLoopState()
+        lyricsAutoShownForSongId = null
         _isGigSetMode.value = isGigSet
         _currentPlaylistId.value = sourcePlaylistId
         val mode = SongScanner.scan(song, context)
@@ -442,7 +457,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun togglePlayPause() { if (engine.isPlaying) { engine.pause(); _isPlaying.value = false } else { engine.play(); _isPlaying.value = true } }
+    fun togglePlayPause() {
+        if (engine.isPlaying) {
+            engine.pause(); _isPlaying.value = false
+        } else {
+            engine.play(); _isPlaying.value = true
+            val song = _currentSong.value
+            if (song != null && song.lyrics.isNotBlank() && lyricsAutoShownForSongId != song.id) {
+                lyricsAutoShownForSongId = song.id
+                _showLyrics.value = true
+            }
+        }
+    }
     fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
     fun seekTo(ms: Long)  { engine.seekTo(ms.coerceIn(0L, _durationMs.value)) }
     fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication(), isGigSet = _isGigSetMode.value) else engine.seekTo(0L) }

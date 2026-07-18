@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -38,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
@@ -127,6 +129,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val isPlaying     by vm.isPlaying.collectAsState()
     val trackMode     by vm.trackMode.collectAsState()
     val showMixer     by vm.showMixer.collectAsState()
+    val showLyrics    by vm.showLyrics.collectAsState()
     val positionMs    by vm.positionMs.collectAsState()
     val durationMs    by vm.durationMs.collectAsState()
     val isScanning    by vm.isScanning.collectAsState()
@@ -207,6 +210,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onStop           = { vm.stopPlayback() },
                 onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
                 onSetLoopButton  = { vm.onSetLoopButtonPressed() },
+                onOpenLyrics     = { vm.openLyrics() },
                 onCycleEndAction = {
                     val sid = activeSetId
                     val song = currentSong
@@ -243,6 +247,16 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             onPlayPause    = { vm.togglePlayPause() },
             onStop         = { vm.stopPlayback() },
             onClose        = { vm.closeMixer() }
+        )
+
+        // Lyrics-Teleprompter — Hochkant, Auto-Scroll an echter Wiedergabeposition
+        LyricsOverlay(
+            visible    = showLyrics,
+            song       = currentSong,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying  = isPlaying,
+            onClose    = { vm.closeLyrics() }
         )
 
         // Scan overlay
@@ -483,10 +497,11 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             SongEditorSheet(
                 song             = editSheet!!,
                 songs            = songs,
-                onSave           = { t, ar, bpmStr ->
+                onSave           = { t, ar, bpmStr, lyrics ->
                     val bpm = bpmStr.toIntOrNull() ?: editSheet!!.bpm
                     vm.updateTitle(editSheet!!, t)
                     vm.updateArtist(editSheet!!, ar)
+                    if (lyrics != editSheet!!.lyrics) vm.updateLyrics(editSheet!!, lyrics)
                     scope.launch { sheetState.hide(); editSheet = null }
                 },
                 onAutoStopChange = { enabled -> vm.updateAutoStop(editSheet!!, enabled) },
@@ -656,7 +671,7 @@ private fun ArchivSongRow(
 private fun SongEditorSheet(
     song: Song,
     songs: List<Song>,
-    onSave: (String, String, String) -> Unit,
+    onSave: (String, String, String, String) -> Unit,
     onAutoStopChange: (Boolean) -> Unit,
     onCapoChange: (Int) -> Unit,
     onNavigate: (Song) -> Unit,
@@ -667,6 +682,7 @@ private fun SongEditorSheet(
     var bpm      by remember(song.id) { mutableStateOf(song.bpm.toString()) }
     var capo     by remember(song.id) { mutableStateOf(song.capoPosition) }
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
+    var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
 
     val idx     = songs.indexOfFirst { it.id == song.id }
     val hasPrev = idx > 0
@@ -716,6 +732,21 @@ private fun SongEditorSheet(
                     .padding(horizontal = 14.dp, vertical = 4.dp))
         }
         Spacer(modifier = Modifier.height(16.dp))
+        // Lyrics (nur Text, keine Akkorde — wird im Teleprompter beim Abspielen gezeigt)
+        Text("Lyrics", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 4.dp))
+        OutlinedTextField(
+            value = lyrics, onValueChange = { lyrics = it },
+            placeholder = { Text("Songtext einfügen — ohne Akkorde …", color = Gray, fontSize = 13.sp) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
+            textStyle = TextStyle(color = White, fontSize = 14.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Volt, unfocusedBorderColor = Gray,
+                focusedTextColor = White, unfocusedTextColor = White,
+                cursorColor = Volt
+            )
+        )
+        Spacer(modifier = Modifier.height(16.dp))
         // Auto-Stop toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -742,7 +773,7 @@ private fun SongEditorSheet(
                 colors = ButtonDefaults.buttonColors(containerColor = BgTrack)) {
                 Text("Abbrechen", color = Gray)
             }
-            Button(onClick = { onSave(title, artist, bpm) }, modifier = Modifier.weight(1f),
+            Button(onClick = { onSave(title, artist, bpm, lyrics) }, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = Volt)) {
                 Text("Speichern", color = Color.Black, fontWeight = FontWeight.Bold)
             }
@@ -829,6 +860,7 @@ private fun GlobalPlayer(
     onSeekTo: (Long) -> Unit = {},
     onPlayPause: () -> Unit, onStop: () -> Unit,
     onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit,
+    onOpenLyrics: () -> Unit = {},
     onCycleEndAction: () -> Unit = {}
 ) {
     var isSeeking by remember { mutableStateOf(false) }
@@ -919,6 +951,18 @@ private fun GlobalPlayer(
                         fontSize = 15.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+            // Lyrics-Button — sichtbar sobald der Song Lyrics hinterlegt hat
+            if (song != null && song.lyrics.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable(onClick = onOpenLyrics),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Article, contentDescription = "Lyrics anzeigen",
+                        tint = Volt, modifier = Modifier.size(22.dp))
                 }
             }
             // EndAction-Button — nur im Gig-Set-Modus, 48dp Touch-Target

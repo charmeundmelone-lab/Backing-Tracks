@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SetEntity::class,
         SetSongCrossRef::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -175,6 +175,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // ── Teleprompter: Lyrics pro Song ─────────────────────────────────────
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE songs ADD COLUMN lyrics TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -192,7 +199,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_9_10,
                     MIGRATION_10_11,
                     MIGRATION_11_12,
-                    MIGRATION_12_13
+                    MIGRATION_12_13,
+                    MIGRATION_13_14
                 )
                 // fallbackToDestructiveMigration() entfernt — Phase 1 abgeschlossen
                 .build()

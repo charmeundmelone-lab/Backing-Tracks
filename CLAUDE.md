@@ -64,23 +64,31 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later + reorderSongs
 │   │                            (@Transaction, Cut&Paste / Batch-Write-Pattern)
 │   ├── SongInSet.kt          — @Embedded Song + positionInSet + completedInSet + spontaneousInSet + endAction
-│   ├── AppDatabase.kt        — RoomDatabase v13, Migrationen bis v13
+│   ├── AppDatabase.kt        — RoomDatabase v14, Migrationen bis v14
 │   └── TrackMode.kt          — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
 ├── ui/
-│   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer
+│   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer,
+│   │                            SongEditorSheet mit Lyrics-Textfeld, Lyrics-Button in GlobalPlayer
 │   ├── PlayerViewModel.kt    — AndroidViewModel: StateFlow, Queue, Loop, AutoStop, isGigSetMode,
-│   │                            loopHint (einmaliger Toast-Hinweis fürs LOOP-Verhalten)
+│   │                            loopHint (einmaliger Toast-Hinweis fürs LOOP-Verhalten),
+│   │                            showLyrics/openLyrics/closeLyrics (Teleprompter-Trigger)
 │   ├── GigViewModel.kt       — Gig/Set/Song CRUD, armSetIfIdle, loadSetAsQueue,
 │   │                            insertSpontaneousNext/Later (Mutex-serialisiert),
 │   │                            reorderSongsInSet/reorderSets, renameSet
-│   └── GigManagementScreen.kt — GigListView/GigRow, GigDetailView/SetCard/SetSongRow
-│                                 (Swipe-Handler), SetSongRowSortable + SetRowSortable
-│                                 (Drag-Handle-Sortiermodi), isLocked bis SetSongRow
-│                                 durchgereicht. KEIN Gig-weiter Edit-Sammel-Modus mehr
-│                                 (siehe Sprint 5.29) — Rename/Löschen/Reset laufen über
-│                                 ein "⋮"-DropdownMenu pro Set bzw. Icon pro Gig; der
-│                                 verbleibende per-Set "Bearbeiten"-Toggle steuert nur
-│                                 noch die Song-Zeilen-Controls (End-Aktion/Entfernen)
+│   ├── GigManagementScreen.kt — GigListView/GigRow, GigDetailView/SetCard/SetSongRow
+│   │                             (Swipe-Handler), SetSongRowSortable + SetRowSortable
+│   │                             (Drag-Handle-Sortiermodi), isLocked bis SetSongRow
+│   │                             durchgereicht. KEIN Gig-weiter Edit-Sammel-Modus mehr
+│   │                             (siehe Sprint 5.29) — Rename/Löschen/Reset laufen über
+│   │                             ein "⋮"-DropdownMenu pro Set bzw. Icon pro Gig; der
+│   │                             verbleibende per-Set "Bearbeiten"-Toggle steuert nur
+│   │                             noch die Song-Zeilen-Controls (End-Aktion/Entfernen).
+│   │                             "Songs hinzufügen" im "⋮"-Menü öffnet AddSongsToSetDialog
+│   │                             (Suche + Checkbox-Liste aller Archiv-Songs, die noch
+│   │                             nicht im Set sind)
+│   └── LyricsOverlay.kt      — Vollbild-Teleprompter (nur Lyrics, keine Akkorde), Hochkant
+│                                erzwungen solange sichtbar, Auto-Scroll an echte
+│                                Wiedergabeposition gekoppelt, Tap-to-Sync (siehe Gotcha 12)
 ├── ui/theme/
 │   └── Theme.kt              — LiveGigPlayerTheme (dark)
 ├── LiveGigPlayerApp.kt       — Application-Klasse, DB-Singleton
@@ -104,6 +112,7 @@ app/src/main/java/de/livegigplayer/pro/
 | playlistId | Long | Zugehöriges Set (0 = keins) |
 | audioFilePath | String | SAF-Pfad (treeUri||folderName) |
 | duration | String | Anzeigedauer (z.B. "3:42") |
+| lyrics | String | Songtext ohne Akkorde, fürs Teleprompter-Overlay (v14) |
 
 ## Build-Setup
 
@@ -121,7 +130,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v13** — nächste Migration wäre 13→14. Migrationen NIE doppelt anlegen.
+1. **Room v14** — nächste Migration wäre 14→15. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
@@ -160,13 +169,74 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
     `editSongsMode` (End-Aktion/Entfernen-Controls in `SetSongRow`). Einstieg in den
     einen setzt den anderen explizit auf `false` (kein `LaunchedEffect`, da beide
     gleichrangig sind, nicht wie früher Gig-weites `isEditing` vs. lokales `sortMode`).
+12. **Lyrics-Teleprompter — Scroll an Wiedergabeposition, NICHT an BPM** —
+    `LyricsOverlay.kt` scrollt proportional zu `positionMs / durationMs` (echte
+    Player-Position), nicht über eine BPM-Rechnung. Dadurch ist der Song immer
+    exakt zu Ende gescrollt, wenn er zu Ende gespielt ist — unabhängig davon, ob
+    die in der DB hinterlegte BPM stimmt. Zwei Garantien, beide bewusst doppelt
+    abgesichert:
+    - **Nur abwärts, nie zurück:** `targetScrollPx` wird ausschließlich über
+      `if (neuerWert > targetScrollPx) targetScrollPx = neuerWert` erhöht — sowohl
+      im Frame-Loop als auch bei Tap-to-Sync. Ein kurzzeitiger Jitter in der
+      Positionsschätzung (oder ein Rückwärts-Seek) kann den Scroll dadurch
+      NIEMALS nach oben reißen, er bleibt höchstens stehen.
+    - **Tap-to-Sync verschiebt den Anker, nicht die Zeile fix:** Tap sucht per
+      `linePositions` (gemessen via `onGloballyPositioned`, siehe unten) die
+      nächste noch nicht erreichte Zeile, setzt `anchorPositionMs`/`anchorScrollPx`
+      auf (jetzt, diese Zeile) und rechnet die Scroll-Rate für den Rest des Songs
+      neu — kompensiert damit automatisch ungleichmäßige Zeilendichte (Strophe
+      vs. Instrumental-Teil vs. Refrain).
+    - Frame-Loop (`withFrameNanos` in einer Endlosschleife) statt `animateScrollTo`
+      für den Normalbetrieb — liefert kontinuierliches 60fps-Scrollen statt Sprünge;
+      `animateScrollTo` kommt nur beim Tap-Snap zum Einsatz.
+    - `linePositions[index]` wird NICHT analytisch aus Zeilenhöhe berechnet
+      (bricht bei Zeilenumbruch auf schmalen Screens), sondern real gemessen —
+      robust unabhängig von Fontgröße/Gerätebreite.
+    - Der Screen erzwingt Hochkant nur für sich selbst (`activity.requestedOrientation`
+      in `DisposableEffect`, zurückgesetzt beim Schließen) — der Rest der App bleibt
+      unangetastet, es gibt sonst nirgends eine Orientierungssperre.
+    - Auto-Öffnen nur EINMAL pro frisch angewähltem Song (`lyricsAutoShownForSongId`
+      in `PlayerViewModel`, zurückgesetzt in `selectSong`) — sonst würde jedes
+      Pause/Play-Toggle den Screen erneut aufreißen.
 
 ## Letzter Stand
 
-**Datum:** 2026-07-17
-**CI Build:** Commit `b5732f5` — grün
+**Datum:** 2026-07-18
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.30)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** UX-Audit — alle 13 Befunde umgesetzt + Reset löscht jetzt auch Wunschsong-Markierungen
+**Commit:** Lyrics-Teleprompter (Room v13→14) — neues Feature, noch ungetestet auf echtem Gerät
+
+### Sprint 5.30 DONE (ungetestet): Lyrics-Teleprompter mit Auto-Scroll + Tap-to-Sync (Room v13→14)
+
+User-Wunsch: Reinen Songtext (keine Akkorde) im Hochkant-Vollbild anzeigen, der
+automatisch aufgeht, sobald ein Song mit hinterlegten Lyrics gestartet wird, und
+der so durchscrollt, dass am Songende der komplette Text durchgelaufen ist —
+"smooth", mit "Tap to Sync", und explizit NIE rückwärts scrollend.
+
+- **DB:** `Song.lyrics: String = ""`, Migration `MIGRATION_13_14` (`ALTER TABLE
+  songs ADD COLUMN lyrics TEXT NOT NULL DEFAULT ''`), `SongDao.updateLyrics()`.
+- **PlayerViewModel:** `showLyrics`/`openLyrics()`/`closeLyrics()`,
+  `updateLyrics()`. `togglePlayPause()` öffnet den Teleprompter automatisch beim
+  ERSTEN Play eines frisch angewählten Songs mit nicht-leeren Lyrics
+  (`lyricsAutoShownForSongId`, zurückgesetzt in `selectSong`) — spätere
+  Pause/Play-Toggles reißen den Screen nicht erneut auf.
+- **LyricsOverlay.kt (neu):** Vollbild-Overlay analog zu `MixerOverlay`. Details
+  zur Scroll-Logik (Frame-Loop statt BPM-Rechnung, Monoton-Klemmung, Tap-to-Sync-
+  Ankerverschiebung, gemessene statt berechnete Zeilenpositionen, Hochkant-Sperre
+  nur lokal) siehe Gotcha 12.
+- **MainScreen.kt:** `SongEditorSheet` hat ein neues mehrzeiliges Lyrics-Textfeld
+  (Placeholder weist explizit auf "ohne Akkorde" hin); `GlobalPlayer` zeigt einen
+  Lyrics-Button (Icons.Filled.Article), sobald der aktuelle Song Lyrics hat —
+  zum manuellen (Wieder-)Öffnen, falls der Screen geschlossen wurde.
+- **Bewusst NICHT BPM-basiert:** Auto-Scroll nutzt die echte Wiedergabeposition
+  (`positionMs`/`durationMs`) statt einer BPM-Berechnung — robust auch wenn die
+  in der DB hinterlegte BPM ungenau ist (die exakte BPM von "Bed of Roses" war
+  z.B. nicht zweifelsfrei zu ermitteln, ~80–84 je nach Half-/Full-Time-Zählung).
+- **Nicht verifiziert:** Kein Gradle-Build in dieser Session möglich (Google-
+  Maven `dl.google.com` durch die Sandbox-Netzwerk-Policy blockiert, 403 — siehe
+  `/root/.ccr/README.md`). Nur manuell gegen den bestehenden Code gegengelesen
+  (Imports, Signaturen, Aufrufstellen). **Nächste Session: zuerst CI-Build-Status
+  prüfen und auf echtem Gerät testen**, bevor an dieser Datei weitergearbeitet wird.
 
 ### Sprint 5.29 DONE: Vollständiger UX-Audit + Umsetzung aller 13 Befunde (Commit b5732f5)
 
@@ -501,6 +571,13 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
+- ⚠️ **Lyrics-Teleprompter auf echtem Gerät testen (PRIO 1):** Sprint 5.30 wurde
+  ohne Gradle-Build implementiert (Netzwerk-Policy blockiert `dl.google.com` in
+  der Sandbox). Vor allem prüfen: DB-Migration 13→14 greift sauber, Auto-Öffnen
+  beim ersten Play, Frame-Loop-Performance (60fps-`scrollTo` parallel zum
+  200ms-Positions-Poll), Tap-to-Sync-Treffergenauigkeit, Hochkant-Sperre wird
+  beim Schließen korrekt zurückgesetzt (sonst bleibt die ganze App danach
+  Hochkant-gesperrt).
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

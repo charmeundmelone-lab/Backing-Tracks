@@ -68,12 +68,19 @@ app/src/main/java/de/livegigplayer/pro/
 │   └── TrackMode.kt          — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
 ├── ui/
 │   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer
-│   ├── PlayerViewModel.kt    — AndroidViewModel: StateFlow, Queue, Loop, AutoStop, isGigSetMode
+│   ├── PlayerViewModel.kt    — AndroidViewModel: StateFlow, Queue, Loop, AutoStop, isGigSetMode,
+│   │                            loopHint (einmaliger Toast-Hinweis fürs LOOP-Verhalten)
 │   ├── GigViewModel.kt       — Gig/Set/Song CRUD, armSetIfIdle, loadSetAsQueue,
 │   │                            insertSpontaneousNext/Later (Mutex-serialisiert),
-│   │                            reorderSongsInSet (Sortier-Modus)
-│   └── GigManagementScreen.kt — GigCard, SetCard, SetSongRow (Swipe-Handler),
-│                                 SetSongRowSortable (Drag-Handle im Sortier-Modus)
+│   │                            reorderSongsInSet/reorderSets, renameSet
+│   └── GigManagementScreen.kt — GigListView/GigRow, GigDetailView/SetCard/SetSongRow
+│                                 (Swipe-Handler), SetSongRowSortable + SetRowSortable
+│                                 (Drag-Handle-Sortiermodi), isLocked bis SetSongRow
+│                                 durchgereicht. KEIN Gig-weiter Edit-Sammel-Modus mehr
+│                                 (siehe Sprint 5.29) — Rename/Löschen/Reset laufen über
+│                                 ein "⋮"-DropdownMenu pro Set bzw. Icon pro Gig; der
+│                                 verbleibende per-Set "Bearbeiten"-Toggle steuert nur
+│                                 noch die Song-Zeilen-Controls (End-Aktion/Entfernen)
 ├── ui/theme/
 │   └── Theme.kt              — LiveGigPlayerTheme (dark)
 ├── LiveGigPlayerApp.kt       — Application-Klasse, DB-Singleton
@@ -140,13 +147,134 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
    Callbacks laufen über `rememberUpdatedState` — sonst derselbe Stale-Capture-Bug
    wie in Gotcha 6. Persistiert wird atomar über `SetDao.reorderSongs`
    (gleiches Batch-Write-Pattern wie `moveSpontaneousNext/Later`).
+10. **isLocked-Durchreichung (Performance-Lock)** — `isLocked` kommt aus `MainScreen`
+    und wird bis in `SetSongRow`/`ArchivSongRow` durchgereicht (KEIN eigener Lock-State
+    pro Screen). Gate-Pattern konsequent: `enabled = !isLocked` an IconButtons,
+    `enabled = !isLocked || <bereitsAktiverModus>` beim Ein-/Ausstieg in einen Modus
+    (damit man einen bereits offenen Sortier-/Bearbeiten-Modus auch bei nachträglich
+    aktiviertem Lock noch sauber verlassen kann, statt eingesperrt zu sein). Bei neuen
+    Screens/Actions im Gig-Set-Tab IMMER prüfen, ob sie durch `isLocked` gegatet werden
+    müssen — der Tab wird live auf der Bühne benutzt (siehe Sprint 5.29, Befund 02).
+11. **Pro-Set Doppel-Toggle (Sortieren ⇄ Bearbeiten)** — `SetCard` hat zwei
+    unabhängige, aber gegenseitig exklusive Modi: `sortMode` (Drag-Handles) und
+    `editSongsMode` (End-Aktion/Entfernen-Controls in `SetSongRow`). Einstieg in den
+    einen setzt den anderen explizit auf `false` (kein `LaunchedEffect`, da beide
+    gleichrangig sind, nicht wie früher Gig-weites `isEditing` vs. lokales `sortMode`).
 
 ## Letzter Stand
 
 **Datum:** 2026-07-17
-**CI Build:** Commit `332f52c` — grün (Run #244)
+**CI Build:** Commit `b5732f5` — grün
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Sortier-Modus für Songs im Set (Drag-Handle)
+**Commit:** UX-Audit — alle 13 Befunde umgesetzt + Reset löscht jetzt auch Wunschsong-Markierungen
+
+### Sprint 5.29 DONE: Vollständiger UX-Audit + Umsetzung aller 13 Befunde (Commit b5732f5)
+
+User-Wunsch: "gesamten Code durchlesen, Analyse machen, alles finden was die App
+daran hindert intuitiv zu sein, Optionen liefern" — danach: "setz bitte alles
+perfekt um". Voller Audit über ~3.400 Zeilen (alle UI-Screens, beide ViewModels,
+Import-Flow), Report als Artifact geliefert (13 Befunde, 2 kritisch/5 mittel/6
+gering, je mit Code-Referenz + Optionen + Empfehlung), danach alle 13 direkt
+umgesetzt. Größter Umbau der App bisher (4 Dateien, ~360 Zeilen Diff).
+
+**Kritisch:**
+- **Bestätigungsdialoge für Gig-/Set-Löschung:** `GigRow` und `SetCard` hatten
+  vorher direkten `onClick → onDelete` ohne Rückfrage (Cascade-Delete über
+  Foreign Keys — ein Fehltipp zerstörte den ganzen Gig samt alter Setlisten).
+  Jetzt gleiches `AlertDialog`-Pattern wie beim Song-Löschen im Archiv, mit
+  Namen in der Bestätigungsfrage.
+- **Performance-Lock (`isLocked`) auf Gig-Set-Tab ausgeweitet:** existierte
+  vorher NUR im Archiv-Tab — der Tab, der tatsächlich live auf der Bühne
+  benutzt wird (Gig-Sets), hatte gar keinen Schutz vor Fehltipps. Jetzt
+  durchgereicht `MainScreen → GigManagementScreen → GigDetailView → SetCard
+  → SetSongRow` (siehe Gotcha 10), gatet Play/Swipe/Sortieren/Bearbeiten/
+  Löschen/Umbenennen/Reset.
+
+**Mittel:**
+- **Gig-weiter "Bearbeiten"-Sammel-Modus entfernt** (Befund: ein Tap löste
+  vier unabhängige UI-Änderungen gleichzeitig aus). `GigListView`/
+  `GigDetailView` haben kein `isEditing`/`onToggleEdit` mehr. Gig-Löschen
+  ist jetzt ein immer sichtbares Icon in `GigRow`. Set-Umbenennen/-Löschen/
+  Completed-Reset laufen über ein immer sichtbares `DropdownMenu` ("⋮") im
+  `SetCard`-Header. Übrig gebliebener per-Set `editSongsMode`-Toggle
+  (weiterhin Edit-Icon ⇄ Check) steuert NUR noch die Song-Zeilen-Controls
+  (End-Aktion-Button, Entfernen-X) — siehe Gotcha 11 für die Exklusivität
+  mit `sortMode`.
+- **Statuszeile bei aktivem Sortier-/Bearbeiten-Modus** — kleiner GigVolt-
+  Hinweistext unter dem Header ("Sets werden sortiert …" / "Songs werden
+  sortiert …" / "Song-Bearbeitung aktiv …"), weil sowohl Sortieren als auch
+  Bearbeiten optisch nur als Checkmark erkennbar waren (nicht unterscheidbar
+  auf den ersten Blick).
+- **Wisch-Hinweis-Chevrons:** dezente `ChevronLeft`/`ChevronRight` (12dp,
+  40% Alpha) an den Zeilenrändern von `ArchivSongRow` und `SetSongRow`, nur
+  sichtbar wenn die Wisch-Geste tatsächlich aktiv nutzbar ist (`interactive`-
+  Flag). Macht das komplett unsichtbare Swipe-to-Queue-Feature entdeckbar.
+- **Verstecktes Doppel-Tap-Verhalten entfernt:** `ArchivSongRow` hatte einen
+  eigenen `combinedClickable` NUR auf dem Titel-Text, der bei bereits
+  ausgewähltem Song Inline-Edit statt Play auslöste — unsichtbar, da visuell
+  nicht vom Rest der Zeile unterscheidbar. Titel-Editing läuft jetzt
+  ausschließlich über die bestehende `SongEditorSheet` (hat bereits ein
+  "Titel"-Feld). Toter Code entfernt: `PlayerViewModel._editingSongId` /
+  `editingSongId` / `startEditing()` / `stopEditing()`, `ArchivSongRow`-
+  Parameter `isEditing`/`onTitleSave`/`onEditStart`, `FocusRequester` für
+  Inline-Edit, ungenutzte Imports (`BasicTextField`, `SolidColor`,
+  `KeyboardOptions`, `KeyboardActions`, `ImeAction`).
+- **LOOP-Button-Hinweise:** `PlayerViewModel._loopHint` (einmaliger Toast,
+  wird von `MainScreen` per `LaunchedEffect(loopHint)` angezeigt und danach
+  geleert). Feuert bei Punkt-A-Setzen ("nochmal LOOP tippen für Punkt B"),
+  beim Loop-Start ("nochmal tippen zum Beenden") und im Set-Modus wenn kein
+  Loop gespeichert ist (vorher: stiller No-Op, kein Feedback).
+- **Import-Fehlermeldung erklärt jetzt Modus A/B:** `importFolder()` in
+  `PlayerViewModel` gibt bei 0 gefundenen Songs die zwei unterstützten
+  Ordner-Layouts im Text aus, statt nur "Keine Songs gefunden".
+
+**Gering:**
+- Tab-Label-`contentDescription` "Playlist" → "Sets" (Terminologie-Konsistenz
+  mit dem Rest der App).
+- Empty-State fürs leere Archiv (Icon + Text), unterscheidet "noch nie
+  importiert" vs. "Suche ohne Treffer" — vorher zeigte ein leeres Archiv ohne
+  vorherigen Import-Versuch gar nichts an.
+- `ArchivSongRow` Bearbeiten/Löschen-Icons jetzt echte `IconButton` (32dp)
+  statt nacktem `Modifier.size(18.dp).clickable{}` — größeres Touch-Target.
+- Bestätigungsdialog beim Entfernen eines Songs aus einem Set (`SetSongRow`),
+  analog zu den anderen Lösch-Bestätigungen.
+- `GenreBar` hat jetzt einen fünften Button ("+", `AddCircleOutline`) für ein
+  freies Custom-Genre (kleiner Dialog mit Textfeld, ruft dieselbe `onGenre`
+  wie die vier festen Chips).
+
+**Reset-Verhalten (separater User-Wunsch, gleicher Commit):**
+- `SetDao.resetCompletedForSet` setzt jetzt zusätzlich `isSpontaneous = 0`
+  zurück (vorher nur `isCompleted`). `positionInSet` bleibt unangetastet —
+  Songs bleiben exakt an der Stelle, an der sie gerade stehen, nur die
+  "bereits gespielt"- UND "★ Wunsch"-Markierungen verschwinden.
+
+### Sprint 5.28 DONE: Fix Completed-Reset traf immer nur das erste Set (Commit 661ed75)
+
+`GigDetailView` hatte den Reset-Button (↻) im GIG-Header, der Code dahinter
+resettete aber via `sets.firstOrNull()?.setId` IMMER nur Set 1 — bei Gigs mit
+mehreren Sets wurde beim Betrachten von Set 2/3 lautlos das falsche Set
+zurückgesetzt. Fix: Button in den Header von `SetCard` verschoben (später in
+Sprint 5.29 ins "⋮"-Menü überführt), resettet jetzt gezielt nur das Set, bei
+dem er steht.
+
+### Sprint 5.27 DONE: Set-Umbenennen + Sortier-Modus für Sets im Gig (Commit 9278dc4)
+
+Zwei User-Wünsche im selben Rutsch: Sets sollten umbenennbar sein, und die
+Reihenfolge der Sets innerhalb eines Gigs sollte änderbar sein (nicht nur
+Songs innerhalb eines Sets, siehe Sprint 5.26).
+
+- **SetDao:** `renameSet(setId, name)`, `reorderSets(gigId, orderedSetIds)`
+  (liest alle Sets eines Gigs einmal, schreibt EINMAL atomar — identisches
+  Batch-Write-Pattern wie `reorderSongs`, siehe Gotcha 8/9).
+- **GigViewModel:** `renameSet()`, `reorderSets()` — dünne Wrapper.
+- **GigManagementScreen:** `CreateNameDialog` um `initialValue`/`confirmLabel`
+  erweitert (gleicher Dialog für "Neues Set" UND "Set umbenennen", nur
+  vorausgefüllt). Sets-Sortier-Modus im `GigDetailView`-Header (`SwapVert`-
+  Toggle) verwendet exakt dasselbe Drag-Offset-Muster wie der Songs-
+  Sortier-Modus aus Sprint 5.26, nur eine Ebene höher (`SetRowSortable`
+  statt `SetSongRowSortable`, kompakte 64dp-Zeilen statt volle `SetCard`s
+  während des Sortierens).
+- Vom User live bestätigt ("Das funktioniert schon mal super").
 
 ### Sprint 5.26 DONE: Sortier-Modus für Songs im Set (Commit 332f52c)
 
@@ -380,8 +508,8 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   `onSongCompleted`-Callback werden jetzt immer gesetzt (nicht erst nach dem
   Early-Return). Callback liest `_activeSetId.value` zur Laufzeit statt
   eingefrorenem `setId`. Gleiches Muster konsistent in `loadSetAsQueue`.
-- **Follow-Me Gear:** Beim manuellen Antippen eines Songs im Set-Tab sollen Spontan-Songs
-  hinter den angetippten Song umsortiert werden (`handleManualSelectionShift` in SetDao)
+- ❌ **Follow-Me Gear (VERWORFEN):** User braucht das nicht mehr — bewusst nicht
+  bauen, nicht wieder vorschlagen.
 - ✅ **endAction Live-Button (ERLEDIGT):** In der PlayerInfoBar rechts (GigSetMode),
   48dp Touch-Target, Farb-kodiert, tippar zum Durchschalten (Commit 1fa2af4)
 - ✅ **endAction Reaktivität (ERLEDIGT):** Button in PlayerInfoBar + Edit-Mode setzt
@@ -391,12 +519,21 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 - ✅ **Songs im Set umsortieren (ERLEDIGT):** Sortier-Modus mit Drag-Handle,
   vom User live an der APK bestätigt ("funktioniert schon mal super",
   Commit 332f52c). Nicht mehr offen.
-- **Set-Umbenennen:** Sets können noch nicht umbenannt werden
+- ✅ **Set-Umbenennen (ERLEDIGT):** Über "⋮"-Menü im SetCard-Header
+  (Commit 9278dc4, UI später in Sprint 5.29 ins Dropdown überführt).
+- ✅ **Sets umsortieren (ERLEDIGT):** Gleicher Drag-Handle-Mechanismus wie
+  bei Songs, eine Ebene höher (Commit 9278dc4).
+- ✅ **UX-Audit + alle 13 Befunde (ERLEDIGT):** Vollständiger Review aller
+  UI-Screens, Report als Artifact, danach komplett umgesetzt (Commit b5732f5,
+  siehe Sprint 5.29). Details siehe dort — inkl. Lösch-Bestätigungen,
+  Performance-Lock im Gig-Set-Tab, Wisch-Hinweise, LOOP-Toasts u.a.
 - **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
 - **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`
   und Reste der alten Shift-Strategie prüfen, ob noch gebraucht (Batch-Write hat sie
   größtenteils ersetzt). Nicht löschen ohne Nutzungs-Check (z.B. addSongsToSet,
-  deleteSongFromSet rufen sanitize noch auf).
+  deleteSongFromSet rufen sanitize noch auf). Kleiner Teilerfolg in Sprint 5.29:
+  `PlayerViewModel.editingSongId`/`startEditing`/`stopEditing` (unbenutzter
+  Inline-Edit-Mechanismus) bereits entfernt.
 
 ### Loop-Editor — Archiviert
 

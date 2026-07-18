@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,6 +39,8 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -73,6 +76,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
+import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
 import kotlin.math.roundToInt
 
@@ -477,6 +481,7 @@ private fun SetCard(
     var dragOffset       by remember(set.setId) { mutableStateOf(0f) }
     var menuExpanded     by remember(set.setId) { mutableStateOf(false) }
     var showDeleteDialog by remember(set.setId) { mutableStateOf(false) }
+    var showAddSongs     by remember(set.setId) { mutableStateOf(false) }
 
     LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
     LaunchedEffect(set.setId) { gigVm.armSetIfIdle(set.setId, playerVm) }
@@ -576,6 +581,10 @@ private fun SetCard(
                     onDismissRequest = { menuExpanded = false },
                     containerColor = GigBgCard
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("Songs hinzufügen", color = GigWhite) },
+                        onClick = { menuExpanded = false; showAddSongs = true }
+                    )
                     DropdownMenuItem(
                         text = { Text("Umbenennen", color = GigWhite) },
                         onClick = { menuExpanded = false; onRenameSet() }
@@ -681,6 +690,16 @@ private fun SetCard(
         }
 
         if (songs.isNotEmpty()) Spacer(modifier = Modifier.height(6.dp))
+    }
+
+    if (showAddSongs) {
+        val allSongs by playerVm.songs.collectAsState()
+        AddSongsToSetDialog(
+            allSongs     = allSongs,
+            alreadyInSet = songs.map { it.song.id }.toSet(),
+            onConfirm    = { ids -> gigVm.addSongsToSet(set.setId, ids, playerVm); showAddSongs = false },
+            onDismiss    = { showAddSongs = false }
+        )
     }
 }
 
@@ -893,6 +912,94 @@ private fun SetSongRow(
 }
 
 // ── Dialog ────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun AddSongsToSetDialog(
+    allSongs: List<Song>,
+    alreadyInSet: Set<Long>,
+    onConfirm: (List<Long>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var selectedIds by remember { mutableStateOf(emptySet<Long>()) }
+
+    val available = remember(allSongs, alreadyInSet) {
+        allSongs.filter { it.id !in alreadyInSet }
+    }
+    val filtered = remember(available, query) {
+        if (query.isBlank()) available
+        else available.filter {
+            it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = GigBgCard,
+        title = { Text("Songs zum Set hinzufügen", color = GigWhite, fontWeight = FontWeight.Bold) },
+        text  = {
+            Column {
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    placeholder = { Text("Suchen …", color = GigGray, fontSize = 13.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GigVolt, unfocusedBorderColor = GigGray,
+                        focusedTextColor = GigWhite, unfocusedTextColor = GigWhite,
+                        cursorColor = GigVolt
+                    )
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                when {
+                    available.isEmpty() -> Text(
+                        "Alle Archiv-Songs sind bereits in diesem Set.",
+                        color = GigGray, fontSize = 13.sp, modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                    filtered.isEmpty() -> Text(
+                        "Keine Treffer.",
+                        color = GigGray, fontSize = 13.sp, modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                    else -> LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        items(filtered, key = { it.id }) { song ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedIds = if (song.id in selectedIds)
+                                            selectedIds - song.id else selectedIds + song.id
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = song.id in selectedIds,
+                                    onCheckedChange = {
+                                        selectedIds = if (it) selectedIds + song.id else selectedIds - song.id
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = GigVolt, uncheckedColor = GigGray)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(song.title, color = GigWhite, fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(song.artist, color = GigGray, fontSize = 12.sp,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = selectedIds.isNotEmpty(), onClick = { onConfirm(selectedIds.toList()) }) {
+                Text("Hinzufügen (${selectedIds.size})", color = GigVolt, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen", color = GigGray) }
+        }
+    )
+}
 
 @Composable
 private fun CreateNameDialog(

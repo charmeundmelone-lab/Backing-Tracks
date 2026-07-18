@@ -527,7 +527,10 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   UI-Screens, Report als Artifact, danach komplett umgesetzt (Commit b5732f5,
   siehe Sprint 5.29). Details siehe dort — inkl. Lösch-Bestätigungen,
   Performance-Lock im Gig-Set-Tab, Wisch-Hinweise, LOOP-Toasts u.a.
-- **Song-zu-Set direkt im UI:** Aktuell nur per "Zum Set hinzufügen" Dialog aus Archiv
+- ✅ **Song-zu-Set direkt im UI (ERLEDIGT):** Neuer Menüpunkt "Songs hinzufügen"
+  im "⋮"-Menü der `SetCard` öffnet `AddSongsToSetDialog` (Suchfeld + Checkbox-Liste
+  aller Archiv-Songs, die noch nicht im Set sind), ruft `gigVm.addSongsToSet()`.
+  Bisheriger Weg über den Archiv-Batch-Dialog bleibt zusätzlich bestehen.
 - **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`
   und Reste der alten Shift-Strategie prüfen, ob noch gebraucht (Batch-Write hat sie
   größtenteils ersetzt). Nicht löschen ohne Nutzungs-Check (z.B. addSongsToSet,

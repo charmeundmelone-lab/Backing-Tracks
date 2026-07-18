@@ -25,8 +25,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -34,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,6 +61,7 @@ private val LyricsBg    = Color(0xFF0A0A0A)
 private val LyricsVolt  = Color(0xFFE8FF00)
 private val LyricsGray  = Color(0xFF777777)
 private val LyricsWhite = Color(0xFFFFFFFF)
+private val LyricsRed   = Color(0xFFDC2626)
 
 // Struktur-Label wie "[Chorus]" oder "[Verse 1]" — keine Akkorde, nur Songaufbau.
 // Wird als eigene, farblich abgesetzte Überschrift gerendert statt als Lyric-Zeile.
@@ -70,15 +73,36 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+// Kalibrierungspunkte-Serialisierung: "lineIndex:positionMs" kommagetrennt, nach
+// positionMs sortiert. Bewusst kein JSON — gleiche Diy-Delimiter-Idiomatik wie
+// audioFilePath ("{treeUri}||{folderName}", siehe Gotcha 4).
+private fun serializeSyncPoints(points: List<Pair<Int, Long>>): String =
+    points.sortedBy { it.second }.joinToString(",") { "${it.first}:${it.second}" }
+
+private fun parseSyncPoints(raw: String): List<Pair<Int, Long>> =
+    if (raw.isBlank()) emptyList()
+    else raw.split(",").mapNotNull { entry ->
+        val parts = entry.split(":")
+        val idx = parts.getOrNull(0)?.toIntOrNull()
+        val ms  = parts.getOrNull(1)?.toLongOrNull()
+        if (idx != null && ms != null) idx to ms else null
+    }.sortedBy { it.second }
+
 /**
  * Vollbild-Teleprompter: reine Lyrics (keine Akkorde), Hochkant, Auto-Scroll
- * gekoppelt an die echte Wiedergabeposition — läuft dadurch exakt am Songende
- * durch, unabhängig von der genau eingetragenen BPM. Tap irgendwo im Textbereich
- * synct auf die nächste noch nicht erreichte Zeile nach. Scroll bewegt sich
- * ausschließlich vorwärts/abwärts (siehe targetScrollPx-Klemmung in LyricsContent).
- * `song.lyricsStartMs` ist ein einmalig gesetzter Start-Anker (Flag-Button im
- * Header) für Songs mit langer Intro, die live abweichend von der Studio-BPM
- * gespielt wird — bis dahin scrollt der Text gar nicht los.
+ * gekoppelt an die echte Wiedergabeposition. Zwei Sync-Mechanismen:
+ *
+ * 1. **Kalibrierung** (Record-Button im Header): einmal pro Song durchtippen —
+ *    ein Tap pro Abschnittswechsel (Intro, Vers, Chorus, …). Jeder Tap speichert
+ *    (Zeilen-Index, Wiedergabeposition) als Kalibrierungspunkt. Danach läuft der
+ *    Scroll bei jedem künftigen Play abschnittsweise mit konstanter, aus den
+ *    gespeicherten Punkten interpolierter Geschwindigkeit — kein Live-Tippen
+ *    mehr nötig. Siehe Gotcha 12.
+ * 2. **Live-Tap-to-Sync** (Tap irgendwo im Textbereich, außerhalb Kalibrierung):
+ *    einmalige, NICHT gespeicherte Korrektur für die laufende Wiedergabe.
+ *
+ * Scroll bewegt sich in beiden Fällen ausschließlich vorwärts/abwärts (siehe
+ * targetScrollPx-Klemmung in LyricsContent) — niemals zurück.
  */
 @Composable
 fun LyricsOverlay(
@@ -88,7 +112,7 @@ fun LyricsOverlay(
     durationMs: Long,
     isPlaying: Boolean,
     onClose: () -> Unit,
-    onSetLyricsStart: (Long) -> Unit = {}
+    onSetLyricsSyncPoints: (Long, String) -> Unit = { _, _ -> }
 ) {
     val activity = LocalContext.current.findActivity()
     DisposableEffect(visible) {
@@ -102,12 +126,12 @@ fun LyricsOverlay(
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         if (song != null) {
             LyricsContent(
-                song             = song,
-                positionMs       = positionMs,
-                durationMs       = durationMs,
-                isPlaying        = isPlaying,
-                onClose          = onClose,
-                onSetLyricsStart = onSetLyricsStart
+                song                  = song,
+                positionMs            = positionMs,
+                durationMs            = durationMs,
+                isPlaying             = isPlaying,
+                onClose               = onClose,
+                onSetLyricsSyncPoints = onSetLyricsSyncPoints
             )
         }
     }
@@ -120,21 +144,34 @@ private fun LyricsContent(
     durationMs: Long,
     isPlaying: Boolean,
     onClose: () -> Unit,
-    onSetLyricsStart: (Long) -> Unit
+    onSetLyricsSyncPoints: (Long, String) -> Unit
 ) {
     val context = LocalContext.current
     val lines   = remember(song.id, song.lyrics) { song.lyrics.lines() }
+    // Gespeicherte Kalibrierungspunkte dieses Songs, sortiert nach Position.
+    val breakpoints = remember(song.id, song.lyricsSyncPoints) { parseSyncPoints(song.lyricsSyncPoints) }
 
     val scrollState   = rememberScrollState()
     val scope         = rememberCoroutineScope()
     // index -> gemessene Y-Position (px) innerhalb der scrollbaren Column
     val linePositions = remember(song.id) { mutableMapOf<Int, Float>() }
 
-    // Sync-Anker (Zeit, Scroll-Px), ab dem die aktuelle Scroll-Rate berechnet wird.
-    // Startet am gespeicherten Start-Anker (song.lyricsStartMs, Default 0) — bis dahin
-    // bleibt der Text stehen, z.B. während einer langen Intro. Wird bei jedem
-    // Tap-to-Sync und beim Setzen eines neuen Start-Ankers neu gesetzt.
-    var anchorPositionMs by remember(song.id) { mutableStateOf(song.lyricsStartMs) }
+    // Kalibrierungs-Modus: Record-Button an → jeder Tap wird zusätzlich zum
+    // Live-Sync in calibrationPoints aufgezeichnet und beim Beenden persistiert.
+    var calibrating by remember(song.id) { mutableStateOf(false) }
+    val calibrationPoints = remember(song.id) { mutableStateListOf<Pair<Int, Long>>() }
+
+    fun persistCalibration() {
+        if (calibrationPoints.isNotEmpty()) {
+            onSetLyricsSyncPoints(song.id, serializeSyncPoints(calibrationPoints))
+        }
+    }
+
+    // Segment-Anker (Zeit, Scroll-Px), ab dem die aktuelle Scroll-Rate berechnet
+    // wird. Schaltet automatisch durch die Kalibrierungspunkte weiter, sobald die
+    // Wiedergabe sie erreicht (siehe LaunchedEffect unten) — ohne Kalibrierung
+    // bleibt es bei (0, 0), also reine Positions-Proportion wie zuvor.
+    var anchorPositionMs by remember(song.id) { mutableStateOf(0L) }
     var anchorScrollPx   by remember(song.id) { mutableStateOf(0f) }
     // Zuletzt gesetztes Scroll-Ziel — wird NIE verringert (Anforderung: nur abwärts, nie zurück).
     var targetScrollPx   by remember(song.id) { mutableStateOf(0f) }
@@ -142,17 +179,35 @@ private fun LyricsContent(
     val latestPositionMs by rememberUpdatedState(positionMs)
     val latestDurationMs by rememberUpdatedState(durationMs)
 
-    // Kontinuierlicher Frame-für-Frame-Scroll, proportional zur echten Wiedergabeposition.
-    // Dadurch ist der Song exakt zu Ende gescrollt, wenn er zu Ende gespielt ist —
-    // unabhängig davon, ob die hinterlegte BPM exakt stimmt.
-    LaunchedEffect(song.id) {
+    // Kontinuierlicher Frame-für-Frame-Scroll. Rate wird pro Segment (zwischen
+    // zwei aufeinanderfolgenden Kalibrierungspunkten, bzw. Songanfang/-ende als
+    // Rand) neu berechnet — dadurch abschnittsweise konstante Geschwindigkeit
+    // statt einer einzigen globalen Rate für den ganzen Song.
+    LaunchedEffect(song.id, song.lyricsSyncPoints) {
+        var nextIdx = 0
         while (isActive) {
             withFrameNanos { }
+            val pos = latestPositionMs
             val dur = latestDurationMs
             val max = scrollState.maxValue
+
+            // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
+            while (nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
+                val (lineIdx, ms) = breakpoints[nextIdx]
+                linePositions[lineIdx]?.let { px ->
+                    anchorPositionMs = ms
+                    anchorScrollPx   = px
+                }
+                nextIdx++
+            }
+
             if (dur > anchorPositionMs && max > 0) {
-                val rate    = (max - anchorScrollPx) / (dur - anchorPositionMs).toFloat()
-                val raw     = anchorScrollPx + rate * (latestPositionMs - anchorPositionMs).toFloat()
+                val nextBreak = breakpoints.getOrNull(nextIdx)
+                val segEndMs  = nextBreak?.second ?: dur
+                val segEndPx  = nextBreak?.let { linePositions[it.first] } ?: max.toFloat()
+                val rate      = if (segEndMs > anchorPositionMs)
+                    (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat() else 0f
+                val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
                 val clamped = raw.coerceIn(0f, max.toFloat())
                 if (clamped > targetScrollPx) targetScrollPx = clamped
             }
@@ -162,27 +217,19 @@ private fun LyricsContent(
         }
     }
 
-    fun tapToSync() {
-        val nextLinePx = linePositions.entries
+    // Ein Handler für beide Tap-Arten: sucht die nächste noch nicht erreichte
+    // Zeile (Header oder Lyric, macht keinen Unterschied), synct live darauf —
+    // und zeichnet den Punkt zusätzlich auf, wenn gerade kalibriert wird.
+    fun handleTap() {
+        val entry = linePositions.entries
             .filter { it.value > targetScrollPx + 4f }
-            .minByOrNull { it.value }
-            ?.value ?: return
+            .minByOrNull { it.value } ?: return
+        val (lineIdx, linePx) = entry.key to entry.value
         anchorPositionMs = latestPositionMs
-        anchorScrollPx   = nextLinePx
-        if (nextLinePx > targetScrollPx) targetScrollPx = nextLinePx
+        anchorScrollPx   = linePx
+        if (linePx > targetScrollPx) targetScrollPx = linePx
         scope.launch { scrollState.animateScrollTo(targetScrollPx.roundToInt()) }
-    }
-
-    // Einmalig gesetzter Start-Anker: "Gesang beginnt genau jetzt" — kompensiert
-    // Intros, die live länger/kürzer laufen als es die BPM-Rechnung annehmen würde.
-    // Wird persistiert, damit es bei künftigen Plays automatisch stimmt.
-    fun setLyricsStart() {
-        anchorPositionMs = latestPositionMs
-        anchorScrollPx   = 0f
-        targetScrollPx   = 0f
-        scope.launch { scrollState.scrollTo(0) }
-        onSetLyricsStart(latestPositionMs)
-        Toast.makeText(context, "Start-Anker gesetzt — läuft ab jetzt automatisch von hier los", Toast.LENGTH_SHORT).show()
+        if (calibrating) calibrationPoints.add(lineIdx to latestPositionMs)
     }
 
     Box(modifier = Modifier.fillMaxSize().background(LyricsBg)) {
@@ -203,16 +250,42 @@ private fun LyricsContent(
                         Text(" pausiert", color = LyricsGray, fontSize = 11.sp)
                     }
                 }
-                IconButton(onClick = { setLyricsStart() }) {
-                    Icon(Icons.Filled.Flag, contentDescription = "Start-Anker hier setzen (Intro überspringen)",
-                        tint = LyricsGray, modifier = Modifier.size(20.dp))
+                IconButton(onClick = {
+                    if (calibrating) {
+                        calibrating = false
+                        persistCalibration()
+                        Toast.makeText(context, "${calibrationPoints.size} Kalibrierungspunkte gespeichert", Toast.LENGTH_SHORT).show()
+                    } else {
+                        calibrating = true
+                        calibrationPoints.clear()
+                        Toast.makeText(context, "Kalibrierung läuft — bei jedem Abschnittswechsel tippen", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Icon(
+                        if (calibrating) Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
+                        contentDescription = if (calibrating) "Kalibrierung beenden & speichern" else "Kalibrierung starten",
+                        tint = if (calibrating) LyricsRed else LyricsGray,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
-                IconButton(onClick = onClose) {
+                IconButton(onClick = {
+                    if (calibrating) { calibrating = false; persistCalibration() }
+                    onClose()
+                }) {
                     Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = LyricsGray)
                 }
             }
 
-            // Lyrics-Bereich — Tap synct auf die nächste noch nicht erreichte Zeile.
+            if (calibrating) {
+                Text(
+                    "● Kalibrierung läuft — ${calibrationPoints.size} Punkte — bei jedem Abschnittswechsel tippen",
+                    color = LyricsRed, fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                )
+            }
+
+            // Lyrics-Bereich — Tap synct auf die nächste noch nicht erreichte Zeile
+            // (live, oder als Kalibrierungspunkt gespeichert, siehe handleTap()).
             // Manuelles Drag-Scrollen ist bewusst deaktiviert (enabled = false), sonst
             // könnte man aus Versehen zurückscrollen — das darf laut Anforderung nie passieren.
             Column(
@@ -220,7 +293,7 @@ private fun LyricsContent(
                     .fillMaxSize()
                     .verticalScroll(scrollState, enabled = false)
                     .pointerInput(Unit) {
-                        detectTapGestures(onTap = { tapToSync() })
+                        detectTapGestures(onTap = { handleTap() })
                     }
                     .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {

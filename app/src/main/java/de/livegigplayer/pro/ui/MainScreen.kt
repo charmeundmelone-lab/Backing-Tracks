@@ -257,7 +257,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             durationMs       = durationMs,
             isPlaying        = isPlaying,
             onClose          = { vm.closeLyrics() },
-            onSetLyricsStart = { ms -> currentSong?.let { vm.updateLyricsStartMs(it, ms) } }
+            onSetLyricsSyncPoints = { _, points -> currentSong?.let { vm.updateLyricsSyncPoints(it, points) } }
         )
 
         // Scan overlay

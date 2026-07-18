@@ -28,5 +28,10 @@ data class Song(
     val loopStartMs: Long = 0L,
     val loopEndMs: Long = 0L,
     val lyrics: String = "",
-    val lyricsStartMs: Long = 0L
+    // Superseded durch lyricsSyncPoints (v16) — Feld bleibt nur für Schema-Kompatibilität
+    // erhalten (Room verlangt exakte Spalten-Übereinstimmung), wird nicht mehr geschrieben.
+    val lyricsStartMs: Long = 0L,
+    // Kalibrierungspunkte aus dem Teleprompter: "lineIndex:positionMs" kommagetrennt,
+    // sortiert nach positionMs. Siehe LyricsOverlay.parseSyncPoints/serializeSyncPoints.
+    val lyricsSyncPoints: String = ""
 )

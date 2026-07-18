@@ -88,9 +88,11 @@ app/src/main/java/de/livegigplayer/pro/
 │   │                             nicht im Set sind)
 │   └── LyricsOverlay.kt      — Vollbild-Teleprompter (nur Lyrics, keine Akkorde), Hochkant
 │                                erzwungen solange sichtbar, Auto-Scroll an echte
-│                                Wiedergabeposition gekoppelt, Tap-to-Sync, Start-Anker
-│                                (Flag-Button, lyricsStartMs), Struktur-Labels "[Chorus]"
-│                                etc. als eigene Überschrift gerendert (siehe Gotcha 12)
+│                                Wiedergabeposition gekoppelt, abschnittsweise konstante
+│                                Geschwindigkeit über Mehrpunkt-Kalibrierung (Record-Button,
+│                                lyricsSyncPoints), Live-Tap-to-Sync als Fallback,
+│                                Struktur-Labels "[Chorus]" etc. als eigene Überschrift
+│                                gerendert (siehe Gotcha 12)
 ├── ui/theme/
 │   └── Theme.kt              — LiveGigPlayerTheme (dark)
 ├── LiveGigPlayerApp.kt       — Application-Klasse, DB-Singleton
@@ -115,7 +117,8 @@ app/src/main/java/de/livegigplayer/pro/
 | audioFilePath | String | SAF-Pfad (treeUri||folderName) |
 | duration | String | Anzeigedauer (z.B. "3:42") |
 | lyrics | String | Songtext ohne Akkorde, mit optionalen Struktur-Labels wie `[Chorus]` (v14) |
-| lyricsStartMs | Long | Einmalig gesetzter Teleprompter-Start-Anker, z.B. nach langer Intro (v15) |
+| lyricsStartMs | Long | Superseded durch lyricsSyncPoints (v16) — nur Schema-Kompatibilität, unbenutzt |
+| lyricsSyncPoints | String | Teleprompter-Kalibrierungspunkte "lineIdx:ms,…", ein Tap pro Abschnitt (v16) |
 
 ## Build-Setup
 
@@ -133,7 +136,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v15** — nächste Migration wäre 15→16. Migrationen NIE doppelt anlegen.
+1. **Room v16** — nächste Migration wäre 16→17. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
@@ -201,15 +204,33 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
     - Auto-Öffnen nur EINMAL pro frisch angewähltem Song (`lyricsAutoShownForSongId`
       in `PlayerViewModel`, zurückgesetzt in `selectSong`) — sonst würde jedes
       Pause/Play-Toggle den Screen erneut aufreißen.
-    - **Start-Anker (`song.lyricsStartMs`, Flag-Button im Header):** löst das
-      Problem, dass eine live gespielte Version oft eine andere (oft längere)
-      Intro hat als die BPM-Rechnung annimmt — die reine Positions-Proportion
-      würde sonst schon während der Intro lostippen. Flag-Button setzt
-      `anchorPositionMs = aktuelle Position`, `anchorScrollPx = 0` und
-      persistiert das einmalig pro Song (`SongDao.updateLyricsStartMs`) — ab
-      dann läuft's bei jedem künftigen Play automatisch richtig los, ohne
-      dass man live etwas tippen muss. Tap-to-Sync bleibt zusätzlich als
-      Korrektur-Fallback bestehen, falls die Version doch mal abweicht.
+    - **Mehrpunkt-Kalibrierung (`song.lyricsSyncPoints`, Record-Button im
+      Header) — löst den einmaligen Start-Anker aus Sprint 5.31 ab:** eine
+      live gespielte Version hat oft nicht nur eine andere Intro-Länge,
+      sondern generell eine andere Zeilendichte pro Abschnitt als die
+      BPM-Rechnung annimmt (Strophe/Chorus/Bridge unterschiedlich lang
+      relativ zur Studio-Version). Eine einzelne globale Rate reicht dafür
+      nicht. Stattdessen: Record-Button startet eine Aufnahme-Session, User
+      tippt einmal pro Abschnittswechsel durch den kompletten Song — jeder
+      Tap speichert `(Zeilen-Index, aktuelle Position)` in
+      `calibrationPoints`. Beim Beenden wird die sortierte Liste als
+      `"lineIdx:ms,lineIdx:ms,…"` persistiert (`SongDao.updateLyricsSyncPoints`).
+      Danach läuft der Scroll bei jedem künftigen Play automatisch
+      abschnittsweise mit der aus den gespeicherten Punkten interpolierten
+      Rate — kein Live-Tippen mehr nötig. Ohne Kalibrierungspunkte (leerer
+      String) verhält sich alles exakt wie die ursprüngliche reine
+      Positions-Proportion (Fallback bleibt erhalten, kein Sonderfall nötig).
+      **Umsetzung im Frame-Loop:** `anchorPositionMs`/`anchorScrollPx`
+      schalten pro Frame automatisch auf den nächsten bereits erreichten
+      Kalibrierungspunkt weiter (`while`-Schleife über den sortierten
+      Breakpoints, verglichen mit der aktuellen Position) — die Rate wird
+      dann nur für das AKTUELLE Segment (bis zum nächsten Punkt bzw.
+      Songende) berechnet, nicht mehr global für den ganzen Song. Live-
+      Tap-to-Sync (außerhalb der Kalibrierung) nutzt denselben Anker
+      (`handleTap()`), überschreibt ihn aber nur ephemer für die laufende
+      Wiedergabe, ohne etwas zu persistieren — komponiert automatisch
+      korrekt mit der Kalibrierungs-Logik durch dieselbe
+      `targetScrollPx`-Monoton-Klemmung (siehe oben), ohne Sonderfall-Code.
     - **Struktur-Labels ohne Akkorde:** Zeilen im Format `[Chorus]`/`[Verse 1]`
       im Lyrics-Text werden per `sectionTagRegex` erkannt und als eigene,
       Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
@@ -219,11 +240,50 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-18
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.30/5.31)
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.32)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Start-Anker (Intro-Skip) + Struktur-Labels im Teleprompter (Room v14→15) — noch ungetestet auf echtem Gerät
+**Commit:** Mehrpunkt-Kalibrierung ersetzt Start-Anker im Teleprompter (Room v15→16) — noch ungetestet auf echtem Gerät
 
-### Sprint 5.31 DONE (ungetestet): Teleprompter — Start-Anker gegen Intro-Drift + Struktur-Labels (Room v14→15)
+### Sprint 5.32 DONE (ungetestet): Teleprompter — Mehrpunkt-Kalibrierung statt Start-Anker (Room v15→16)
+
+User-Wunsch nach Sprint 5.31 (Push, Commit ed4bc76, CI-Status noch nicht gegengecheckt):
+der einmalige Start-Anker reicht nicht — eine live gespielte Version hat nicht nur
+eine andere Intro-Länge, sondern generell abweichende Zeilendichte pro Abschnitt.
+Gewünschter Ablauf: einmal komplett durch den Song tippen (ein Tap pro
+Abschnittswechsel: Intro → Vers → Chorus → …), das wird gespeichert, und ab dann
+läuft der Song in exakt dieser abschnittsweise konstanten Geschwindigkeit durch.
+Explizit wiederholt: NIEMALS rückwärts springen (Erfahrung aus anderen Apps),
+konstante Vorlaufgeschwindigkeit, smooth.
+
+- **DB:** `Song.lyricsStartMs` bleibt nur für Schema-Kompatibilität erhalten
+  (unbenutzt, nicht mehr beschrieben — kein DROP COLUMN, Konvention dieses
+  Projekts ist ADD-only, siehe bisherige Migrationshistorie).
+  Neu: `Song.lyricsSyncPoints: String = ""`, Migration `MIGRATION_15_16`
+  (`ALTER TABLE songs ADD COLUMN lyricsSyncPoints TEXT NOT NULL DEFAULT ''`),
+  `SongDao.updateLyricsSyncPoints()`, `PlayerViewModel.updateLyricsSyncPoints()`.
+  `SongDao.updateLyricsStartMs()` (Sprint 5.31) wieder entfernt — war nur für
+  eine Session im Einsatz, keine anderen Aufrufer.
+- **LyricsOverlay — Kalibrierung statt Start-Anker:** Flag-Button ersetzt durch
+  Record/Stop-Toggle (`FiberManualRecord`/`Stop`, rot während Aufnahme, plus
+  Statuszeile mit Live-Zähler). Während aktiv zeichnet jeder Tap
+  `(Zeilen-Index, Position)` auf; "Fertig" persistiert die sortierte Liste.
+  Kompletter Umbau des Frame-Loops: `anchorPositionMs`/`anchorScrollPx`
+  schalten pro Frame automatisch durch bereits erreichte Kalibrierungspunkte
+  weiter, Rate wird nur noch pro aktuellem Segment berechnet (nicht mehr
+  global für den ganzen Song) — siehe Gotcha 12 für Details. Live-Tap-to-Sync
+  (außerhalb Kalibrierung) und die Monoton-Klemmung (nie rückwärts) bleiben
+  unverändert bestehen und komponieren automatisch korrekt mit der neuen
+  Segment-Logik, ohne Sonderfall-Code.
+- **Aktualisierte Lyrics-Datei nicht nötig** — Struktur-Labels aus Sprint 5.31
+  bleiben unverändert, dienen jetzt zusätzlich als natürliche Tap-Ziele beim
+  Kalibrieren (User tippt direkt auf "[Chorus]" etc.).
+- **Nicht verifiziert:** Wie 5.30/5.31 kein Gradle-Build in dieser Session
+  möglich — nur manuell gegengelesen. **Nächste Session: CI-Status prüfen,
+  dann Kalibrierung an "Bed Of Roses" live durchtesten** (einmal durchtippen,
+  App schließen/neu öffnen, prüfen ob die Geschwindigkeit ohne erneutes
+  Tippen stimmt).
+
+### Sprint 5.31 DONE: Teleprompter — Start-Anker gegen Intro-Drift + Struktur-Labels (Room v14→15) — Commit ed4bc76, superseded durch Sprint 5.32
 
 User-Feedback nach erstem Live-Test von Sprint 5.30: Lyrics laufen korrekt von oben nach
 unten (funktioniert!), aber zwei Probleme: (1) Songstruktur (Vers/Chorus/Bridge) ist
@@ -617,14 +677,18 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 ### Offene TODOs (nächste Session)
 
 - ✅ **Lyrics-Teleprompter Grundfunktion (ERLEDIGT):** Sprint 5.30 vom User live
-  getestet — Auto-Scroll von oben nach unten funktioniert. Zwei Nachbesserungen
-  daraus wurden in Sprint 5.31 umgesetzt (Start-Anker + Struktur-Labels).
-- ⚠️ **Sprint 5.31 auf echtem Gerät testen (PRIO 1):** Wie 5.30 ohne Gradle-Build
+  getestet — Auto-Scroll von oben nach unten funktioniert.
+- ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als
+  eigene Volt-Überschrift gerendert. Nicht mehr offen.
+- ⚠️ **Sprint 5.32 (Mehrpunkt-Kalibrierung) auf echtem Gerät testen (PRIO 1):**
+  Ersetzt den Start-Anker aus 5.31 komplett. Wie 5.30/5.31 ohne Gradle-Build
   implementiert (Netzwerk-Policy blockiert `dl.google.com` in der Sandbox). Vor
-  allem prüfen: DB-Migration 14→15 greift sauber, Flag-Button setzt den Start-
-  Anker korrekt und der Scroll bleibt bis dahin wirklich bei 0 stehen, Struktur-
-  Labels rendern sichtbar abgesetzt (Volt, nicht wie normale Lyric-Zeilen),
-  Tap-to-Sync funktioniert weiterhin nach dem Setzen eines Start-Ankers.
+  allem prüfen: DB-Migration 15→16 greift sauber, Record-Button zeichnet Taps
+  korrekt auf (Zähler in der Statuszeile stimmt), "Fertig" persistiert die
+  Punkte, Song neu öffnen/starten läuft ohne erneutes Tippen in der beim
+  Kalibrieren gesetzten Geschwindigkeit ab, niemals Rückwärtssprung (kritisch
+  laut User — Erfahrung aus anderen Apps), Live-Tap-to-Sync funktioniert
+  weiterhin auch nach abgeschlossener Kalibrierung.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

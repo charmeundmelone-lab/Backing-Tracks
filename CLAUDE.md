@@ -175,29 +175,55 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
     `editSongsMode` (End-Aktion/Entfernen-Controls in `SetSongRow`). Einstieg in den
     einen setzt den anderen explizit auf `false` (kein `LaunchedEffect`, da beide
     gleichrangig sind, nicht wie früher Gig-weites `isEditing` vs. lokales `sortMode`).
-12. **Lyrics-Teleprompter — Scroll an Wiedergabeposition, NICHT an BPM** —
-    `LyricsOverlay.kt` scrollt proportional zu `positionMs / durationMs` (echte
-    Player-Position), nicht über eine BPM-Rechnung. Dadurch ist der Song immer
-    exakt zu Ende gescrollt, wenn er zu Ende gespielt ist — unabhängig davon, ob
-    die in der DB hinterlegte BPM stimmt. Zwei Garantien, beide bewusst doppelt
-    abgesichert:
-    - **Nur abwärts, nie zurück:** `targetScrollPx` wird ausschließlich über
-      `if (neuerWert > targetScrollPx) targetScrollPx = neuerWert` erhöht — sowohl
-      im Frame-Loop als auch bei Tap-to-Sync. Ein kurzzeitiger Jitter in der
-      Positionsschätzung (oder ein Rückwärts-Seek) kann den Scroll dadurch
-      NIEMALS nach oben reißen, er bleibt höchstens stehen.
+12. **Lyrics-Teleprompter — Scroll an Wiedergabeposition, NICHT an BPM, KEIN
+    ScrollState** — `LyricsOverlay.kt` scrollt proportional zu `positionMs /
+    durationMs` (echte Player-Position), nicht über eine BPM-Rechnung. Dadurch
+    ist der Song immer exakt zu Ende gescrollt, wenn er zu Ende gespielt ist —
+    unabhängig davon, ob die in der DB hinterlegte BPM stimmt.
+    **WICHTIG (Sprint 5.36, nach vier gescheiterten Fix-Versuchen mit
+    Compose's `ScrollState`):** Der Text-Block wird NICHT über
+    `Modifier.verticalScroll()`/`ScrollState` gescrollt, sondern über
+    `Modifier.offset { IntOffset(0, -scrollOffsetPx.roundToInt()) }`
+    (Lambda-Variante) innerhalb einer fest positionierten, `clipToBounds()`-
+    begrenzten Viewport-`Box` verschoben. Grund: `ScrollState.scrollTo()`
+    (Frame-Loop, jeden Frame) und `ScrollState.animateScrollTo()` (früher in
+    `handleTap()`) konkurrieren um dieselbe interne `MutatorMutex` und
+    unterbrechen sich gegenseitig — Hauptverdacht für anhaltendes Ruckeln über
+    mehrere Fix-Versuche hinweg. **Bei künftigen Änderungen an diesem Screen:
+    NIEMALS `ScrollState`/`verticalScroll`/`scrollTo`/`animateScrollTo` wieder
+    einführen** — Viewport- und Content-Höhe werden stattdessen selbst per
+    `onGloballyPositioned` gemessen (`viewportHeightPx`, `contentHeightPx`),
+    `maxScrollPx = contentHeightPx - viewportHeightPx` direkt daraus berechnet.
+    Es gibt nur EINEN Schreiber für `scrollOffsetPx` (die Frame-Loop);
+    `handleTap()` setzt ausschließlich den Anker, nie direkt den Offset.
+    Zwei Garantien, beide bewusst doppelt abgesichert:
+    - **Nur abwärts, nie zurück:** `scrollOffsetPx` wird ausschließlich über
+      `if (neuerWert > scrollOffsetPx) scrollOffsetPx = neuerWert` erhöht — sowohl
+      im Frame-Loop als auch bei Tap-to-Sync (via Anker-Verschiebung). Ein
+      kurzzeitiger Jitter in der Positionsschätzung (oder ein Rückwärts-Seek)
+      kann den Scroll dadurch NIEMALS nach oben reißen, er bleibt höchstens stehen.
     - **Tap-to-Sync verschiebt den Anker, nicht die Zeile fix:** Tap sucht per
       `linePositions` (gemessen via `onGloballyPositioned`, siehe unten) die
       nächste noch nicht erreichte Zeile, setzt `anchorPositionMs`/`anchorScrollPx`
-      auf (jetzt, diese Zeile) und rechnet die Scroll-Rate für den Rest des Songs
-      neu — kompensiert damit automatisch ungleichmäßige Zeilendichte (Strophe
-      vs. Instrumental-Teil vs. Refrain).
-    - Frame-Loop (`withFrameNanos` in einer Endlosschleife) statt `animateScrollTo`
-      für den Normalbetrieb — liefert kontinuierliches 60fps-Scrollen statt Sprünge;
-      `animateScrollTo` kommt nur beim Tap-Snap zum Einsatz.
+      auf (jetzt, diese Zeile) — die Frame-Loop holt sich den neuen Zielwert im
+      nächsten Frame automatisch selbst ab (kein direkter Schreibzugriff aus
+      `handleTap()`, siehe oben) und rechnet die Scroll-Rate für den Rest des
+      Songs neu — kompensiert damit automatisch ungleichmäßige Zeilendichte
+      (Strophe vs. Instrumental-Teil vs. Refrain).
+    - **`allLinesMeasured`-Gate:** Die Frame-Loop tut buchstäblich nichts
+      (`continue`), bevor `linePositions.size >= nonBlankLineCount` UND
+      Viewport-/Content-Höhe beide > 0 sind — eliminiert die ganze Fehlerklasse
+      "teilweise vermessenes Layout beim (Wieder-)Öffnen" strukturell, statt sie
+      Fall für Fall mit Nullable-Checks abzufangen (so wie in Sprint 5.33
+      versucht — hat nicht ausgereicht).
+    - Frame-Loop (`withFrameNanos` in einer Endlosschleife) treibt
+      kontinuierliches 60fps-Scrollen — keine separate Animation mehr, die mit
+      der Loop um denselben Zustand konkurrieren könnte.
     - `linePositions[index]` wird NICHT analytisch aus Zeilenhöhe berechnet
       (bricht bei Zeilenumbruch auf schmalen Screens), sondern real gemessen —
-      robust unabhängig von Fontgröße/Gerätebreite.
+      robust unabhängig von Fontgröße/Gerätebreite. `positionInParent()` ist
+      relativ zur Text-Column selbst (nicht zum Screen) und bleibt dadurch
+      stabil, auch während die Column per `Modifier.offset` bewegt wird.
     - Der Screen erzwingt Hochkant nur für sich selbst (`activity.requestedOrientation`
       in `DisposableEffect`, zurückgesetzt beim Schließen) — der Rest der App bleibt
       unangetastet, es gibt sonst nirgends eine Orientierungssperre.
@@ -230,7 +256,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       (`handleTap()`), überschreibt ihn aber nur ephemer für die laufende
       Wiedergabe, ohne etwas zu persistieren — komponiert automatisch
       korrekt mit der Kalibrierungs-Logik durch dieselbe
-      `targetScrollPx`-Monoton-Klemmung (siehe oben), ohne Sonderfall-Code.
+      `scrollOffsetPx`-Monoton-Klemmung (siehe oben), ohne Sonderfall-Code.
     - **Struktur-Labels ohne Akkorde:** Zeilen im Format `[Chorus]`/`[Verse 1]`
       im Lyrics-Text werden per `sectionTagRegex` erkannt und als eigene,
       Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
@@ -240,11 +266,75 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-19
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.35)
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.36)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix — durationMs-Quelle vertauscht (Click-Track-Bug) + Diagnose-Logging, Sprint 5.34 hat immer noch nicht gereicht
+**Commit:** Kompletter Architektur-Neuentwurf des Teleprompter-Scrolls — ScrollState/Animation entfernt, Sprint 5.35 hat immer noch nicht gereicht
 
-### Sprint 5.35 DONE (ungetestet): Fix — vermutlich echte Root Cause (falsche durationMs-Quelle) + Diagnose-Logging als Sicherheitsnetz
+### Sprint 5.36 DONE (ungetestet): Kompletter Architektur-Neuentwurf — ScrollState + Animation komplett entfernt
+
+User-Report nach Live-Test von Sprint 5.35 (Commit ce8d574, CI grün): Bug besteht
+ERNEUT UNVERÄNDERT ("während der Kalibrierung wird ganz schnell wieder immer noch
+nach unten gescrollt und sehr ruckelig", Kalibrierungspunkte werden wieder nicht
+übernommen). Das ist der VIERTE erfolglose Fix-Versuch in Folge (5.33, 5.34, 5.35).
+User-Anweisung danach explizit: nicht weiter Symptome flicken, sondern die
+Funktion komplett neu von Grund auf durchdenken und sauber implementieren.
+
+**Neubewertung:** Alle bisherigen Theorien (Layout-Race, dur/pos-Plausibilität,
+Session-Reset, Click-Track-Duration) betrafen ausschließlich die
+RATE-BERECHNUNG. Da der Hauptplayer (Fortschrittsbalken/Countdown, dieselben
+`positionMs`/`durationMs`-Werte aus `PlayerViewModel`) nie als fehlerhaft
+gemeldet wurde, war die Datenquelle vermutlich nie das eigentliche Problem —
+der Fehler lag höchstwahrscheinlich in der Scroll-MECHANIK selbst:
+
+**Root Cause (neue Theorie, mit deutlich höherer Zuversicht):** `handleTap()`
+rief `scrollState.animateScrollTo()` auf, während die Frame-Loop GLEICHZEITIG
+jeden Frame `scrollState.scrollTo()` aufrief — beide konkurrieren um dieselbe
+interne Compose-Sperre (`MutatorMutex` in `ScrollableState.scroll()`). Ein neuer
+`scroll()`-Aufruf mit Standard-Priorität unterbricht automatisch einen noch
+laufenden — die Frame-Loop (alle ~16ms) hat damit `animateScrollTo()`
+faktisch permanent abgewürgt, lange bevor die Animation nennenswert
+fortschreiten konnte. Zusätzlich hing die gesamte Rate-Berechnung von
+`ScrollState.maxValue` ab — dessen genaues Verhalten in Kombination mit
+`enabled = false` und einer gleichzeitig per Frame-Loop manipulierten
+Scroll-Position nicht mit Sicherheit vorhersagbar war.
+
+**Fix — komplette Neuarchitektur, keine Patches mehr:**
+- `ScrollState`/`verticalScroll`/`scrollTo`/`animateScrollTo` vollständig
+  entfernt. Ersetzt durch `Modifier.offset { IntOffset(0, -scrollOffsetPx...) }`
+  (Lambda-Variante — läuft nur in der Platzierungsphase, kein
+  Recomposition-Overhead) auf einer Text-Column innerhalb eines fest
+  positionierten, `clipToBounds()`-begrenzten Viewport-Box.
+- **Nur noch EIN Schreiber für die Scroll-Position:** die Frame-Loop.
+  `handleTap()` setzt ausschließlich den Anker (`anchorPositionMs`/
+  `anchorScrollPx`) — die Loop übernimmt den neuen Zielwert automatisch im
+  nächsten Frame. Keine zweite, konkurrierende Animation mehr möglich.
+- **Viewport- und Content-Höhe selbst gemessen** (`onGloballyPositioned` auf
+  Viewport-Box und Text-Column), `maxScrollPx = contentHeightPx -
+  viewportHeightPx` direkt daraus berechnet — keine Abhängigkeit mehr von
+  internem `ScrollState`-Verhalten.
+- **Explizites `allLinesMeasured`-Gate** (`linePositions.size >=
+  nonBlankLineCount`) VOR jeder Berechnung — die Frame-Loop tut buchstäblich
+  nichts, bevor nicht wirklich jede Zeile vermessen ist. Eliminiert die ganze
+  Fehlerklasse "teilweise vermessenes Layout" strukturell, statt sie wie in
+  5.33–5.35 Fall für Fall abzufangen.
+- Die dur/pos-Plausibilitätsprüfung (5.34) und die zusätzliche
+  `song.duration`-Absicherung (5.35) bleiben zusätzlich bestehen (schaden
+  nicht, auch wenn sie vermutlich nie die eigentliche Ursache waren).
+- Diagnose-Logging (5.35) bleibt für den Notfall bestehen, an neue
+  Variablennamen angepasst.
+
+- **Nicht verifiziert:** Wie 5.30–5.35 kein Gradle-Build in dieser Session
+  möglich. Dies ist aber die erste Fix-Runde, die die STRUKTUR des Problems
+  angeht statt eine weitere Theorie über die Werte zu patchen — entsprechend
+  höhere Zuversicht, aber ohne Gerätetest nicht mit Sicherheit zu behaupten.
+  **Nächste Session, falls der Bug immer noch auftritt:** `adb logcat -s
+  LyricsOverlay` mitschneiden (sollte jetzt aussagekräftiger sein, da die
+  Kandidatenliste möglicher Ursachen strukturell kleiner ist) und zusätzlich
+  gezielt prüfen, ob das Ruckeln JETZT verschwunden ist (das war unabhängig
+  von der Ziel-Berechnung durch die ScrollState/Animation-Kollision erklärbar
+  und sollte durch die neue Architektur unabhängig vom Rest behoben sein).
+
+### Sprint 5.35 DONE: Fix — vermutlich echte Root Cause (falsche durationMs-Quelle) + Diagnose-Logging als Sicherheitsnetz (Commit ce8d574, CI grün — hat laut User-Report NICHT ausgereicht, siehe Sprint 5.36)
 
 User-Report nach Live-Test von Sprint 5.34 (Commit 1600120, CI grün): Bug besteht
 UNVERÄNDERT ("scrollt während der Kalibrierung immer noch schnell und ruckelig
@@ -798,21 +888,24 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als
   eigene Volt-Überschrift gerendert. Nicht mehr offen.
-- 🔴 **Sprint 5.32–5.35 (Mehrpunkt-Kalibrierung + DREI Bugfix-Runden) auf
-  echtem Gerät testen (PRIO 1, ESKALIERT):** Ersetzt den Start-Anker aus 5.31
-  komplett. Bug (Scroll springt schnell/ruckartig bis ans Ende, 0 Kalibrierungs-
-  punkte) hat bereits ZWEI Fix-Versuche überlebt (5.33, 5.34) — beide waren
-  laut User-Report wirkungslos. 5.35 hat eine neue, besser fundierte Theorie
-  (falsche durationMs-Quelle beim Multitrack-Click-Track, siehe dort) UND
-  Diagnose-Logging als Rückfallebene. **Falls der Bug in 5.35 IMMER NOCH
-  auftritt:** nicht nochmal blind eine Theorie fixen — stattdessen
-  `adb logcat -s LyricsOverlay` während eines Kalibrierungsversuchs mitschneiden
-  und die geloggten pos/dur/rate-Werte auswerten (siehe Sprint 5.35). Sonst wie
-  gehabt prüfen: Kalibrierungspunkte werden tatsächlich gespeichert (Zähler > 0
-  nach dem Tippen), Teleprompter mitten im Song öffnen/erneut öffnen läuft
-  smooth, DB-Migration 15→16 greift sauber, Song neu starten läuft ohne
-  erneutes Tippen in der kalibrierten Geschwindigkeit ab, niemals
-  Rückwärtssprung (kritisch laut User — Erfahrung aus anderen Apps),
+- 🔴 **Sprint 5.32–5.36 (Mehrpunkt-Kalibrierung + VIER Bugfix-Runden, davon
+  eine komplette Neuarchitektur) auf echtem Gerät testen (PRIO 1, ESKALIERT):**
+  Ersetzt den Start-Anker aus 5.31 komplett. Bug (Scroll springt schnell/
+  ruckartig bis ans Ende, 0 Kalibrierungspunkte) hat bereits DREI Fix-Versuche
+  überlebt (5.33, 5.34, 5.35) — alle laut User-Report wirkungslos. 5.36 ist
+  keine weitere Theorie-Korrektur mehr, sondern ein kompletter Architektur-
+  Neuentwurf auf User-Anweisung: `ScrollState`/`animateScrollTo` (Quelle eines
+  MutatorMutex-Konflikts mit der Frame-Loop, siehe dort) komplett entfernt und
+  durch direkt selbst gemessene Werte + `Modifier.offset` ersetzt, nur noch EIN
+  Schreiber für die Scroll-Position. **Falls der Bug in 5.36 IMMER NOCH
+  auftritt:** nicht nochmal eine Theorie fixen — `adb logcat -s LyricsOverlay`
+  mitschneiden (Diagnose-Logging aus 5.35 ist noch da, an neue Variablennamen
+  angepasst) und die geloggten Werte auswerten, statt weiter zu raten. Sonst
+  wie gehabt prüfen: Kalibrierungspunkte werden tatsächlich gespeichert
+  (Zähler > 0 nach dem Tippen), Teleprompter mitten im Song öffnen/erneut
+  öffnen läuft smooth OHNE Ruckeln, DB-Migration 15→16 greift sauber, Song neu
+  starten läuft ohne erneutes Tippen in der kalibrierten Geschwindigkeit ab,
+  niemals Rückwärtssprung (kritisch laut User — Erfahrung aus anderen Apps),
   Live-Tap-to-Sync funktioniert weiterhin auch nach abgeschlossener
   Kalibrierung.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live

@@ -19,11 +19,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
@@ -39,23 +38,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private const val TAG = "LyricsOverlay"
@@ -91,14 +90,9 @@ private fun parseSyncPoints(raw: String): List<Pair<Int, Long>> =
         if (idx != null && ms != null) idx to ms else null
     }.sortedBy { it.second }
 
-// "mm:ss" (song.duration, z.B. "5:22") → ms. Diese beim Import einmalig über
-// MediaMetadataRetriever gemessene Dauer ist die verlässlichere Quelle als die
-// live von ExoPlayer gemeldete durationMs: AudioEngine.durationMs fragt bei
-// Multitrack-Songs `tracks.firstOrNull()` ab, ohne den Click-Track auszuschließen
-// — FolderImporter tut das für song.duration bewusst (siehe "Bug-Fix 2"-Kommentar
-// dort), weil einzelne Stems (v.a. Click) in der Vergangenheit falsche/kurze
-// Längen geliefert haben. Eine zu kurze durationMs lässt die Scroll-Rate im
-// Frame-Loop explodieren (siehe LaunchedEffect unten).
+// "mm:ss" (song.duration, z.B. "5:22") → ms. Zusätzliche Absicherung gegen eine
+// zu kurze live gemeldete durationMs (siehe FolderImporter "Bug-Fix 2"-Kommentar
+// zum Click-Track) — wird in LyricsContent per max() mit der Live-Dauer kombiniert.
 private fun parseDurationString(s: String): Long {
     val parts = s.split(":")
     val min = parts.getOrNull(0)?.toLongOrNull() ?: return 0L
@@ -119,8 +113,28 @@ private fun parseDurationString(s: String): Long {
  * 2. **Live-Tap-to-Sync** (Tap irgendwo im Textbereich, außerhalb Kalibrierung):
  *    einmalige, NICHT gespeicherte Korrektur für die laufende Wiedergabe.
  *
+ * ARCHITEKTUR (Sprint 5.36 — bewusst ohne ScrollState/Animation): Frühere Versuche
+ * nutzten Compose's `ScrollState` (`verticalScroll` + `scrollTo`/`animateScrollTo`).
+ * Das Problem dabei: `handleTap()` rief `animateScrollTo()` auf, während die
+ * Frame-Loop GLEICHZEITIG jeden Frame `scrollTo()` aufrief — beide konkurrieren
+ * um dieselbe interne Compose-Sperre (MutatorMutex) und unterbrechen sich
+ * gegenseitig, was zu sichtbarem Ruckeln führen kann, unabhängig von der
+ * eigentlichen Zielberechnung. Zusätzlich hing die Rate-Berechnung von
+ * `ScrollState.maxValue` ab, dessen genaues Timing/Verhalten mit `enabled=false`
+ * nicht vollständig nachvollziehbar war. Beides jetzt eliminiert: Statt
+ * `verticalScroll` wird der Text-Block per `Modifier.offset { }` (Lambda-Variante,
+ * läuft nur in der Platzierungsphase, kein Recomposition-Overhead) manuell nach
+ * oben verschoben — eine einzige Zustandsvariable (`scrollOffsetPx`), EIN Schreiber
+ * (die Frame-Loop; `handleTap()` verschiebt nur den Anker, die Loop holt den neuen
+ * Wert im nächsten Frame selbst ab), keine konkurrierende Animation. Viewport- und
+ * Content-Höhe werden selbst gemessen (`onGloballyPositioned`), `maxScrollPx` wird
+ * direkt daraus berechnet — keine Abhängigkeit von internem ScrollState-Verhalten
+ * mehr. Die Frame-Loop wartet zusätzlich explizit, bis ALLE Zeilen vermessen sind
+ * (`allLinesMeasured`), bevor überhaupt gerechnet wird — eliminiert die ganze
+ * Klasse von Bugs durch teilweise vermessene Layouts beim (Wieder-)Öffnen.
+ *
  * Scroll bewegt sich in beiden Fällen ausschließlich vorwärts/abwärts (siehe
- * targetScrollPx-Klemmung in LyricsContent) — niemals zurück.
+ * scrollOffsetPx-Klemmung in LyricsContent) — niemals zurück.
  */
 @Composable
 fun LyricsOverlay(
@@ -175,18 +189,15 @@ private fun LyricsContent(
 ) {
     val context = LocalContext.current
     val lines   = remember(song.id, song.lyrics) { song.lyrics.lines() }
+    val nonBlankLineCount = remember(lines) { lines.count { it.isNotBlank() } }
     // Gespeicherte Kalibrierungspunkte dieses Songs, sortiert nach Position.
     val breakpoints = remember(song.id, song.lyricsSyncPoints) { parseSyncPoints(song.lyricsSyncPoints) }
 
-    // Wie der übrige Scroll-Zustand mit openSession gekeyt (statt rememberScrollState()),
-    // damit auch die rohe Scroll-Position bei jedem Öffnen bei 0 startet.
-    val scrollState   = remember(song.id, openSession) { ScrollState(0) }
-    val scope         = rememberCoroutineScope()
-    // index -> gemessene Y-Position (px) innerhalb der scrollbaren Column. Wie der
-    // gesamte Scroll-Zustand unten mit openSession gekeyt: jedes Öffnen des Screens
-    // startet komplett frisch, statt einen eventuell verkorksten Zustand aus einer
-    // vorherigen Session (z.B. nach einem Bug in einer älteren Version) mitzuschleppen.
+    // index -> gemessene Y-Position (px) innerhalb der Text-Column (siehe Architektur-
+    // Kommentar oben). Mit openSession gekeyt: jedes Öffnen startet komplett frisch.
     val linePositions = remember(song.id, openSession) { mutableMapOf<Int, Float>() }
+    var viewportHeightPx by remember(song.id, openSession) { mutableStateOf(0f) }
+    var contentHeightPx  by remember(song.id, openSession) { mutableStateOf(0f) }
 
     // Kalibrierungs-Modus: Record-Button an → jeder Tap wird zusätzlich zum
     // Live-Sync in calibrationPoints aufgezeichnet und beim Beenden persistiert.
@@ -202,16 +213,17 @@ private fun LyricsContent(
     // Segment-Anker (Zeit, Scroll-Px), ab dem die aktuelle Scroll-Rate berechnet
     // wird. Schaltet automatisch durch die Kalibrierungspunkte weiter, sobald die
     // Wiedergabe sie erreicht (siehe LaunchedEffect unten) — ohne Kalibrierung
-    // bleibt es bei (0, 0), also reine Positions-Proportion wie zuvor.
+    // bleibt es bei (0, 0), also reine Positions-Proportion.
     var anchorPositionMs by remember(song.id, openSession) { mutableStateOf(0L) }
     var anchorScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
-    // Zuletzt gesetztes Scroll-Ziel — wird NIE verringert (Anforderung: nur abwärts, nie zurück).
-    var targetScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
+    // Aktuell angewandter Scroll-Offset — EINZIGE Quelle der Wahrheit fürs Rendering
+    // (siehe Modifier.offset unten). Wird NIE verringert (nur abwärts, nie zurück).
+    // Einziger Schreiber ist die Frame-Loop unten; handleTap() setzt nur den Anker,
+    // die Loop übernimmt den neuen Wert automatisch im nächsten Frame — dadurch gibt
+    // es nur einen einzigen Mutationspfad, keine konkurrierende Animation mehr.
+    var scrollOffsetPx by remember(song.id, openSession) { mutableStateOf(0f) }
 
-    // Die verlässlichere der beiden Dauer-Quellen: siehe parseDurationString(). Das
-    // Maximum aus beiden zu nehmen schützt in beide Richtungen — welche der beiden
-    // auch zu kurz melden sollte, die längere gewinnt und verhindert die Explosion
-    // der Scroll-Rate.
+    // Zusätzliche Absicherung gegen eine zu kurze live gemeldete durationMs.
     val dbDurationMs = remember(song.id, song.duration) { parseDurationString(song.duration) }
     val latestPositionMs by rememberUpdatedState(positionMs)
     val latestDurationMs by rememberUpdatedState(maxOf(durationMs, dbDurationMs))
@@ -228,76 +240,69 @@ private fun LyricsContent(
         var bigJumpLogCount = 0
         while (isActive) {
             withFrameNanos { }
+
+            // Nichts tun, bevor Layout vollständig vermessen ist — eliminiert jede
+            // Form von "teilweise vermessen" als Fehlerquelle komplett, statt sie
+            // Fall für Fall abzufangen.
+            val maxScrollPx = (contentHeightPx - viewportHeightPx).coerceAtLeast(0f)
+            val allLinesMeasured = linePositions.size >= nonBlankLineCount
+            if (!allLinesMeasured || contentHeightPx <= 0f || viewportHeightPx <= 0f || maxScrollPx <= 0f) {
+                continue
+            }
+
             val pos = latestPositionMs
             val dur = latestDurationMs
-            val max = scrollState.maxValue
 
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
-            // Noch nicht vermessene Zeile (Layout-Timing-Race) → Schleife abbrechen und im
-            // nächsten Frame erneut versuchen, statt den Punkt stillschweigend zu verlieren.
             while (nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
                 val (lineIdx, ms) = breakpoints[nextIdx]
-                val px = linePositions[lineIdx] ?: break
-                anchorPositionMs = ms
-                anchorScrollPx   = px
+                val px = linePositions[lineIdx]
+                if (px != null) { anchorPositionMs = ms; anchorScrollPx = px }
                 nextIdx++
             }
 
             // dur >= pos ist eine Plausibilitätsprüfung: durationMs kann beim Songwechsel
             // (Preload/Crossfade der A/B-Player in AudioEngine) für einen Frame noch einen
-            // veralteten, zu kleinen Wert liefern, während positionMs schon weiterläuft. Ohne
-            // diese Prüfung würde raw sofort auf max geklemmt (pos > dur → Rate viel zu hoch)
-            // und blieb wegen der Monoton-Klemmung fälschlich für den Rest der Wiedergabe dort
-            // hängen — noch bevor überhaupt ein Kalibrierungs-Tap ankommen konnte.
+            // veralteten, zu kleinen Wert liefern, während positionMs schon weiterläuft.
             if (dur in 1..<pos && !guardBlockLogged) {
                 guardBlockLogged = true
-                Log.w(TAG, "Guard blockiert: dur=$dur < pos=$pos (max=$max) — durationMs war zu klein")
+                Log.w(TAG, "Guard blockiert: dur=$dur < pos=$pos (maxScrollPx=$maxScrollPx) — durationMs war zu klein")
             }
-            if (dur > anchorPositionMs && dur >= pos && max > 0) {
-                val nextBreak = breakpoints.getOrNull(nextIdx)
-                val segEndMs  = nextBreak?.second ?: dur
-                // Bei einem noch nicht vermessenen Zwischen-Ziel (Layout-Timing-Race beim
-                // Öffnen) NICHT auf "volle Scroll-Länge" ausweichen — sonst würde ein
-                // Zwischenpunkt fälschlich wie das Songende behandelt (Rate schießt hoch)
-                // und bleibt wegen der Monoton-Klemmung dauerhaft hängen. Stattdessen: in
-                // diesem Frame einfach nichts aktualisieren, nächster Frame versucht's erneut.
-                val segEndPx: Float? = if (nextBreak == null) max.toFloat() else linePositions[nextBreak.first]
-                if (segEndPx != null) {
-                    val rate = if (segEndMs > anchorPositionMs)
-                        (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat() else 0f
-                    val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
-                    val clamped = raw.coerceIn(0f, max.toFloat())
-                    if (clamped > targetScrollPx) {
-                        val jump = clamped - targetScrollPx
-                        if (jump > 30f && bigJumpLogCount < 10) {
-                            bigJumpLogCount++
-                            Log.w(TAG, "Großer Scroll-Sprung: +${jump}px in einem Frame " +
-                                "(pos=$pos dur=$dur anchor=($anchorPositionMs,$anchorScrollPx) " +
-                                "segEnd=($segEndMs,$segEndPx) rate=$rate max=$max)")
-                        }
-                        targetScrollPx = clamped
-                    }
+            if (dur <= 0L || dur < pos || dur <= anchorPositionMs) continue
+
+            val nextBreak = breakpoints.getOrNull(nextIdx)
+            val segEndMs  = nextBreak?.second ?: dur
+            val segEndPx  = nextBreak?.let { linePositions[it.first] } ?: maxScrollPx
+            if (segEndMs <= anchorPositionMs) continue
+
+            val rate    = (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat()
+            val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
+            val clamped = raw.coerceIn(0f, maxScrollPx)
+            if (clamped > scrollOffsetPx) {
+                val jump = clamped - scrollOffsetPx
+                if (jump > 30f && bigJumpLogCount < 10) {
+                    bigJumpLogCount++
+                    Log.w(TAG, "Großer Scroll-Sprung: +${jump}px in einem Frame " +
+                        "(pos=$pos dur=$dur anchor=($anchorPositionMs,$anchorScrollPx) " +
+                        "segEnd=($segEndMs,$segEndPx) rate=$rate maxScrollPx=$maxScrollPx)")
                 }
-            }
-            if (targetScrollPx.roundToInt() != scrollState.value) {
-                scrollState.scrollTo(targetScrollPx.roundToInt())
+                scrollOffsetPx = clamped
             }
         }
     }
 
     // Ein Handler für beide Tap-Arten: sucht die nächste noch nicht erreichte
-    // Zeile (Header oder Lyric, macht keinen Unterschied), synct live darauf —
-    // und zeichnet den Punkt zusätzlich auf, wenn gerade kalibriert wird.
+    // Zeile (Header oder Lyric, macht keinen Unterschied), setzt den Anker darauf
+    // — die Frame-Loop oben holt sich den neuen Zielwert automatisch im nächsten
+    // Frame (kein direkter Schreibzugriff auf scrollOffsetPx hier, siehe oben).
+    // Zeichnet den Punkt zusätzlich auf, wenn gerade kalibriert wird.
     fun handleTap() {
         val entry = linePositions.entries
-            .filter { it.value > targetScrollPx + 4f }
+            .filter { it.value > scrollOffsetPx + 4f }
             .minByOrNull { it.value } ?: return
-        val (lineIdx, linePx) = entry.key to entry.value
         anchorPositionMs = latestPositionMs
-        anchorScrollPx   = linePx
-        if (linePx > targetScrollPx) targetScrollPx = linePx
-        scope.launch { scrollState.animateScrollTo(targetScrollPx.roundToInt()) }
-        if (calibrating) calibrationPoints.add(lineIdx to latestPositionMs)
+        anchorScrollPx   = entry.value
+        if (calibrating) calibrationPoints.add(entry.key to latestPositionMs)
     }
 
     Box(modifier = Modifier.fillMaxSize().background(LyricsBg)) {
@@ -352,52 +357,58 @@ private fun LyricsContent(
                 )
             }
 
-            // Lyrics-Bereich — Tap synct auf die nächste noch nicht erreichte Zeile
-            // (live, oder als Kalibrierungspunkt gespeichert, siehe handleTap()).
-            // Manuelles Drag-Scrollen ist bewusst deaktiviert (enabled = false), sonst
-            // könnte man aus Versehen zurückscrollen — das darf laut Anforderung nie passieren.
-            Column(
+            // Viewport: fester Ausschnitt, Inhalt wird per Offset reingeschoben (siehe
+            // Architektur-Kommentar oben) statt über Compose's ScrollState zu scrollen.
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(scrollState, enabled = false)
+                    .clipToBounds()
+                    .onGloballyPositioned { coords -> viewportHeightPx = coords.size.height.toFloat() }
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = { handleTap() })
                     }
-                    .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
-                lines.forEachIndexed { index, line ->
-                    val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
-                    when {
-                        line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
-                        sectionLabel != null -> Text(
-                            text = sectionLabel.uppercase(),
-                            color = LyricsVolt,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 2.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 20.dp, bottom = 6.dp)
-                                .onGloballyPositioned { coords ->
-                                    linePositions[index] = coords.positionInParent().y
-                                }
-                        )
-                        else -> Text(
-                            text = line,
-                            color = LyricsWhite,
-                            fontSize = 26.sp,
-                            lineHeight = 36.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onGloballyPositioned { coords ->
-                                    linePositions[index] = coords.positionInParent().y
-                                }
-                        )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset(0, -scrollOffsetPx.roundToInt()) }
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                        .onGloballyPositioned { coords -> contentHeightPx = coords.size.height.toFloat() }
+                ) {
+                    lines.forEachIndexed { index, line ->
+                        val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
+                        when {
+                            line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
+                            sectionLabel != null -> Text(
+                                text = sectionLabel.uppercase(),
+                                color = LyricsVolt,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 20.dp, bottom = 6.dp)
+                                    .onGloballyPositioned { coords ->
+                                        linePositions[index] = coords.positionInParent().y
+                                    }
+                            )
+                            else -> Text(
+                                text = line,
+                                color = LyricsWhite,
+                                fontSize = 26.sp,
+                                lineHeight = 36.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onGloballyPositioned { coords ->
+                                        linePositions[index] = coords.positionInParent().y
+                                    }
+                            )
+                        }
                     }
+                    // Platzhalter am Ende, damit auch die letzte Zeile bis ganz oben scrollen kann.
+                    Spacer(modifier = Modifier.height(240.dp))
                 }
-                // Platzhalter am Ende, damit auch die letzte Zeile bis ganz oben scrollen kann.
-                Spacer(modifier = Modifier.height(240.dp))
             }
         }
     }

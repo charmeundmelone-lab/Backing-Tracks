@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,11 +45,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
@@ -121,15 +121,29 @@ private fun parseDurationString(s: String): Long {
  * gegenseitig, was zu sichtbarem Ruckeln führen kann, unabhängig von der
  * eigentlichen Zielberechnung. Zusätzlich hing die Rate-Berechnung von
  * `ScrollState.maxValue` ab, dessen genaues Timing/Verhalten mit `enabled=false`
- * nicht vollständig nachvollziehbar war. Beides jetzt eliminiert: Statt
- * `verticalScroll` wird der Text-Block per `Modifier.offset { }` (Lambda-Variante,
- * läuft nur in der Platzierungsphase, kein Recomposition-Overhead) manuell nach
- * oben verschoben — eine einzige Zustandsvariable (`scrollOffsetPx`), EIN Schreiber
- * (die Frame-Loop; `handleTap()` verschiebt nur den Anker, die Loop holt den neuen
- * Wert im nächsten Frame selbst ab), keine konkurrierende Animation. Viewport- und
- * Content-Höhe werden selbst gemessen (`onGloballyPositioned`), `maxScrollPx` wird
- * direkt daraus berechnet — keine Abhängigkeit von internem ScrollState-Verhalten
- * mehr. Die Frame-Loop wartet zusätzlich explizit, bis ALLE Zeilen vermessen sind
+ * nicht vollständig nachvollziehbar war. Beides eliminiert: eigenes `Layout`
+ * (siehe unten) misst den Text-Block EXPLIZIT mit `maxHeight = Constraints.Infinity`
+ * und platziert ihn direkt selbst per `placeRelative(0, -scrollOffsetPx…)` — eine
+ * einzige Zustandsvariable (`scrollOffsetPx`), EIN Schreiber (die Frame-Loop;
+ * `handleTap()` verschiebt nur den Anker, die Loop holt den neuen Wert im
+ * nächsten Frame selbst ab), keine konkurrierende Animation.
+ *
+ * **Sprint 5.38 — zweiter Bug in derselben Architektur:** Die erste Version
+ * (5.36/5.37) hatte Viewport und Content in einer normalen `Box(fillMaxSize) {
+ * Column(fillMaxWidth) }` verschachtelt. Eine `Box` reicht ihre eigene
+ * (durch den Viewport begrenzte) `maxHeight`-Constraint automatisch an ihre
+ * Kinder weiter — die Content-Column konnte dadurch NIE höher gemessen werden
+ * als der sichtbare Ausschnitt selbst. `contentHeightPx` blieb praktisch immer
+ * gleich `viewportHeightPx`, `maxScrollPx` damit strukturell ~0 → die Frame-Loop
+ * wartete für immer auf sinnvollen Scroll-Bedarf, der nie kam (kompletter
+ * Stillstand, unabhängig von Taps). Das eigene `Layout` misst die Content-
+ * Column jetzt mit `constraints.copy(maxHeight = Constraints.Infinity)` —
+ * KEIN Verlass mehr auf automatische Constraint-Weitergabe.
+ *
+ * Viewport- und Content-Höhe werden direkt in der `Layout`-Messphase erfasst
+ * (`constraints.maxHeight` bzw. `placeable.height`) statt über eine separate
+ * `onGloballyPositioned`-Messung — `maxScrollPx` wird direkt daraus berechnet.
+ * Die Frame-Loop wartet zusätzlich explizit, bis ALLE Zeilen vermessen sind
  * (`allLinesMeasured`), bevor überhaupt gerechnet wird — eliminiert die ganze
  * Klasse von Bugs durch teilweise vermessene Layouts beim (Wieder-)Öffnen.
  *
@@ -376,57 +390,71 @@ private fun LyricsContent(
                 )
             }
 
-            // Viewport: fester Ausschnitt, Inhalt wird per Offset reingeschoben (siehe
-            // Architektur-Kommentar oben) statt über Compose's ScrollState zu scrollen.
-            Box(
+            // Viewport: fester Ausschnitt, Inhalt wird per eigenem Layout reingeschoben
+            // (siehe Architektur-Kommentar oben) statt über Compose's ScrollState.
+            //
+            // WICHTIG (Sprint 5.38): Ein normales Box(fillMaxSize) { Column(fillMaxWidth) }
+            // gibt der Column NICHT automatisch unbegrenzte Höhe — die Box reicht ihre
+            // eigene (durch den Viewport begrenzte) maxHeight-Constraint an die Column
+            // weiter. Der Text-Block konnte dadurch nie höher gemessen werden als der
+            // sichtbare Ausschnitt selbst, `contentHeightPx` blieb praktisch immer gleich
+            // `viewportHeightPx`, `maxScrollPx` damit ~0 → die Frame-Loop wartete für
+            // immer auf sinnvollen Scroll-Bedarf, der nie kam. Kompletter Stillstand,
+            // unabhängig von Taps. Fix: eigenes `Layout` misst die Content-Column
+            // EXPLIZIT mit `maxHeight = Constraints.Infinity` — Höhe und Platzierung
+            // (inkl. Scroll-Offset) werden hier direkt selbst kontrolliert, kein Verlass
+            // mehr auf automatische Constraint-Weitergabe.
+            Layout(
                 modifier = Modifier
                     .fillMaxSize()
                     .clipToBounds()
-                    .onGloballyPositioned { coords -> viewportHeightPx = coords.size.height.toFloat() }
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = { handleTap() })
-                    }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .offset { IntOffset(0, -scrollOffsetPx.roundToInt()) }
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
-                        .onGloballyPositioned { coords -> contentHeightPx = coords.size.height.toFloat() }
-                ) {
-                    lines.forEachIndexed { index, line ->
-                        val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
-                        when {
-                            line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
-                            sectionLabel != null -> Text(
-                                text = sectionLabel.uppercase(),
-                                color = LyricsVolt,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 2.sp,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 20.dp, bottom = 6.dp)
-                                    .onGloballyPositioned { coords ->
-                                        linePositions[index] = coords.positionInParent().y
-                                    }
-                            )
-                            else -> Text(
-                                text = line,
-                                color = LyricsWhite,
-                                fontSize = 26.sp,
-                                lineHeight = 36.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onGloballyPositioned { coords ->
-                                        linePositions[index] = coords.positionInParent().y
-                                    }
-                            )
+                    },
+                content = {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
+                        lines.forEachIndexed { index, line ->
+                            val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
+                            when {
+                                line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
+                                sectionLabel != null -> Text(
+                                    text = sectionLabel.uppercase(),
+                                    color = LyricsVolt,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 2.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 20.dp, bottom = 6.dp)
+                                        .onGloballyPositioned { coords ->
+                                            linePositions[index] = coords.positionInParent().y
+                                        }
+                                )
+                                else -> Text(
+                                    text = line,
+                                    color = LyricsWhite,
+                                    fontSize = 26.sp,
+                                    lineHeight = 36.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onGloballyPositioned { coords ->
+                                            linePositions[index] = coords.positionInParent().y
+                                        }
+                                )
+                            }
                         }
+                        // Platzhalter am Ende, damit auch die letzte Zeile bis ganz oben scrollen kann.
+                        Spacer(modifier = Modifier.height(240.dp))
                     }
-                    // Platzhalter am Ende, damit auch die letzte Zeile bis ganz oben scrollen kann.
-                    Spacer(modifier = Modifier.height(240.dp))
+                }
+            ) { measurables, constraints ->
+                viewportHeightPx = constraints.maxHeight.toFloat()
+                val contentConstraints = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+                val placeable = measurables.first().measure(contentConstraints)
+                contentHeightPx = placeable.height.toFloat()
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    placeable.placeRelative(0, -scrollOffsetPx.roundToInt())
                 }
             }
         }

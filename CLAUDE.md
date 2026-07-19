@@ -176,46 +176,61 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
     einen setzt den anderen explizit auf `false` (kein `LaunchedEffect`, da beide
     gleichrangig sind, nicht wie früher Gig-weites `isEditing` vs. lokales `sortMode`).
 12. **Lyrics-Teleprompter — Scroll an Wiedergabeposition, NICHT an BPM, KEIN
-    ScrollState** — `LyricsOverlay.kt` scrollt proportional zu `positionMs /
-    durationMs` (echte Player-Position), nicht über eine BPM-Rechnung. Dadurch
-    ist der Song immer exakt zu Ende gescrollt, wenn er zu Ende gespielt ist —
-    unabhängig davon, ob die in der DB hinterlegte BPM stimmt.
-    **WICHTIG (Sprint 5.36, nach vier gescheiterten Fix-Versuchen mit
-    Compose's `ScrollState`):** Der Text-Block wird NICHT über
-    `Modifier.verticalScroll()`/`ScrollState` gescrollt, sondern über
-    `Modifier.offset { IntOffset(0, -scrollOffsetPx.roundToInt()) }`
-    (Lambda-Variante) innerhalb einer fest positionierten, `clipToBounds()`-
-    begrenzten Viewport-`Box` verschoben. Grund: `ScrollState.scrollTo()`
-    (Frame-Loop, jeden Frame) und `ScrollState.animateScrollTo()` (früher in
-    `handleTap()`) konkurrieren um dieselbe interne `MutatorMutex` und
-    unterbrechen sich gegenseitig — Hauptverdacht für anhaltendes Ruckeln über
-    mehrere Fix-Versuche hinweg. **Bei künftigen Änderungen an diesem Screen:
-    NIEMALS `ScrollState`/`verticalScroll`/`scrollTo`/`animateScrollTo` wieder
-    einführen** — Viewport- und Content-Höhe werden stattdessen selbst per
-    `onGloballyPositioned` gemessen (`viewportHeightPx`, `contentHeightPx`),
-    `maxScrollPx = contentHeightPx - viewportHeightPx` direkt daraus berechnet.
-    Es gibt nur EINEN Schreiber für `scrollOffsetPx` (die Frame-Loop);
-    `handleTap()` setzt ausschließlich den Anker, nie direkt den Offset.
-    Zwei Garantien, beide bewusst doppelt abgesichert:
+    ScrollState, EIGENES `Layout`** — `LyricsOverlay.kt` scrollt proportional zu
+    `positionMs / durationMs` (echte Player-Position), nicht über eine
+    BPM-Rechnung. Dadurch ist der Song immer exakt zu Ende gescrollt, wenn er
+    zu Ende gespielt ist — unabhängig davon, ob die in der DB hinterlegte BPM
+    stimmt.
+    **WICHTIG (Sprint 5.36–5.38, nach fünf gescheiterten Fix-Versuchen):**
+    Der Text-Block wird NICHT über `Modifier.verticalScroll()`/`ScrollState`
+    UND NICHT über ein simples `Box(fillMaxSize) { Column(fillMaxWidth) }`
+    gescrollt, sondern über ein eigenes `Layout`-Composable, das die
+    Content-Column explizit mit `constraints.copy(maxHeight =
+    Constraints.Infinity)` misst und selbst per `placeable.placeRelative(0,
+    -scrollOffsetPx…)` platziert. **Bei künftigen Änderungen an diesem Screen
+    NIEMALS folgendes wieder einführen:**
+    - `ScrollState`/`verticalScroll`/`scrollTo`/`animateScrollTo` — Grund
+      (Sprint 5.36): `ScrollState.scrollTo()` (Frame-Loop, jeden Frame) und
+      `ScrollState.animateScrollTo()` (früher in `handleTap()`) konkurrieren
+      um dieselbe interne `MutatorMutex` und unterbrechen sich gegenseitig.
+    - Ein simples `Box(fillMaxSize) { Column(fillMaxWidth) }` als Viewport/
+      Content-Struktur — Grund (Sprint 5.38): eine `Box` reicht ihre eigene,
+      durch den Viewport begrenzte `maxHeight`-Constraint automatisch an ihre
+      Kinder weiter. Die Content-Column konnte dadurch NIE höher gemessen
+      werden als der sichtbare Ausschnitt selbst — `maxScrollPx` blieb
+      strukturell ~0, die Frame-Loop wartete für immer auf Scroll-Bedarf, der
+      nie kam. Kompletter Stillstand, unabhängig von Taps — kein Timing-Bug,
+      sondern garantiert reproduzierbar bei jedem Öffnen. Das eigene `Layout`
+      erfasst Viewport-Höhe (`constraints.maxHeight`) und Content-Höhe
+      (`placeable.height`) direkt in der Messphase, `maxScrollPx` wird direkt
+      daraus berechnet — kein Verlass mehr auf automatische
+      Constraint-Weitergabe.
+    Es gibt nur EINEN Schreiber für die kontinuierliche Vorwärtsbewegung von
+    `scrollOffsetPx` (die Frame-Loop); `handleTap()` setzt den Anker UND
+    springt zusätzlich sofort sichtbar dorthin (Sprint 5.37 — ohne den
+    Sofort-Sprung bewegt sich während einer laufenden Kalibrierung ohne
+    vorhandene Kalibrierungspunkte zwischen zwei Taps nur ein Bruchteil-Pixel,
+    weil die Frame-Loop dann noch mit "Rest des ganzen Songs bis zum Ende" als
+    Zielspanne rechnet). Das ist sicher — anders als bei der alten
+    `ScrollState`-Version handelt es sich um eine simple, monoton geklemmte
+    Zuweisung ohne Animate-Aufruf oder konkurrierende Coroutine, exakt wie in
+    der Frame-Loop selbst. Zwei Garantien, beide bewusst doppelt abgesichert:
     - **Nur abwärts, nie zurück:** `scrollOffsetPx` wird ausschließlich über
       `if (neuerWert > scrollOffsetPx) scrollOffsetPx = neuerWert` erhöht — sowohl
-      im Frame-Loop als auch bei Tap-to-Sync (via Anker-Verschiebung). Ein
-      kurzzeitiger Jitter in der Positionsschätzung (oder ein Rückwärts-Seek)
-      kann den Scroll dadurch NIEMALS nach oben reißen, er bleibt höchstens stehen.
-    - **Tap-to-Sync verschiebt den Anker, nicht die Zeile fix:** Tap sucht per
-      `linePositions` (gemessen via `onGloballyPositioned`, siehe unten) die
+      im Frame-Loop als auch bei Tap-to-Sync. Ein kurzzeitiger Jitter in der
+      Positionsschätzung (oder ein Rückwärts-Seek) kann den Scroll dadurch
+      NIEMALS nach oben reißen, er bleibt höchstens stehen.
+    - **Tap-to-Sync verschiebt den Anker, nicht nur die Zeile fix:** Tap sucht
+      per `linePositions` (gemessen via `onGloballyPositioned`, siehe unten) die
       nächste noch nicht erreichte Zeile, setzt `anchorPositionMs`/`anchorScrollPx`
-      auf (jetzt, diese Zeile) — die Frame-Loop holt sich den neuen Zielwert im
-      nächsten Frame automatisch selbst ab (kein direkter Schreibzugriff aus
-      `handleTap()`, siehe oben) und rechnet die Scroll-Rate für den Rest des
-      Songs neu — kompensiert damit automatisch ungleichmäßige Zeilendichte
-      (Strophe vs. Instrumental-Teil vs. Refrain).
+      auf (jetzt, diese Zeile) — die Frame-Loop rechnet die Scroll-Rate für den
+      Rest des Songs ab diesem neuen Anker neu — kompensiert damit automatisch
+      ungleichmäßige Zeilendichte (Strophe vs. Instrumental-Teil vs. Refrain).
     - **`allLinesMeasured`-Gate:** Die Frame-Loop tut buchstäblich nichts
       (`continue`), bevor `linePositions.size >= nonBlankLineCount` UND
-      Viewport-/Content-Höhe beide > 0 sind — eliminiert die ganze Fehlerklasse
+      Viewport-/Content-Höhe beide > 0 sind — eliminiert die Fehlerklasse
       "teilweise vermessenes Layout beim (Wieder-)Öffnen" strukturell, statt sie
-      Fall für Fall mit Nullable-Checks abzufangen (so wie in Sprint 5.33
-      versucht — hat nicht ausgereicht).
+      Fall für Fall mit Nullable-Checks abzufangen.
     - Frame-Loop (`withFrameNanos` in einer Endlosschleife) treibt
       kontinuierliches 60fps-Scrollen — keine separate Animation mehr, die mit
       der Loop um denselben Zustand konkurrieren könnte.
@@ -223,7 +238,15 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       (bricht bei Zeilenumbruch auf schmalen Screens), sondern real gemessen —
       robust unabhängig von Fontgröße/Gerätebreite. `positionInParent()` ist
       relativ zur Text-Column selbst (nicht zum Screen) und bleibt dadurch
-      stabil, auch während die Column per `Modifier.offset` bewegt wird.
+      stabil, auch während die Column per `placeRelative` bewegt wird.
+    - **Touch-Durchfall zur MainScreen-TopBar (Sprint 5.37):** Der
+      Schließen-Button (X) sitzt an fast derselben Bildschirmposition wie das
+      "⋮"-Menü der `TopBar` dahinter (beide oben rechts, direkt unter dem
+      Statusbalken). Die äußerste Box des Screens hat deshalb einen leeren
+      `detectTapGestures {}`-Handler, der jeden nicht anderweitig konsumierten
+      Tap abfängt, statt ihn zur TopBar durchfallen zu lassen — Compose testet
+      Kind-Elemente (Buttons, Tap-to-Sync-Viewport) zuerst, deren Handler
+      bleiben also unangetastet.
     - Der Screen erzwingt Hochkant nur für sich selbst (`activity.requestedOrientation`
       in `DisposableEffect`, zurückgesetzt beim Schließen) — der Rest der App bleibt
       unangetastet, es gibt sonst nirgends eine Orientierungssperre.
@@ -266,11 +289,48 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-19
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.37)
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.38)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix zwei Nebenwirkungen des 5.36-Neuentwurfs — kein Sofort-Feedback beim Tap, Touch-Durchfall zur MainScreen-TopBar
+**Commit:** Fix — Text scrollte trotz 5.36/5.37 komplett gar nicht (Box-Constraint-Bug), eigenes Layout ersetzt Box+Column
 
-### Sprint 5.37 DONE (ungetestet): Fix — Tap-Sofortsprung fehlte + Touch fiel zur TopBar durch
+### Sprint 5.38 DONE (ungetestet): Fix — Text scrollte überhaupt nicht (struktureller Box-Constraint-Bug)
+
+User-Report nach Live-Test von Sprint 5.37 (Commit c4bf09c, CI grün): Kalibrierungspunkte
+werden weiterhin korrekt gespeichert, ABER der Text bewegt sich überhaupt nicht mehr —
+weder während der Kalibrierung noch danach beim normalen Abspielen. User stellt klar,
+wofür die Funktion eigentlich da ist: nach abgeschlossener Kalibrierung soll der Text
+beim Songabspielen butterweich und in korrekter Geschwindigkeit mitlaufen, damit man
+als Musiker live immer an der richtigen Stelle im Text ist.
+
+**Root Cause — struktureller Bug, keine Race Condition:** `LyricsOverlay.kt` verschachtelte
+Viewport und Content in einer normalen `Box(fillMaxSize) { Column(fillMaxWidth) }`. Eine
+`Box` reicht ihre eigene (durch den Viewport begrenzte) `maxHeight`-Constraint automatisch
+an ihre Kinder weiter — die Content-Column konnte dadurch NIE höher gemessen werden als
+der sichtbare Ausschnitt selbst. `contentHeightPx` blieb praktisch immer identisch zu
+`viewportHeightPx`, `maxScrollPx` (= Differenz) damit strukturell ~0 — die Frame-Loop
+wartete (per `allLinesMeasured`/`maxScrollPx > 0`-Gate aus Sprint 5.36) für immer auf
+sinnvollen Scroll-Bedarf, der nie kam. Kompletter Stillstand, unabhängig von Taps oder
+Kalibrierung — ein deterministischer Layout-Fehler, kein Timing-/Race-Problem wie in
+5.33–5.35 vermutet.
+
+**Fix:** Eigenes `Layout`-Composable ersetzt `Box { Column { ... } }`. Die Content-Column
+wird jetzt EXPLIZIT mit `constraints.copy(maxHeight = Constraints.Infinity)` gemessen —
+kein Verlass mehr auf automatische Constraint-Weitergabe. Viewport-Höhe (`constraints.
+maxHeight`) und Content-Höhe (`placeable.height`) werden direkt in der Messphase erfasst,
+Platzierung inkl. Scroll-Offset direkt selbst über `placeable.placeRelative(0,
+-scrollOffsetPx…)` im `layout{}`-Block — derselbe "nur Neuplatzierung, keine
+Neuvermessung"-Mechanismus wie beim vorherigen `Modifier.offset{}`, also weiterhin
+performant.
+
+- **Nicht verifiziert:** Wie 5.30–5.37 kein Gradle-Build in dieser Session möglich.
+  Diesmal aber eine konkrete, nachvollziehbare strukturelle Ursache (bekanntes
+  Compose-Verhalten: Box reicht Constraints an Kinder weiter) statt einer Race-
+  Condition-Vermutung — entsprechend hohe Zuversicht. **Nächste Session: gezielt
+  prüfen**, ob der Text jetzt sowohl während der Kalibrierung (sofort bei jedem Tap)
+  als auch danach beim normalen Wiedergeben (kontinuierlich, smooth, ohne Ruckler)
+  scrollt.
+
+### Sprint 5.37 DONE: Fix — Tap-Sofortsprung fehlte + Touch fiel zur TopBar durch (Commit c4bf09c, CI grün — Kalibrierung/Speichern bestätigt funktionsfähig, Scroll-Stillstand-Bug erst in 5.38 gefunden)
 
 User-Report nach Live-Test von Sprint 5.36 (Commit 279490d, CI grün): Kalibrierungspunkte
 werden jetzt endlich korrekt gespeichert (5.36 hat den 0-Punkte-Bug also tatsächlich
@@ -932,15 +992,26 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   in Sprint 5.36 (ScrollState/animateScrollTo entfernt) hat laut User-Report
   tatsächlich funktioniert — Kalibrierungspunkte werden jetzt korrekt
   gespeichert, kein Race-to-bottom mehr. Nicht mehr offen.
-- ⚠️ **Sprint 5.37 (zwei Nebenwirkungen von 5.36) auf echtem Gerät testen
-  (PRIO 1):** (1) Tap während Kalibrierung springt jetzt sofort sichtbar zur
-  getippten Zeile (vorher kein Feedback, siehe dort). (2) Äußerste Box
-  konsumiert jetzt jeden Tap, der keinen Button trifft — verhindert
-  Durchfallen zur MainScreen-TopBar (löste vorher fälschlich deren
-  "Alle Songs löschen"-Menü aus). Prüfen: Tap-Feedback während Kalibrierung
-  sichtbar sofort, Stop→X schließt sauber ohne fremdes Menü zu öffnen,
-  DB-Migration 15→16 weiterhin sauber, niemals Rückwärtssprung (kritisch
-  laut User), Live-Tap-to-Sync funktioniert weiterhin.
+- ✅ **Tap-Feedback + Touch-Durchfall (ERLEDIGT):** Sprint 5.37 — Tap während
+  Kalibrierung springt sofort sichtbar zur getippten Zeile, Touch fällt nicht
+  mehr zur MainScreen-TopBar durch. Beides laut User-Report weiterhin korrekt
+  (das eigentliche Problem beim erneuten Test war der Scroll-Stillstand aus
+  5.38, keine Regression bei diesen beiden Fixes). Nicht mehr offen.
+- ⚠️ **Sprint 5.38 (Scroll-Stillstand-Fix) auf echtem Gerät testen (PRIO 1,
+  ESKALIERT):** Nach 5.36/5.37 bewegte sich der Text überhaupt nicht mehr —
+  weder während der Kalibrierung noch danach beim normalen Abspielen. Root
+  Cause war ein struktureller Compose-Layout-Bug (`Box` reicht ihre
+  `maxHeight`-Constraint automatisch an Kinder weiter, Content-Column konnte
+  nie höher gemessen werden als der Viewport, siehe Gotcha 12) — KEIN
+  Timing-/Race-Problem wie in 5.33–5.35 vermutet, sondern deterministisch
+  reproduzierbar bei jedem Öffnen. Fix: eigenes `Layout`-Composable statt
+  `Box { Column {...} }`, misst die Content-Column explizit mit
+  `maxHeight = Constraints.Infinity`. **Das ist der Kernzweck der ganzen
+  Funktion — unbedingt gründlich testen:** nach abgeschlossener Kalibrierung
+  muss der Text beim normalen Songabspielen kontinuierlich, smooth und in der
+  kalibrierten Geschwindigkeit mitlaufen (nicht nur beim Tippen selbst).
+  Zusätzlich: niemals Rückwärtssprung (kritisch laut User), DB-Migration
+  15→16 weiterhin sauber, Live-Tap-to-Sync funktioniert weiterhin.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

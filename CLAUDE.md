@@ -305,9 +305,36 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-19
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.38)
+**CI Build:** #263 grün (Commit a50bcad) — Sprint 5.42 selbst ist reine Dokumentation, kein Code-Push nötig
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Diagnose-Log direkt in der App teilbar (Share-Sheet) — User hat keinen PC/adb zur Hand
+**Commit:** Segment-Wechsel-"Bug" aufgeklärt — false alarm, fehlende Kalibrierung für den getesteten Song
+
+### Sprint 5.42 DONE: Segment-Wechsel-Bug aufgeklärt — kein Code-Bug, fehlende Kalibrierung
+
+Diagnose-Log (Sprint 5.40/5.41) hat sofort die Ursache gezeigt: `Lyrics-Loop start:
+song='Can't judge a book K0' ... breakpoints=[]` — für GENAU DIESEN Song waren keine
+Kalibrierungspunkte gespeichert. Per Rückfrage bestätigt: dieser Song wurde bisher nie
+selbst kalibriert (der frühere "Ja, frisch komplett durchkalibriert"-Report bezog sich
+auf einen anderen Song, vermutlich "Bed Of Roses"). Ohne Kalibrierungspunkte läuft die
+Loop im dokumentierten Fallback-Modus (reine globale Positions-Proportion über die
+ganze Songlänge, siehe Gotcha 12) — das ist das erwartete, korrekte Verhalten ohne
+Kalibrierungsdaten, kein Defekt im Segment-Wechsel-Code selbst.
+
+**Kein Code-Fix nötig.** Segment-Code (Rate-Formel, Anker-Weiterschaltung) ist korrekt,
+wie schon in Sprint 5.40 vermutet — es hat nur nie Kalibrierungsdaten zum Anwenden
+gehabt. Lösung für den User: für JEDEN Song, der abschnittsweise dynamisch laufen soll,
+einmal individuell Record → durchtippen → Stop machen. Die Diagnose-Infrastruktur aus
+5.40/5.41 (Log.d/Log.w + in-App teilbares `debugLog`) bleibt bestehen — nützlich für
+zukünftige ähnliche Reports, um sofort zu sehen ob `breakpoints=[]` die Ursache ist,
+bevor an der eigentlichen Logik gesucht wird.
+
+Nebenbei aufgefallen (nicht Ursache dieses Falls, da durch `maxOf()` bereits
+abgefangen): `song.duration='03:24'` (204000ms) vs. live gemeldete `durationMs=410425`
+— fast exakt Faktor 2 auseinander. Für diesen Song ist die beim Import gemessene
+Anzeige-Dauer offenbar falsch/halbiert. Betrifft nur die Fallback-Rate-Berechnung
+potenziell in Edge-Fällen, aktuell durch `maxOf(durationMs, dbDurationMs)` unkritisch,
+da die größere (richtige) Live-Dauer gewinnt — trotzdem als bekannte Dateninkonsistenz
+notiert, falls „${song.duration}"-Anzeigen an anderer Stelle in der App betroffen sind.
 
 ### Sprint 5.41 DONE (Diagnose, kein Fix): Diagnose-Log ohne adb teilbar
 
@@ -1093,19 +1120,17 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 - ✅ **Sprint 5.38 (Scroll-Stillstand) + Sprint 5.39 (fester Lesepunkt)
   (ERLEDIGT):** Vom User bestätigt funktionsfähig — Text bewegt sich, Lesepunkt
   sitzt sichtbar bei ~30%. Nicht mehr offen.
-- 🔴 **Segment-Wechsel-Bug: Scroll-Geschwindigkeit wirkt konstant trotz
-  frischer Kalibrierung (PRIO 1, NEU in Sprint 5.40):** User hat nach 5.39
-  eine komplett frische Kalibrierung durchgetippt (bestätigt, kein Daten-
-  problem) — Scroll läuft trotzdem "immer ganz konstant" statt abschnittsweise
-  unterschiedlich schnell, manche Songteile laufen zu langsam. Die Rate-Formel
-  selbst ist korrekt; Verdacht (unbestätigt) auf Segmente, die beim Anker-
-  Weiterschalten stillschweigend übersprungen werden, wenn ein Kalibrierungs-
-  punkt keine gemessene Zeilen-Position findet (`linePositions[lineIdx] ==
-  null`). Sprint 5.40 hat dafür NUR Diagnose-Logging ergänzt (kein Blind-Fix,
-  siehe Lehre aus 5.33–5.35): `Log.w` bei übersprungenen Kalibrierungspunkten,
-  `Log.d` mit Rate bei jedem echten Segment-Wechsel. **Nächste Session:**
-  `adb logcat -s LyricsOverlay` während eines kompletten Songdurchlaufs
-  mitschneiden, auswerten, dann gezielt fixen.
+- ✅ **Segment-Wechsel-"Bug" (AUFGEKLÄRT, Sprint 5.42, KEIN Code-Bug):** Diagnose-
+  Log zeigte `breakpoints=[]` für den getesteten Song — der Song war schlicht nie
+  individuell kalibriert worden (früherer "frisch kalibriert"-Report bezog sich
+  auf einen anderen Song). Segment-Rate-Formel ist korrekt. Kein Fix nötig — User
+  muss jeden Song, der abschnittsweise dynamisch laufen soll, einmal einzeln über
+  Record → durchtippen → Stop kalibrieren. Diagnose-Infrastruktur (`debugLog` +
+  Share-Button, Sprint 5.40/5.41) bleibt für künftige Reports nützlich. Nicht mehr
+  offen. Separat notiert (kein aktueller Bug, nur beobachtet): `song.duration` für
+  diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
+  `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
+  diesen einen Song vermerkt.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

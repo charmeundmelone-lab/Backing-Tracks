@@ -3,6 +3,7 @@ package de.livegigplayer.pro.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.util.Log
 import android.widget.Toast
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -224,6 +226,21 @@ private fun LyricsContent(
     var calibrating by remember(song.id, openSession) { mutableStateOf(false) }
     val calibrationPoints = remember(song.id, openSession) { mutableStateListOf<Pair<Int, Long>>() }
 
+    // Diagnose-Log für den Segment-Wechsel-Bug (Sprint 5.40/5.41): sammelt dieselben
+    // Meldungen wie Log.d/Log.w zusätzlich in-app, damit der User sie ohne PC/adb per
+    // Share-Sheet (WhatsApp/E-Mail/...) direkt vom Handy verschicken kann.
+    val debugLog = remember(song.id, openSession) { mutableStateListOf<String>() }
+    fun logDebug(msg: String) {
+        Log.d(TAG, msg)
+        debugLog.add(msg)
+        if (debugLog.size > 300) debugLog.removeAt(0)
+    }
+    fun logWarn(msg: String) {
+        Log.w(TAG, msg)
+        debugLog.add("WARN: $msg")
+        if (debugLog.size > 300) debugLog.removeAt(0)
+    }
+
     fun persistCalibration() {
         if (calibrationPoints.isNotEmpty()) {
             onSetLyricsSyncPoints(song.id, serializeSyncPoints(calibrationPoints))
@@ -253,7 +270,7 @@ private fun LyricsContent(
     // Rand) neu berechnet — dadurch abschnittsweise konstante Geschwindigkeit
     // statt einer einzigen globalen Rate für den ganzen Song.
     LaunchedEffect(song.id, openSession, song.lyricsSyncPoints) {
-        Log.d(TAG, "Lyrics-Loop start: song='${song.title}' liveDurationMsParam=$durationMs " +
+        logDebug("Lyrics-Loop start: song='${song.title}' liveDurationMsParam=$durationMs " +
             "dbDurationMs=$dbDurationMs (song.duration='${song.duration}') breakpoints=$breakpoints")
         var nextIdx = 0
         var guardBlockLogged = false
@@ -283,7 +300,7 @@ private fun LyricsContent(
                     anchorScrollPx = px
                     segmentJustChanged = true
                 } else {
-                    Log.w(TAG, "Kalibrierungspunkt #${nextIdx + 1}/${breakpoints.size} " +
+                    logWarn("Kalibrierungspunkt #${nextIdx + 1}/${breakpoints.size} " +
                         "(lineIdx=$lineIdx, ms=$ms) hat KEINE gemessene Zeilen-Position " +
                         "— Anker NICHT aktualisiert, Segment wird übersprungen!")
                 }
@@ -295,7 +312,7 @@ private fun LyricsContent(
             // veralteten, zu kleinen Wert liefern, während positionMs schon weiterläuft.
             if (dur in 1..<pos && !guardBlockLogged) {
                 guardBlockLogged = true
-                Log.w(TAG, "Guard blockiert: dur=$dur < pos=$pos (maxScrollPx=$maxScrollPx) — durationMs war zu klein")
+                logWarn("Guard blockiert: dur=$dur < pos=$pos (maxScrollPx=$maxScrollPx) — durationMs war zu klein")
             }
             if (dur <= 0L || dur < pos || dur <= anchorPositionMs) continue
 
@@ -306,7 +323,7 @@ private fun LyricsContent(
 
             val rate    = (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat()
             if (segmentJustChanged) {
-                Log.d(TAG, "Neues Segment: anchor=(${anchorPositionMs}ms, ${anchorScrollPx}px) -> " +
+                logDebug("Neues Segment: anchor=(${anchorPositionMs}ms, ${anchorScrollPx}px) -> " +
                     "segEnd=(${segEndMs}ms, ${segEndPx}px) rate=${rate}px/ms " +
                     "(nextIdx=$nextIdx von ${breakpoints.size} Punkten)")
             }
@@ -316,7 +333,7 @@ private fun LyricsContent(
                 val jump = clamped - scrollOffsetPx
                 if (jump > 30f && bigJumpLogCount < 10) {
                     bigJumpLogCount++
-                    Log.w(TAG, "Großer Scroll-Sprung: +${jump}px in einem Frame " +
+                    logWarn("Großer Scroll-Sprung: +${jump}px in einem Frame " +
                         "(pos=$pos dur=$dur anchor=($anchorPositionMs,$anchorScrollPx) " +
                         "segEnd=($segEndMs,$segEndPx) rate=$rate maxScrollPx=$maxScrollPx)")
                 }
@@ -393,6 +410,20 @@ private fun LyricsContent(
                         tint = if (calibrating) LyricsRed else LyricsGray,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+                IconButton(onClick = {
+                    if (debugLog.isEmpty()) {
+                        Toast.makeText(context, "Noch kein Diagnose-Log vorhanden", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "LyricsOverlay-Diagnose: ${song.title}")
+                            putExtra(Intent.EXTRA_TEXT, debugLog.joinToString("\n"))
+                        }
+                        context.startActivity(Intent.createChooser(shareIntent, "Diagnose-Log teilen"))
+                    }
+                }) {
+                    Icon(Icons.Filled.Share, contentDescription = "Diagnose-Log teilen", tint = LyricsGray, modifier = Modifier.size(20.dp))
                 }
                 IconButton(onClick = {
                     if (calibrating) { calibrating = false; persistCalibration() }

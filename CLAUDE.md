@@ -307,7 +307,23 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.38)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Diagnose-Logging für Segment-Wechsel-Bug (Rate wirkt trotz frischer Kalibrierung konstant)
+**Commit:** Diagnose-Log direkt in der App teilbar (Share-Sheet) — User hat keinen PC/adb zur Hand
+
+### Sprint 5.41 DONE (Diagnose, kein Fix): Diagnose-Log ohne adb teilbar
+
+User hat keinen PC/adb zur Verfügung, um das in Sprint 5.40 ergänzte Logging
+auszulesen ("wo finde ich diese logs?"). Statt adb-Anleitung: dieselben
+Meldungen (`Lyrics-Loop start …`, `Neues Segment …`, Warnungen zu
+übersprungenen Kalibrierungspunkten/Guard-Blocks/großen Sprüngen) landen jetzt
+zusätzlich in einer In-App-Liste (`debugLog`, gekappt bei 300 Einträgen,
+mit `song.id`/`openSession` gekeyt wie der übrige Scroll-Zustand). Neuer
+Share-Icon-Button im Header (zwischen Record/Stop und Schließen) öffnet
+Androids Share-Sheet (`Intent.ACTION_SEND`, `text/plain`) mit dem kompletten
+Log als Text — User kann direkt vom Handy aus per WhatsApp/E-Mail/Notiz an
+den Chat schicken, kein Kabel/PC nötig. `Log.d`/`Log.w` bleiben zusätzlich
+bestehen (adb funktioniert weiterhin, falls doch mal ein PC zur Hand ist) —
+`logDebug()`/`logWarn()` sind dünne Wrapper, die beides gleichzeitig tun.
+Reine Zusatz-Instrumentierung, keine Änderung an Rate-/Segment-Logik selbst.
 
 ### Sprint 5.40 DONE (Diagnose, kein Fix): Logging für Segment-Wechsel-Bug
 

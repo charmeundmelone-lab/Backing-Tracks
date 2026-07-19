@@ -119,12 +119,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (_currentSong.value?.id == song.id) _currentSong.value = u
     }
 
-    fun updateLyricsLeadMs(song: Song, leadMs: Long) {
-        val u = song.copy(lyricsLeadMs = leadMs)
-        viewModelScope.launch { dao.updateLyricsLeadMs(song.id, leadMs) }
-        if (_currentSong.value?.id == song.id) _currentSong.value = u
-    }
-
     private val _queue           = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
 

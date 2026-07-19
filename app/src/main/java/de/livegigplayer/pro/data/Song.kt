@@ -34,9 +34,9 @@ data class Song(
     // Kalibrierungspunkte aus dem Teleprompter: "lineIndex:positionMs" kommagetrennt,
     // sortiert nach positionMs. Siehe LyricsOverlay.parseSyncPoints/serializeSyncPoints.
     val lyricsSyncPoints: String = "",
-    // Vorlauf des Teleprompter-Scrolls in ms (v17): um wie viel der Text dem echten
-    // Gesang vorauseilt. Kompensiert die menschliche Reaktionszeit beim Kalibrieren
-    // (jeder Tap wird ~0,3–0,5s NACH dem echten Abschnittswechsel gesetzt) und gibt
-    // dem Sänger Vorlesezeit. Live im Teleprompter per −/+ verstellbar.
+    // (v17) Reserviert/unbenutzt: war ein einstellbarer Scroll-Vorlauf (Sprint 5.45),
+    // durch das Abschnitts-Modell mit Oben-Anker (Sprint 5.46) abgelöst. Spalte bleibt
+    // aus Schema-Kompatibilität erhalten (ADD-only-Konvention, Gerät ist bereits auf v17),
+    // wird nicht mehr geschrieben — analog lyricsStartMs.
     val lyricsLeadMs: Long = 0L
 )

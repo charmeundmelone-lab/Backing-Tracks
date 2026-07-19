@@ -119,7 +119,7 @@ app/src/main/java/de/livegigplayer/pro/
 | lyrics | String | Songtext ohne Akkorde, mit optionalen Struktur-Labels wie `[Chorus]` (v14) |
 | lyricsStartMs | Long | Superseded durch lyricsSyncPoints (v16) — nur Schema-Kompatibilität, unbenutzt |
 | lyricsSyncPoints | String | Teleprompter-Kalibrierungspunkte "lineIdx:ms,…", ein Tap pro Abschnitt (v16) |
-| lyricsLeadMs | Long | Teleprompter-Vorlauf in ms: wie weit der Text dem Gesang vorauseilt, live per −/+ verstellbar (v17) |
+| lyricsLeadMs | Long | (v17) Reserviert/unbenutzt — war Vorlauf-Regler (Sprint 5.45), abgelöst durch Abschnitts-Modell/Oben-Anker (5.46) |
 
 ## Build-Setup
 
@@ -286,22 +286,23 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
       — bewusst NICHT aus dem Text entfernt wie Akkord-Zeilen, weil es reine
       Songstruktur ist, kein Akkord.
-    - **Fester Lesepunkt (Sprint 5.39):** `ANCHOR_FRACTION = 0.3f` (Top-Level-
-      Konstante). Der Content-Placeable wird im `layout{}`-Block nicht mehr ab
-      `-scrollOffsetPx` (= Viewport-Oberrand), sondern ab `readingAnchorPx -
-      scrollOffsetPx` platziert, wobei `readingAnchorPx = constraints.maxHeight
-      * ANCHOR_FRACTION` direkt aus der Messphase kommt (kein Lag durch
-      separates `viewportHeightPx`-State). Reine Verschiebung des
-      Platzierungs-Nullpunkts — `scrollOffsetPx` selbst (Rate-Berechnung pro
-      Segment, Monoton-Klemmung, `handleTap()`) bleibt unverändert, dadurch
-      automatisch weiterhin korrekt mit Kalibrierung/Live-Tap-to-Sync
-      komponierbar, ohne Sonderfall-Code. Eine dünne, NICHT mitscrollende
-      Indikator-Linie (`Box`, 1dp, Volt 25% Alpha) liegt als zweites Kind
-      derselben äußeren `Box` bei `viewportHeightPx * ANCHOR_FRACTION` über
-      dem `Layout` — rein optische Markierung des festen Lesepunkts, kein
-      Einfluss auf die Scroll-Mechanik. Dafür musste das bisher alleinstehende
-      `Layout` in eine `Box(fillMaxSize())` gewrappt werden (zwei Geschwister:
-      `Layout` + Indikator-`Box`).
+    - **Abschnitts-Modell / Oben-Anker (Sprint 5.46, ERSETZT den festen 30%-
+      Lesepunkt aus 5.39):** Der Content-Placeable wird im `layout{}`-Block ab
+      `-scrollOffsetPx` platziert — d.h. bei `scrollOffsetPx == Pixel eines
+      Abschnitts-Anfangs` steht dieser exakt am OBEREN Bildschirmrand. Genau das
+      peilt die Kalibrierung an: jeder Abschnitts-Anfang erreicht zu seinem
+      kalibrierten Zeitpunkt den oberen Rand, dazwischen gleitet der Text mit der
+      pro Segment berechneten Rate (jeder Abschnitt hat so seine eigene
+      Geschwindigkeit). **Warum der 30%-Lesepunkt (5.39) WEG ist:** er rückte über
+      die gerade gesungene Zeile permanent ~15 Zeilen (0.3 × Viewport / Zeilenhöhe)
+      BEREITS GESUNGENEN Text — genau dorthin, wo man beim Singen instinktiv
+      hinschaut. Das war die strukturelle Ursache des "hinkt hinterher"-Gefühls,
+      unabhängig von Rate/Interpolation. Oben-Anker beseitigt das: oben steht das
+      Aktuelle, darunter nur Kommendes. Reine Platzierungsänderung —
+      `scrollOffsetPx` (Rate pro Segment, Monoton-Klemmung, `handleTap()`) bleibt
+      unverändert. `ANCHOR_FRACTION` und die nicht-scrollende Indikator-Linie aus
+      5.39 wieder entfernt; das `Layout` bleibt in der `Box(fillMaxSize())`
+      gewrappt (harmlos, bekannt gut vermessend).
     - **Diagnose-Log lebt im ViewModel, nicht in `LyricsOverlay.kt` (Sprint 5.43):**
       `PlayerViewModel.lyricsDebugLog` (`MutableList<String>`) statt
       `remember(song.id, openSession)` in `LyricsContent` — Grund: CUE-Modus
@@ -332,36 +333,62 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       sowohl die Frame-Loop als auch `handleTap()` (Kalibrierungs-Aufnahme)
       dieselbe Schätzung verwenden — sonst wären Kalibrierungspunkte leicht
       verrauscht relativ zur Playback-Darstellung.
-    - **Einstellbarer Vorlauf `song.lyricsLeadMs` (Sprint 5.45, Room v17):** Nach
-      5.44 (Positions-Hochrechnung, smooth) blieb das gefühlte Nachhinken —
-      Beweis, dass es KEIN Rechenfehler in der Rate/Interpolation ist (die
-      Segment-Raten im Log variieren nachweislich korrekt 0.0128–0.0333 px/ms),
-      sondern ein KONSTANTER Zeit-Versatz. Ursache: menschliche Reaktionszeit
-      beim Kalibrieren (jeder Tap wird ~0,3–0,5s NACH dem echten
-      Abschnittswechsel gesetzt, dieser Verzug ist in jedem Kalibrierungspunkt
-      eingebacken und wird beim Abspielen exakt reproduziert) + fehlende
-      Vorlesezeit für den Sänger. Fix: `leadMs` wird im Frame-Loop auf die
-      geschätzte Position addiert (`pos = (estimatedPositionMs() + leadMs)
-      .coerceIn(0, dur)`) — der Scroll rechnet mit einer voraus liegenden
-      Position, jede Zeile erreicht den Lesepunkt `leadMs` früher. Bewusst KEIN
-      weiterer unsichtbarer Automatik-Fix (fünfter Blind-Versuch vermieden):
-      stattdessen ein DIREKT vom User verstellbarer Knopf (−/+ im Header,
-      250ms-Schritte, −3s..+8s), live während der Wiedergabe, sofort pro Song
-      persistiert (`SongDao.updateLyricsLeadMs`) — der User dial't den Text
-      exakt dorthin, wo er singt, unabhängig von der genauen Ursache. Lead wirkt
-      NUR auf die Playback-Position im Scroll, NICHT auf `handleTap()`/die
-      Kalibrierungs-Aufnahme (die zeichnet weiter Roh-Positionen auf) — Lead ist
-      eine reine Playback-Kompensation ON TOP der Kalibrierung, komponiert
-      dadurch automatisch korrekt, ohne Sonderfall-Code.
+    - **Einstellbarer Vorlauf `song.lyricsLeadMs` (Sprint 5.45, Room v17) —
+      ZURÜCKGENOMMEN in 5.46:** War ein −/+ Knopf im Header, der eine konstante
+      Zeit-Verschiebung auf die Playback-Position addierte, um die beim
+      Kalibrieren eingebackene Reaktionszeit zu kompensieren. Der User wollte
+      keinen Regler-Kram, sondern das Abschnitts-Modell (Oben-Anker, siehe oben).
+      UI + Anwendung wieder entfernt; die DB-Spalte `lyricsLeadMs` (v17) bleibt
+      reserviert/unbenutzt bestehen (ADD-only-Konvention, Gerät ist bereits auf
+      v17 — analog `lyricsStartMs`). Falls sich nach 5.46 doch noch ein winziger
+      konstanter Versatz zeigt, ist das die naheliegende, sauber wieder
+      aktivierbare Feinjustierung.
 
 ## Letzter Stand
 
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Teleprompter — einstellbarer Vorlauf (−/+ Knopf, pro Song gespeichert) gegen konstantes Nachhinken (Room v17)
+**Commit:** Teleprompter — Abschnitts-Modell: jeder Abschnitts-Anfang gleitet zu seinem Einsatz an den OBEREN Rand (löst den 30%-Lesepunkt ab, der die eigentliche Nachhinken-Ursache war)
 
-### Sprint 5.45 DONE (ungetestet): Einstellbarer Vorlauf gegen konstantes Nachhinken (Room v16→17)
+### Sprint 5.46 DONE (ungetestet): Abschnitts-Modell — Oben-Anker statt 30%-Lesepunkt
+
+User-Ansage nach 5.45 (Vorlauf-Regler): "das gefällt mir so nicht", stattdessen
+eine eigene Vorstellung — einmal durchtippen, dann soll **jeder Abschnitt als
+Ganzes sanft an den oberen Rand gleiten**, jeder Abschnitt mit eigener
+Geschwindigkeit, während der Song durchläuft. Per Frage/Antwort geklärt:
+durchgehend langsames Gleiten (kein Halten/Snappen), Fokus-Position ganz oben.
+
+**Kern-Erkenntnis (endlich die Wurzel des "hinkt hinterher"):** Der feste
+30%-Lesepunkt (Sprint 5.39) rückte über die gerade gesungene Zeile permanent
+~15 Zeilen (0.3 × Viewport / Zeilenhöhe) BEREITS GESUNGENEN Text — genau
+dorthin, wo man beim Singen instinktiv hinschaut. Das erklärt das dauerhafte
+"der Text ist hinter mir"-Gefühl STRUKTURELL, unabhängig von Rate/Interpolation
+(die laut Diagnose-Log nachweislich korrekt waren, 0.0128–0.0333 px/ms). ALLE
+Nachhinken-Reports (5.40–5.45) liefen mit diesem 30%-Anker.
+
+**Fix (bewusst minimal & risikoarm):** Platzierung im `Layout` von
+`readingAnchorPx - scrollOffsetPx` zurück auf `-scrollOffsetPx` (Oben-Anker) —
+bei `scrollOffsetPx == Pixel eines Abschnitts-Anfangs` steht dieser exakt oben,
+genau was die Kalibrierung anpeilt. `scrollOffsetPx` selbst (Rate pro Segment,
+Monoton-Klemmung, `handleTap()`, Positions-Hochrechnung aus 5.44) bleibt
+UNVERÄNDERT — deshalb sehr risikoarm, die gefürchtete Fehlerklasse
+(Rückwärtssprung/Ruckeln/Race) betrifft nur `scrollOffsetPx`. Entfernt:
+`ANCHOR_FRACTION`, die 30%-Indikator-Linie, der Vorlauf-Regler samt −/+ UI
+und `updateLyricsLeadMs` (DAO/VM). Behalten: DB-Feld `lyricsLeadMs` + Migration
+v17 (Schema-Stabilität, Gerät bereits auf v17 — analog `lyricsStartMs`).
+Kalibrierung, Diagnose-Log/Share, Struktur-Labels, 60fps-Hochrechnung: alle
+unverändert. Siehe Gotcha 12.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich (Google-Maven
+  für Android-Gradle-Plugin gesperrt, 403 — nur statisch geprüft: Klammerbalance,
+  keine verwaisten Referenzen, Imports, Schema). **Nächste Session: live testen** —
+  Bed of Roses (Kalibrierung bleibt gespeichert): fühlt sich der Text jetzt beim
+  Mitsingen richtig an, kommt der aktuelle Abschnitt oben an, ist das Nachhinken
+  weg? Falls ein kleiner konstanter Rest bleibt: Vorlauf (5.45) sauber wieder
+  aktivierbar.
+
+### Sprint 5.45 DONE: Einstellbarer Vorlauf — vom User abgelehnt, in 5.46 zurückgenommen (Room v16→17)
 
 User-Report nach 5.44 (Positions-Hochrechnung, CI grün): "das Problem besteht
 weiterhin" — der Text hinkt beim Mitsingen weiterhin konstant hinterher, die
@@ -1281,17 +1308,16 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
   `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
   diesen einen Song vermerkt.
-- 🔴 **Teleprompter-Nachhinken: einstellbarer Vorlauf live testen (PRIO 1,
-  NEU in Sprint 5.45):** 5.44 (60fps-Interpolation) hat das gefühlte Nachhinken
-  NICHT behoben → Ursache ist kein Rechenfehler (Segment-Raten laut Log korrekt),
-  sondern ein konstanter Zeit-Versatz (Reaktionszeit beim Kalibrieren + fehlende
-  Vorlesezeit). Fix (5.45): direkt verstellbarer Vorlauf (`song.lyricsLeadMs`,
-  Room v17, −/+ im Header, pro Song gespeichert), addiert auf die Playback-
-  Position im Scroll (siehe Gotcha 12). **Nächste Session: live testen** —
-  Bed of Roses mitsingen, Vorlauf per + hochdrehen bis der Text passt, prüfen
-  ob der Wert pro Song erhalten bleibt. Falls der Vorlauf-Knopf das Nachhinken
-  nicht löst, ist die Annahme "konstanter Zeit-Versatz" falsch und die Ursache
-  liegt tiefer (dann erneut Log auswerten).
+- 🔴 **Teleprompter Abschnitts-Modell (Oben-Anker) live testen (PRIO 1, NEU in
+  Sprint 5.46):** Wurzel des Nachhinkens gefunden — der 30%-Lesepunkt (5.39)
+  zeigte über der aktuellen Zeile permanent ~15 Zeilen bereits gesungenen Text.
+  Fix: Oben-Anker (jeder Abschnitts-Anfang gleitet zu seinem Einsatz an den
+  oberen Rand), Vorlauf-Regler zurückgenommen (User wollte ihn nicht). Rein
+  Platzierung geändert, Scroll-Mechanik unangetastet. **Nächste Session: mit
+  Bed of Roses live mitsingen** (Kalibrierung bleibt gespeichert) — kommt der
+  aktuelle Abschnitt oben an, ist das Nachhinken weg, fühlt es sich smooth an?
+  Falls ein kleiner konstanter Rest bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration
+  noch da) sauber wieder aktivierbar.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

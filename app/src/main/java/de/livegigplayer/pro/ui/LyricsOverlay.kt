@@ -19,16 +19,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -55,16 +52,11 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
-
-// Fester Lesepunkt: Anteil der Viewport-Höhe von oben, an dem die aktuelle Zeile
-// beim Durchlaufen sichtbar "im Fokus" steht (siehe Layout-Platzierung unten).
-private const val ANCHOR_FRACTION = 0.3f
 
 private val LyricsBg    = Color(0xFF0A0A0A)
 private val LyricsVolt  = Color(0xFFE8FF00)
@@ -120,6 +112,18 @@ private fun parseDurationString(s: String): Long {
  * 2. **Live-Tap-to-Sync** (Tap irgendwo im Textbereich, außerhalb Kalibrierung):
  *    einmalige, NICHT gespeicherte Korrektur für die laufende Wiedergabe.
  *
+ * **ABSCHNITTS-MODELL (Sprint 5.46):** Der Scroll ist so verankert, dass der
+ * ANFANG jedes Abschnitts genau zu seinem kalibrierten Zeitpunkt am OBEREN
+ * Bildschirmrand ankommt (nicht mehr an einem festen 30%-Lesepunkt, siehe
+ * unten). Zwischen zwei Kalibrierungspunkten gleitet der Text durchgehend
+ * sanft mit der für dieses Segment berechneten Rate — jeder Abschnitt hat so
+ * automatisch seine eigene Geschwindigkeit. Der Abschnitt, den man gerade
+ * singt, steht dadurch oben, darunter der Rest + das Kommende. Der frühere
+ * 30%-Lesepunkt (Sprint 5.39) rückte über die aktuelle Zeile dauerhaft ~15
+ * Zeilen bereits gesungenen Text — genau dorthin, wo man beim Singen hinschaut
+ * — und war die eigentliche Ursache des "hinkt hinterher"-Gefühls. Oben-Anker
+ * beseitigt das strukturell.
+ *
  * ARCHITEKTUR (Sprint 5.36 — bewusst ohne ScrollState/Animation): Frühere Versuche
  * nutzten Compose's `ScrollState` (`verticalScroll` + `scrollTo`/`animateScrollTo`).
  * Das Problem dabei: `handleTap()` rief `animateScrollTo()` auf, während die
@@ -166,7 +170,6 @@ fun LyricsOverlay(
     isPlaying: Boolean,
     onClose: () -> Unit,
     onSetLyricsSyncPoints: (Long, String) -> Unit = { _, _ -> },
-    onSetLyricsLeadMs: (Long, Long) -> Unit = { _, _ -> },
     debugLog: List<String> = emptyList(),
     onLogDebug: (String) -> Unit = {},
     onLogWarn: (String) -> Unit = {}
@@ -197,7 +200,6 @@ fun LyricsOverlay(
                 isPlaying             = isPlaying,
                 onClose               = onClose,
                 onSetLyricsSyncPoints = onSetLyricsSyncPoints,
-                onSetLyricsLeadMs     = onSetLyricsLeadMs,
                 debugLog              = debugLog,
                 onLogDebug            = onLogDebug,
                 onLogWarn             = onLogWarn
@@ -215,7 +217,6 @@ private fun LyricsContent(
     isPlaying: Boolean,
     onClose: () -> Unit,
     onSetLyricsSyncPoints: (Long, String) -> Unit,
-    onSetLyricsLeadMs: (Long, Long) -> Unit,
     debugLog: List<String>,
     onLogDebug: (String) -> Unit,
     onLogWarn: (String) -> Unit
@@ -250,18 +251,11 @@ private fun LyricsContent(
     var anchorPositionMs by remember(song.id, openSession) { mutableStateOf(0L) }
     var anchorScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
     // Aktuell angewandter Scroll-Offset — EINZIGE Quelle der Wahrheit fürs Rendering
-    // (siehe Modifier.offset unten). Wird NIE verringert (nur abwärts, nie zurück).
+    // (siehe Layout-placeRelative unten). Wird NIE verringert (nur abwärts, nie zurück).
     // Einziger Schreiber ist die Frame-Loop unten; handleTap() setzt nur den Anker,
     // die Loop übernimmt den neuen Wert automatisch im nächsten Frame — dadurch gibt
     // es nur einen einzigen Mutationspfad, keine konkurrierende Animation mehr.
     var scrollOffsetPx by remember(song.id, openSession) { mutableStateOf(0f) }
-
-    // Einstellbarer Vorlauf: um wie viel ms der Text dem echten Gesang vorauseilt.
-    // Startwert aus der DB (song.lyricsLeadMs), live per −/+ im Header verstellbar,
-    // Änderung wird sofort persistiert. Kompensiert die beim Kalibrieren eingebackene
-    // Reaktionszeit (jeder Tap ~0,3–0,5s zu spät) und gibt dem Sänger Vorlesezeit.
-    var leadMs by remember(song.id, openSession) { mutableStateOf(song.lyricsLeadMs) }
-    val latestLeadMs by rememberUpdatedState(leadMs)
 
     // Zusätzliche Absicherung gegen eine zu kurze live gemeldete durationMs.
     val dbDurationMs = remember(song.id, song.duration) { parseDurationString(song.duration) }
@@ -321,12 +315,8 @@ private fun LyricsContent(
                 continue
             }
 
+            val pos = estimatedPositionMs()
             val dur = latestDurationMs
-            // Vorlauf anwenden: der Scroll rechnet mit einer um leadMs voraus liegenden
-            // Position → jede Zeile erreicht den Lesepunkt leadMs früher als kalibriert.
-            // Auf [0, dur] geklemmt, damit der Vorlauf am Songende nicht über die letzte
-            // Zeile hinausschießt (der Rest wird ohnehin durch maxScrollPx begrenzt).
-            val pos = (estimatedPositionMs() + latestLeadMs).coerceIn(0L, dur)
 
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
             var segmentJustChanged = false
@@ -472,39 +462,6 @@ private fun LyricsContent(
                 }
             }
 
-            // Vorlauf-Steuerung: regelt live, wie weit der Text dem Gesang vorauseilt.
-            // Direkt kompensierbar, wenn der Text "hinterherhinkt" (+ drücken) oder
-            // vorauseilt (− drücken). Wird pro Song sofort gespeichert.
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Vorlauf", color = LyricsGray, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                IconButton(
-                    onClick = {
-                        leadMs = (leadMs - 250L).coerceIn(-3000L, 8000L)
-                        onSetLyricsLeadMs(song.id, leadMs)
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Filled.Remove, contentDescription = "Vorlauf verringern", tint = LyricsVolt, modifier = Modifier.size(20.dp))
-                }
-                Text(
-                    (if (leadMs >= 0) "+" else "") + "%.2f s".format(leadMs / 1000f),
-                    color = LyricsWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-                IconButton(
-                    onClick = {
-                        leadMs = (leadMs + 250L).coerceIn(-3000L, 8000L)
-                        onSetLyricsLeadMs(song.id, leadMs)
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = "Vorlauf erhöhen", tint = LyricsVolt, modifier = Modifier.size(20.dp))
-                }
-            }
-
             if (calibrating) {
                 Text(
                     "● Kalibrierung läuft — ${calibrationPoints.size} Punkte — bei jedem Abschnittswechsel tippen",
@@ -568,7 +525,8 @@ private fun LyricsContent(
                                     )
                                 }
                             }
-                            // Platzhalter am Ende, damit auch die letzte Zeile bis zum Lesepunkt scrollen kann.
+                            // Platzhalter am Ende, damit die Zeilen des letzten Abschnitts
+                            // noch bis zum oberen Rand hochscrollen können.
                             Spacer(modifier = Modifier.height(240.dp))
                         }
                     }
@@ -577,28 +535,15 @@ private fun LyricsContent(
                     val contentConstraints = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
                     val placeable = measurables.first().measure(contentConstraints)
                     contentHeightPx = placeable.height.toFloat()
-                    // Fester Lesepunkt: Inhalt wird nicht ab dem Viewport-Oberrand platziert,
-                    // sondern ab ANCHOR_FRACTION * Viewport-Höhe — die "aktuelle" Zeile läuft
-                    // dadurch sichtbar durch diese feste Bildschirmposition, statt oben zu
-                    // verschwinden. Reine Verschiebung des Platzierungs-Nullpunkts, ändert
-                    // nichts an scrollOffsetPx selbst (Rate-Berechnung, Monoton-Klemmung).
-                    val readingAnchorPx = (constraints.maxHeight * ANCHOR_FRACTION).roundToInt()
+                    // Oben-Anker (Abschnitts-Modell, Sprint 5.46): Inhalt wird ab dem
+                    // Viewport-Oberrand platziert. Bei scrollOffsetPx == Pixel eines
+                    // Abschnitts-Anfangs steht dieser damit exakt oben — genau das, was
+                    // die Kalibrierung anpeilt (Abschnitt erreicht zu seinem Zeitpunkt den
+                    // oberen Rand). Reine Platzierung, ändert nichts an scrollOffsetPx
+                    // selbst (Rate-Berechnung pro Segment, Monoton-Klemmung).
                     layout(constraints.maxWidth, constraints.maxHeight) {
-                        placeable.placeRelative(0, readingAnchorPx - scrollOffsetPx.roundToInt())
+                        placeable.placeRelative(0, -scrollOffsetPx.roundToInt())
                     }
-                }
-
-                // Statische Indikator-Linie am festen Lesepunkt — läuft selbst nicht mit,
-                // markiert nur die Bildschirmposition, an der der Text gerade "im Fokus" ist.
-                if (viewportHeightPx > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .fillMaxWidth()
-                            .offset { IntOffset(0, (viewportHeightPx * ANCHOR_FRACTION).roundToInt()) }
-                            .height(1.dp)
-                            .background(LyricsVolt.copy(alpha = 0.25f))
-                    )
                 }
             }
         }

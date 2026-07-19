@@ -258,7 +258,6 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             isPlaying        = isPlaying,
             onClose          = { vm.closeLyrics() },
             onSetLyricsSyncPoints = { _, points -> currentSong?.let { vm.updateLyricsSyncPoints(it, points) } },
-            onSetLyricsLeadMs = { _, leadMs -> currentSong?.let { vm.updateLyricsLeadMs(it, leadMs) } },
             debugLog         = vm.lyricsDebugLog,
             onLogDebug       = { vm.logLyricsDebug(it) },
             onLogWarn        = { vm.logLyricsWarn(it) }

@@ -240,9 +240,37 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-18
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.32)
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.33)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Mehrpunkt-Kalibrierung ersetzt Start-Anker im Teleprompter (Room v15→16) — noch ungetestet auf echtem Gerät
+**Commit:** Fix Race-Bug im Kalibrierungs-Frame-Loop — Scroll sprang bei Layout-Timing-Race auf volle Länge
+
+### Sprint 5.33 DONE (ungetestet): Fix — Scroll sprang schnell/ruckartig bis ans Songende (Race-Bug, Commit folgt)
+
+User-Report nach Live-Test von Sprint 5.32: Text scrollt "ziemlich abgehackt ... in hoher
+Geschwindigkeit" von oben nach unten statt in der kalibrierten Geschwindigkeit.
+
+**Root Cause:** Im Frame-Loop (`LyricsOverlay.kt`) fiel `segEndPx` (Scroll-Ziel des
+nächsten Kalibrierungspunkts) auf `max.toFloat()` (= volle Scroll-Länge) zurück,
+wann immer `linePositions[lineIdx]` noch `null` war — nicht nur wenn es KEINEN
+nächsten Breakpoint mehr gab (beabsichtigt), sondern fälschlich AUCH, wenn ein
+Zwischen-Breakpoint schlicht noch nicht vermessen war (Compose-Layout-Timing-Race
+beim (Wieder-)Öffnen des Screens, v.a. wenn mitten im Song geöffnet — `positionMs`
+dann schon groß). Ergebnis: ein einzelner Zwischenpunkt wurde für einen Frame wie
+das Songende behandelt → Rate schießt hoch → durch die Monoton-Klemmung
+(`targetScrollPx` darf nie sinken) blieb dieser falsche, viel zu hohe Wert für den
+Rest der Wiedergabe hängen.
+
+**Fix:** `segEndPx` ist jetzt `Float?` — `null` nur beim echten Songende
+(kein weiterer Breakpoint), sonst bei fehlender Messung schlicht kein Update in
+diesem Frame (nächster Frame versucht's erneut), statt eines falschen Ausweich-
+werts. Gleiches Pattern beim Anker-Vorschalten: `break` statt stillschweigendem
+Überspringen, falls eine Zeile noch nicht vermessen ist — kein Kalibrierungspunkt
+geht mehr verloren.
+
+- **Nicht verifiziert:** Wie 5.30–5.32 kein Gradle-Build in dieser Session
+  möglich — nur manuell gegengelesen. **Nächste Session: live gegentesten**,
+  v.a. den ursprünglich gemeldeten Fall (Screen mitten im Song öffnen/erneut
+  öffnen) gezielt reproduzieren.
 
 ### Sprint 5.32 DONE (ungetestet): Teleprompter — Mehrpunkt-Kalibrierung statt Start-Anker (Room v15→16)
 
@@ -680,15 +708,18 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als
   eigene Volt-Überschrift gerendert. Nicht mehr offen.
-- ⚠️ **Sprint 5.32 (Mehrpunkt-Kalibrierung) auf echtem Gerät testen (PRIO 1):**
-  Ersetzt den Start-Anker aus 5.31 komplett. Wie 5.30/5.31 ohne Gradle-Build
-  implementiert (Netzwerk-Policy blockiert `dl.google.com` in der Sandbox). Vor
-  allem prüfen: DB-Migration 15→16 greift sauber, Record-Button zeichnet Taps
-  korrekt auf (Zähler in der Statuszeile stimmt), "Fertig" persistiert die
-  Punkte, Song neu öffnen/starten läuft ohne erneutes Tippen in der beim
-  Kalibrieren gesetzten Geschwindigkeit ab, niemals Rückwärtssprung (kritisch
-  laut User — Erfahrung aus anderen Apps), Live-Tap-to-Sync funktioniert
-  weiterhin auch nach abgeschlossener Kalibrierung.
+- ⚠️ **Sprint 5.32/5.33 (Mehrpunkt-Kalibrierung + Race-Fix) auf echtem Gerät
+  testen (PRIO 1):** Ersetzt den Start-Anker aus 5.31 komplett. User meldete
+  nach 5.32 einen Bug (Scroll springt schnell/ruckartig bis ans Ende) — Root
+  Cause gefunden und in 5.33 gefixt (Layout-Timing-Race, siehe dort), aber
+  NICHT live gegengetestet (kein Gradle-Build in der Sandbox möglich). Vor
+  allem prüfen: der ursprünglich gemeldete Fall (Teleprompter mitten im Song
+  öffnen/erneut öffnen) läuft jetzt smooth statt zu springen, DB-Migration
+  15→16 greift sauber, Record-Button zeichnet Taps korrekt auf, "Fertig"
+  persistiert die Punkte, Song neu starten läuft ohne erneutes Tippen in der
+  kalibrierten Geschwindigkeit ab, niemals Rückwärtssprung (kritisch laut
+  User — Erfahrung aus anderen Apps), Live-Tap-to-Sync funktioniert weiterhin
+  auch nach abgeschlossener Kalibrierung.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

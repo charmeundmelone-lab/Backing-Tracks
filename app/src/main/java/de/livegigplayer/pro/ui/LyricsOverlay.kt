@@ -192,24 +192,32 @@ private fun LyricsContent(
             val max = scrollState.maxValue
 
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
+            // Noch nicht vermessene Zeile (Layout-Timing-Race) → Schleife abbrechen und im
+            // nächsten Frame erneut versuchen, statt den Punkt stillschweigend zu verlieren.
             while (nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
                 val (lineIdx, ms) = breakpoints[nextIdx]
-                linePositions[lineIdx]?.let { px ->
-                    anchorPositionMs = ms
-                    anchorScrollPx   = px
-                }
+                val px = linePositions[lineIdx] ?: break
+                anchorPositionMs = ms
+                anchorScrollPx   = px
                 nextIdx++
             }
 
             if (dur > anchorPositionMs && max > 0) {
                 val nextBreak = breakpoints.getOrNull(nextIdx)
                 val segEndMs  = nextBreak?.second ?: dur
-                val segEndPx  = nextBreak?.let { linePositions[it.first] } ?: max.toFloat()
-                val rate      = if (segEndMs > anchorPositionMs)
-                    (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat() else 0f
-                val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
-                val clamped = raw.coerceIn(0f, max.toFloat())
-                if (clamped > targetScrollPx) targetScrollPx = clamped
+                // Bei einem noch nicht vermessenen Zwischen-Ziel (Layout-Timing-Race beim
+                // Öffnen) NICHT auf "volle Scroll-Länge" ausweichen — sonst würde ein
+                // Zwischenpunkt fälschlich wie das Songende behandelt (Rate schießt hoch)
+                // und bleibt wegen der Monoton-Klemmung dauerhaft hängen. Stattdessen: in
+                // diesem Frame einfach nichts aktualisieren, nächster Frame versucht's erneut.
+                val segEndPx: Float? = if (nextBreak == null) max.toFloat() else linePositions[nextBreak.first]
+                if (segEndPx != null) {
+                    val rate = if (segEndMs > anchorPositionMs)
+                        (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat() else 0f
+                    val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
+                    val clamped = raw.coerceIn(0f, max.toFloat())
+                    if (clamped > targetScrollPx) targetScrollPx = clamped
+                }
             }
             if (targetScrollPx.roundToInt() != scrollState.value) {
                 scrollState.scrollTo(targetScrollPx.roundToInt())

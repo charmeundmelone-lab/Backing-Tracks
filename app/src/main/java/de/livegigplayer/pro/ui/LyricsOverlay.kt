@@ -255,6 +255,37 @@ private fun LyricsContent(
     val dbDurationMs = remember(song.id, song.duration) { parseDurationString(song.duration) }
     val latestPositionMs by rememberUpdatedState(positionMs)
     val latestDurationMs by rememberUpdatedState(maxOf(durationMs, dbDurationMs))
+    val latestIsPlaying   by rememberUpdatedState(isPlaying)
+
+    // positionMs kommt aus PlayerViewModel und wird dort nur alle 200ms aktualisiert
+    // (Poll-Loop, delay(200L)) — Frame-Loop UND handleTap() brauchen aber eine zum
+    // Zeitpunkt des Aufrufs möglichst genaue, kontinuierliche Schätzung, nicht den
+    // eingefrorenen 200ms-Rohwert (sonst "Treppenstufen" statt smooth, wirkt konstant/
+    // hinterher — das war der eigentliche Bug hinter "Song kommt nicht hinterher").
+    // lastRawPositionMs/-AtNanos verankern den letzten ECHTEN Messwert; solange er sich
+    // nicht ändert, wird per realer Systemzeit linear hochgerechnet (gekappt auf max.
+    // 400ms) — der nächste echte 200ms-Wert korrigiert die Hochrechnung automatisch,
+    // kein Drift. Auf Composable-Ebene gehalten (nicht lokal im LaunchedEffect), damit
+    // sowohl die Frame-Loop als auch handleTap() dieselbe Schätzung verwenden.
+    var lastRawPositionMs   by remember(song.id, openSession) { mutableStateOf(positionMs) }
+    var lastRawPositionAtNs by remember(song.id, openSession) { mutableStateOf(System.nanoTime()) }
+    var wasPlayingForEstimate by remember(song.id, openSession) { mutableStateOf(isPlaying) }
+    fun estimatedPositionMs(): Long {
+        val rawPos = latestPositionMs
+        val nowNs  = System.nanoTime()
+        val justResumed = latestIsPlaying && !wasPlayingForEstimate
+        if (rawPos != lastRawPositionMs || justResumed) {
+            lastRawPositionMs   = rawPos
+            lastRawPositionAtNs = nowNs
+        }
+        wasPlayingForEstimate = latestIsPlaying
+        return if (latestIsPlaying) {
+            val elapsedMs = (nowNs - lastRawPositionAtNs) / 1_000_000L
+            lastRawPositionMs + elapsedMs.coerceIn(0L, 400L)
+        } else {
+            lastRawPositionMs
+        }
+    }
 
     // Kontinuierlicher Frame-für-Frame-Scroll. Rate wird pro Segment (zwischen
     // zwei aufeinanderfolgenden Kalibrierungspunkten, bzw. Songanfang/-ende als
@@ -278,7 +309,7 @@ private fun LyricsContent(
                 continue
             }
 
-            val pos = latestPositionMs
+            val pos = estimatedPositionMs()
             val dur = latestDurationMs
 
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
@@ -347,10 +378,11 @@ private fun LyricsContent(
         val entry = linePositions.entries
             .filter { it.value > scrollOffsetPx + 4f }
             .minByOrNull { it.value } ?: return
-        anchorPositionMs = latestPositionMs
+        val pos = estimatedPositionMs()
+        anchorPositionMs = pos
         anchorScrollPx   = entry.value
         if (entry.value > scrollOffsetPx) scrollOffsetPx = entry.value
-        if (calibrating) calibrationPoints.add(entry.key to latestPositionMs)
+        if (calibrating) calibrationPoints.add(entry.key to pos)
     }
 
     // fillMaxSize() deckt zwar optisch den ganzen Screen ab, konsumiert aber

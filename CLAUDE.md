@@ -312,15 +312,68 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       der User ihn teilen konnte. Der ViewModel-Log überlebt jeden Songwechsel;
       jede Zeile trägt weiterhin den Songtitel, dadurch bleibt bei mehreren
       Songs im selben Log nachvollziehbar, welche Zeile zu welchem Song gehört.
+    - **Positions-Hochrechnung zwischen 200ms-Polls (Sprint 5.44):** `positionMs`
+      kommt aus `PlayerViewModel` und wird dort nur alle 200ms aktualisiert
+      (Poll-Loop, `delay(200L)`), der Scroll-Frame-Loop läuft aber mit 60fps.
+      Ohne Hochrechnung friert `pos` für ~12 von 12 Frames ein und springt dann
+      sprunghaft nach — sichtbar als "Treppenstufen" statt smooth, wirkte für
+      den User wie "läuft konstant und hinkt hinterher" (bestätigt per Live-
+      Test: Text kam beim Mitsingen nicht hinterher, obwohl die Segment-Raten
+      im Diagnose-Log nachweislich korrekt unterschiedlich waren). Fix:
+      `estimatedPositionMs()` verankert den letzten ECHTEN 200ms-Messwert
+      (`lastRawPositionMs`/`lastRawPositionAtNs`) und rechnet dazwischen per
+      realer Systemzeit linear hoch (`System.nanoTime()`, gekappt auf max.
+      400ms Overshoot) — der nächste echte 200ms-Wert korrigiert die
+      Hochrechnung automatisch, kein Drift. Läuft nur während `isPlaying`;
+      beim Pause→Play-Übergang wird der Anker sofort neu verankert (kein
+      Overshoot durch einen alten, vor der Pause liegenden Zeitstempel). Auf
+      Composable-Ebene gehalten (nicht lokal im `LaunchedEffect`), damit
+      sowohl die Frame-Loop als auch `handleTap()` (Kalibrierungs-Aufnahme)
+      dieselbe Schätzung verwenden — sonst wären Kalibrierungspunkte leicht
+      verrauscht relativ zur Playback-Darstellung.
 
 ## Letzter Stand
 
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Diagnose-Log überlebt jetzt Auto-Advance/CUE-Arming (ViewModel statt song-gebundenem Compose-State)
+**Commit:** Fix — Scroll hinkt hinterher/wirkt konstant (200ms-Poll vs. 60fps-Loop), Positions-Hochrechnung ergänzt
 
-### Sprint 5.43 DONE (ungetestet): Diagnose-Log übersteht Song-Wechsel (CUE-Arming-Bug gefunden)
+### Sprint 5.44 DONE (ungetestet): Fix — echter Root Cause für "läuft konstant/hinkt hinterher" gefunden
+
+User-Report nach 5.43 (persistenter Diagnose-Log, CI grün): Mit dem jetzt korrekt
+zugeordneten, vollständigen Log für Bed of Roses (11 Kalibrierungspunkte, echte
+Segment-Wechsel sichtbar) zeigte sich beim Live-Mitsingen weiterhin dasselbe
+Symptom — der Text bleibt konstant hinter dem Gesang zurück. User-Anweisung: die
+komplette Logik nochmal von Grund auf auf Denkfehler durchgehen, nicht nur die
+Rate-Formel selbst (die laut Log nachweislich korrekt unterschiedliche Werte pro
+Segment liefert, 0.0128–0.0333 px/ms).
+
+**Root Cause gefunden (Datenquelle, nicht Rate-Formel):** `PlayerViewModel`
+aktualisiert `positionMs` nur alle 200ms (Poll-Loop, `delay(200L)`), der
+Scroll-Frame-Loop in `LyricsOverlay.kt` läuft aber mit 60fps (`withFrameNanos`).
+Ohne Hochrechnung bleibt `pos` für ~12 von 12 Frames eingefroren und springt dann
+sprunghaft nach — der Scroll bewegt sich in "Treppenstufen" statt smooth, verbringt
+die meiste Zeit stillstehend. Das erklärt beide Symptome exakt: "konstant" (viel
+sichtbare Stillstandszeit) UND "hinkt hinterher" (der angezeigte Text liegt im
+Schnitt immer ein Stück hinter der kontinuierlich fortschreitenden Musik).
+
+**Fix:** `estimatedPositionMs()` (neue lokale Funktion in `LyricsContent`) verankert
+den letzten echten 200ms-Messwert (`lastRawPositionMs`/`lastRawPositionAtNs`) und
+rechnet dazwischen per realer Systemzeit (`System.nanoTime()`) linear hoch, gekappt
+auf max. 400ms Overshoot — der nächste echte 200ms-Wert korrigiert automatisch,
+kein Drift. Nur aktiv während `isPlaying`; beim Pause→Play-Übergang wird der Anker
+sofort neu verankert. Auf Composable-Ebene gehalten (nicht lokal im
+`LaunchedEffect`), damit sowohl die Frame-Loop als auch `handleTap()`
+(Kalibrierungs-Aufnahme) dieselbe Schätzung verwenden — sonst wären neu
+aufgenommene Kalibrierungspunkte leicht verrauscht relativ zur Playback-
+Darstellung. Siehe Gotcha 12 für Details.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich. **Nächste
+  Session: gezielt live testen**, ob sich der Scroll jetzt beim Mitsingen von
+  Bed of Roses spürbar smooth und ohne Nachhinken anfühlt.
+
+### Sprint 5.43 DONE: Diagnose-Log übersteht Song-Wechsel (CUE-Arming-Bug gefunden)
 
 User-Hinweis nach 5.42: Der geteilte Log gehörte zu einem Song, der laut User "gar
 nicht abgespielt wurde". Root Cause im Code bestätigt: `PlayerViewModel.skipNext()`
@@ -1173,6 +1226,17 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
   `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
   diesen einen Song vermerkt.
+- ⚠️ **Sprint 5.43 (persistenter Diagnose-Log) + Sprint 5.44 (Positions-
+  Hochrechnung) auf echtem Gerät testen (PRIO 1):** Mit korrekt zugeordnetem
+  Log (5.43) zeigte sich der ECHTE Bug: `positionMs` aus `PlayerViewModel`
+  aktualisiert nur alle 200ms, der 60fps-Frame-Loop lief bis dahin mit
+  eingefrorenen Werten in "Treppenstufen" statt smooth — erklärt "läuft
+  konstant" UND "hinkt beim Mitsingen hinterher" exakt. Fix (5.44):
+  `estimatedPositionMs()` rechnet zwischen den 200ms-Werten per realer
+  Systemzeit hoch (siehe Gotcha 12). **Nächste Session: gezielt live
+  testen**, ob sich der Scroll beim Mitsingen jetzt smooth und ohne
+  Nachhinken anfühlt — das war der Kernzweck der ganzen Funktion und bisher
+  nie erfolgreich bestätigt.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

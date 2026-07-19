@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -123,10 +123,18 @@ fun LyricsOverlay(
         }
     }
 
+    // Zählt jedes Öffnen hoch — als zusätzlicher remember()-Key in LyricsContent
+    // erzwingt das einen kompletten Reset des Scroll-Zustands bei jedem Öffnen,
+    // unabhängig davon, ob AnimatedVisibility die alte Komposition zwischen zwei
+    // schnellen Schließen/Öffnen-Zyklen noch am Leben hält.
+    var openSession by remember { mutableStateOf(0) }
+    LaunchedEffect(visible) { if (visible) openSession++ }
+
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         if (song != null) {
             LyricsContent(
                 song                  = song,
+                openSession           = openSession,
                 positionMs            = positionMs,
                 durationMs            = durationMs,
                 isPlaying             = isPlaying,
@@ -140,6 +148,7 @@ fun LyricsOverlay(
 @Composable
 private fun LyricsContent(
     song: Song,
+    openSession: Int,
     positionMs: Long,
     durationMs: Long,
     isPlaying: Boolean,
@@ -151,15 +160,20 @@ private fun LyricsContent(
     // Gespeicherte Kalibrierungspunkte dieses Songs, sortiert nach Position.
     val breakpoints = remember(song.id, song.lyricsSyncPoints) { parseSyncPoints(song.lyricsSyncPoints) }
 
-    val scrollState   = rememberScrollState()
+    // Wie der übrige Scroll-Zustand mit openSession gekeyt (statt rememberScrollState()),
+    // damit auch die rohe Scroll-Position bei jedem Öffnen bei 0 startet.
+    val scrollState   = remember(song.id, openSession) { ScrollState(0) }
     val scope         = rememberCoroutineScope()
-    // index -> gemessene Y-Position (px) innerhalb der scrollbaren Column
-    val linePositions = remember(song.id) { mutableMapOf<Int, Float>() }
+    // index -> gemessene Y-Position (px) innerhalb der scrollbaren Column. Wie der
+    // gesamte Scroll-Zustand unten mit openSession gekeyt: jedes Öffnen des Screens
+    // startet komplett frisch, statt einen eventuell verkorksten Zustand aus einer
+    // vorherigen Session (z.B. nach einem Bug in einer älteren Version) mitzuschleppen.
+    val linePositions = remember(song.id, openSession) { mutableMapOf<Int, Float>() }
 
     // Kalibrierungs-Modus: Record-Button an → jeder Tap wird zusätzlich zum
     // Live-Sync in calibrationPoints aufgezeichnet und beim Beenden persistiert.
-    var calibrating by remember(song.id) { mutableStateOf(false) }
-    val calibrationPoints = remember(song.id) { mutableStateListOf<Pair<Int, Long>>() }
+    var calibrating by remember(song.id, openSession) { mutableStateOf(false) }
+    val calibrationPoints = remember(song.id, openSession) { mutableStateListOf<Pair<Int, Long>>() }
 
     fun persistCalibration() {
         if (calibrationPoints.isNotEmpty()) {
@@ -171,10 +185,10 @@ private fun LyricsContent(
     // wird. Schaltet automatisch durch die Kalibrierungspunkte weiter, sobald die
     // Wiedergabe sie erreicht (siehe LaunchedEffect unten) — ohne Kalibrierung
     // bleibt es bei (0, 0), also reine Positions-Proportion wie zuvor.
-    var anchorPositionMs by remember(song.id) { mutableStateOf(0L) }
-    var anchorScrollPx   by remember(song.id) { mutableStateOf(0f) }
+    var anchorPositionMs by remember(song.id, openSession) { mutableStateOf(0L) }
+    var anchorScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
     // Zuletzt gesetztes Scroll-Ziel — wird NIE verringert (Anforderung: nur abwärts, nie zurück).
-    var targetScrollPx   by remember(song.id) { mutableStateOf(0f) }
+    var targetScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
 
     val latestPositionMs by rememberUpdatedState(positionMs)
     val latestDurationMs by rememberUpdatedState(durationMs)
@@ -183,7 +197,7 @@ private fun LyricsContent(
     // zwei aufeinanderfolgenden Kalibrierungspunkten, bzw. Songanfang/-ende als
     // Rand) neu berechnet — dadurch abschnittsweise konstante Geschwindigkeit
     // statt einer einzigen globalen Rate für den ganzen Song.
-    LaunchedEffect(song.id, song.lyricsSyncPoints) {
+    LaunchedEffect(song.id, openSession, song.lyricsSyncPoints) {
         var nextIdx = 0
         while (isActive) {
             withFrameNanos { }
@@ -202,7 +216,13 @@ private fun LyricsContent(
                 nextIdx++
             }
 
-            if (dur > anchorPositionMs && max > 0) {
+            // dur >= pos ist eine Plausibilitätsprüfung: durationMs kann beim Songwechsel
+            // (Preload/Crossfade der A/B-Player in AudioEngine) für einen Frame noch einen
+            // veralteten, zu kleinen Wert liefern, während positionMs schon weiterläuft. Ohne
+            // diese Prüfung würde raw sofort auf max geklemmt (pos > dur → Rate viel zu hoch)
+            // und blieb wegen der Monoton-Klemmung fälschlich für den Rest der Wiedergabe dort
+            // hängen — noch bevor überhaupt ein Kalibrierungs-Tap ankommen konnte.
+            if (dur > anchorPositionMs && dur >= pos && max > 0) {
                 val nextBreak = breakpoints.getOrNull(nextIdx)
                 val segEndMs  = nextBreak?.second ?: dur
                 // Bei einem noch nicht vermessenen Zwischen-Ziel (Layout-Timing-Race beim

@@ -64,6 +64,25 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // Verhindert, dass der Lyrics-Screen bei jedem Play/Pause-Toggle erneut
     // automatisch aufgeht — nur beim ERSTEN Play eines frisch angewählten Songs.
     private var lyricsAutoShownForSongId: Long? = null
+
+    // Diagnose-Log für den Lyrics-Teleprompter (Sprint 5.43): bewusst NICHT an
+    // song.id/openSession gebunden wie zuvor in LyricsOverlay.kt selbst, sondern
+    // hier im ViewModel über den gesamten App-Gebrauch hinweg — sonst geht der Log
+    // eines Songs verloren, sobald das Auto-Advance/CUE-Arming (siehe skipNext())
+    // lautlos auf den nächsten Song umschaltet, bevor der User den Share-Button
+    // drücken konnte. Kein StateFlow nötig: wird nur beim Share-Tap gelesen, nicht
+    // live gerendert.
+    val lyricsDebugLog: MutableList<String> = mutableListOf()
+    fun logLyricsDebug(msg: String) {
+        Log.d("LyricsOverlay", msg)
+        lyricsDebugLog.add(msg)
+        if (lyricsDebugLog.size > 500) lyricsDebugLog.removeAt(0)
+    }
+    fun logLyricsWarn(msg: String) {
+        Log.w("LyricsOverlay", msg)
+        lyricsDebugLog.add("WARN: $msg")
+        if (lyricsDebugLog.size > 500) lyricsDebugLog.removeAt(0)
+    }
     private val _positionMs    = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
     private val _durationMs    = MutableStateFlow(0L)

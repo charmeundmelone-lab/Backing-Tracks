@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -60,8 +59,6 @@ import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
-
-private const val TAG = "LyricsOverlay"
 
 // Fester Lesepunkt: Anteil der Viewport-Höhe von oben, an dem die aktuelle Zeile
 // beim Durchlaufen sichtbar "im Fokus" steht (siehe Layout-Platzierung unten).
@@ -166,7 +163,10 @@ fun LyricsOverlay(
     durationMs: Long,
     isPlaying: Boolean,
     onClose: () -> Unit,
-    onSetLyricsSyncPoints: (Long, String) -> Unit = { _, _ -> }
+    onSetLyricsSyncPoints: (Long, String) -> Unit = { _, _ -> },
+    debugLog: List<String> = emptyList(),
+    onLogDebug: (String) -> Unit = {},
+    onLogWarn: (String) -> Unit = {}
 ) {
     val activity = LocalContext.current.findActivity()
     DisposableEffect(visible) {
@@ -193,7 +193,10 @@ fun LyricsOverlay(
                 durationMs            = durationMs,
                 isPlaying             = isPlaying,
                 onClose               = onClose,
-                onSetLyricsSyncPoints = onSetLyricsSyncPoints
+                onSetLyricsSyncPoints = onSetLyricsSyncPoints,
+                debugLog              = debugLog,
+                onLogDebug            = onLogDebug,
+                onLogWarn             = onLogWarn
             )
         }
     }
@@ -207,7 +210,10 @@ private fun LyricsContent(
     durationMs: Long,
     isPlaying: Boolean,
     onClose: () -> Unit,
-    onSetLyricsSyncPoints: (Long, String) -> Unit
+    onSetLyricsSyncPoints: (Long, String) -> Unit,
+    debugLog: List<String>,
+    onLogDebug: (String) -> Unit,
+    onLogWarn: (String) -> Unit
 ) {
     val context = LocalContext.current
     val lines   = remember(song.id, song.lyrics) { song.lyrics.lines() }
@@ -225,21 +231,6 @@ private fun LyricsContent(
     // Live-Sync in calibrationPoints aufgezeichnet und beim Beenden persistiert.
     var calibrating by remember(song.id, openSession) { mutableStateOf(false) }
     val calibrationPoints = remember(song.id, openSession) { mutableStateListOf<Pair<Int, Long>>() }
-
-    // Diagnose-Log für den Segment-Wechsel-Bug (Sprint 5.40/5.41): sammelt dieselben
-    // Meldungen wie Log.d/Log.w zusätzlich in-app, damit der User sie ohne PC/adb per
-    // Share-Sheet (WhatsApp/E-Mail/...) direkt vom Handy verschicken kann.
-    val debugLog = remember(song.id, openSession) { mutableStateListOf<String>() }
-    fun logDebug(msg: String) {
-        Log.d(TAG, msg)
-        debugLog.add(msg)
-        if (debugLog.size > 300) debugLog.removeAt(0)
-    }
-    fun logWarn(msg: String) {
-        Log.w(TAG, msg)
-        debugLog.add("WARN: $msg")
-        if (debugLog.size > 300) debugLog.removeAt(0)
-    }
 
     fun persistCalibration() {
         if (calibrationPoints.isNotEmpty()) {
@@ -270,7 +261,7 @@ private fun LyricsContent(
     // Rand) neu berechnet — dadurch abschnittsweise konstante Geschwindigkeit
     // statt einer einzigen globalen Rate für den ganzen Song.
     LaunchedEffect(song.id, openSession, song.lyricsSyncPoints) {
-        logDebug("Lyrics-Loop start: song='${song.title}' liveDurationMsParam=$durationMs " +
+        onLogDebug("Lyrics-Loop start: song='${song.title}' liveDurationMsParam=$durationMs " +
             "dbDurationMs=$dbDurationMs (song.duration='${song.duration}') breakpoints=$breakpoints")
         var nextIdx = 0
         var guardBlockLogged = false
@@ -300,7 +291,7 @@ private fun LyricsContent(
                     anchorScrollPx = px
                     segmentJustChanged = true
                 } else {
-                    logWarn("Kalibrierungspunkt #${nextIdx + 1}/${breakpoints.size} " +
+                    onLogWarn("Kalibrierungspunkt #${nextIdx + 1}/${breakpoints.size} " +
                         "(lineIdx=$lineIdx, ms=$ms) hat KEINE gemessene Zeilen-Position " +
                         "— Anker NICHT aktualisiert, Segment wird übersprungen!")
                 }
@@ -312,7 +303,7 @@ private fun LyricsContent(
             // veralteten, zu kleinen Wert liefern, während positionMs schon weiterläuft.
             if (dur in 1..<pos && !guardBlockLogged) {
                 guardBlockLogged = true
-                logWarn("Guard blockiert: dur=$dur < pos=$pos (maxScrollPx=$maxScrollPx) — durationMs war zu klein")
+                onLogWarn("Guard blockiert: dur=$dur < pos=$pos (maxScrollPx=$maxScrollPx) — durationMs war zu klein")
             }
             if (dur <= 0L || dur < pos || dur <= anchorPositionMs) continue
 
@@ -323,7 +314,7 @@ private fun LyricsContent(
 
             val rate    = (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat()
             if (segmentJustChanged) {
-                logDebug("Neues Segment: anchor=(${anchorPositionMs}ms, ${anchorScrollPx}px) -> " +
+                onLogDebug("Neues Segment: anchor=(${anchorPositionMs}ms, ${anchorScrollPx}px) -> " +
                     "segEnd=(${segEndMs}ms, ${segEndPx}px) rate=${rate}px/ms " +
                     "(nextIdx=$nextIdx von ${breakpoints.size} Punkten)")
             }
@@ -333,7 +324,7 @@ private fun LyricsContent(
                 val jump = clamped - scrollOffsetPx
                 if (jump > 30f && bigJumpLogCount < 10) {
                     bigJumpLogCount++
-                    logWarn("Großer Scroll-Sprung: +${jump}px in einem Frame " +
+                    onLogWarn("Großer Scroll-Sprung: +${jump}px in einem Frame " +
                         "(pos=$pos dur=$dur anchor=($anchorPositionMs,$anchorScrollPx) " +
                         "segEnd=($segEndMs,$segEndPx) rate=$rate maxScrollPx=$maxScrollPx)")
                 }

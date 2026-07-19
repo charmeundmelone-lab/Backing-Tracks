@@ -301,13 +301,55 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       Einfluss auf die Scroll-Mechanik. Dafür musste das bisher alleinstehende
       `Layout` in eine `Box(fillMaxSize())` gewrappt werden (zwei Geschwister:
       `Layout` + Indikator-`Box`).
+    - **Diagnose-Log lebt im ViewModel, nicht in `LyricsOverlay.kt` (Sprint 5.43):**
+      `PlayerViewModel.lyricsDebugLog` (`MutableList<String>`) statt
+      `remember(song.id, openSession)` in `LyricsContent` — Grund: CUE-Modus
+      (`endAction=0`) arm't beim Auto-Advance den NÄCHSTEN Song bereits in
+      `currentSong`/die Audio-Engine, OHNE ihn abzuspielen (`isPlaying=false`,
+      siehe Sprint 5.22/5.43). Bleibt der Lyrics-Screen nach Songende offen,
+      folgt er `currentSong` auf diesen ungehörten, nur georarmten Song — ein
+      song-gebundener Log wäre in genau diesem Moment verloren gegangen, bevor
+      der User ihn teilen konnte. Der ViewModel-Log überlebt jeden Songwechsel;
+      jede Zeile trägt weiterhin den Songtitel, dadurch bleibt bei mehreren
+      Songs im selben Log nachvollziehbar, welche Zeile zu welchem Song gehört.
 
 ## Letzter Stand
 
 **Datum:** 2026-07-19
-**CI Build:** #263 grün (Commit a50bcad) — Sprint 5.42 selbst ist reine Dokumentation, kein Code-Push nötig
+**CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Segment-Wechsel-"Bug" aufgeklärt — false alarm, fehlende Kalibrierung für den getesteten Song
+**Commit:** Diagnose-Log überlebt jetzt Auto-Advance/CUE-Arming (ViewModel statt song-gebundenem Compose-State)
+
+### Sprint 5.43 DONE (ungetestet): Diagnose-Log übersteht Song-Wechsel (CUE-Arming-Bug gefunden)
+
+User-Hinweis nach 5.42: Der geteilte Log gehörte zu einem Song, der laut User "gar
+nicht abgespielt wurde". Root Cause im Code bestätigt: `PlayerViewModel.skipNext()`
+→ `selectSong()` wird beim Auto-Advance (Song-Ende-Erkennung, siehe Gotcha 2) auch im
+**CUE-Modus** aufgerufen (`endAction=0`: "arm, kein Play", siehe Sprint 5.22) —
+dabei wird `_currentSong.value` sofort auf den NÄCHSTEN Song gesetzt und dessen Audio
+per `engine.activatePreloaded()` in die Engine geladen, OBWOHL `_isPlaying` auf
+`false` bleibt und der User den Song nie hört. Der Lyrics-Screen folgt `currentSong`
+direkt — blieb der Screen nach Songende offen (kein automatisches Schließen bei
+Songwechsel), sprang der komplette Diagnose-Zustand (inkl. `debugLog`, das bisher
+`remember(song.id, openSession)`-gebunden war) lautlos auf den neu **georarmten, aber
+nie gehörten** nächsten Song um — der User hatte dadurch nie eine Chance, den echten
+Log des zuvor gehörten Songs zu teilen.
+
+**Fix:** `debugLog` lebt jetzt nicht mehr in `LyricsOverlay.kt` selbst (dort per
+`remember(song.id, openSession)` bei jedem Songwechsel zurückgesetzt), sondern als
+einfache `MutableList<String>` in `PlayerViewModel` (`lyricsDebugLog`,
+`logLyricsDebug()`/`logLyricsWarn()`) — überlebt damit JEDEN Songwechsel innerhalb
+der App-Session, auch stille CUE-Arm-Übergänge. `LyricsOverlay`/`LyricsContent`
+bekommen `debugLog: List<String>` sowie `onLogDebug`/`onLogWarn`-Callbacks von außen
+injiziert statt sie selbst zu verwalten; `MainScreen.kt` verdrahtet sie auf
+`vm.lyricsDebugLog`/`vm.logLyricsDebug()`/`vm.logLyricsWarn()`. Jede Log-Zeile enthält
+weiterhin den Songtitel (`"Lyrics-Loop start: song='...'"`), dadurch bleibt auch bei
+mehreren Songs im selben Log nachvollziehbar, welche Zeile zu welchem Song gehört.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich. **Nächste
+  Session: gezielt testen**, dass der Share-Button jetzt den vollständigen Log des
+  tatsächlich gehörten Songs enthält, auch wenn der Song inzwischen zu Ende ist und
+  der nächste automatisch (CUE-Modus) geladen wurde.
 
 ### Sprint 5.42 DONE: Segment-Wechsel-Bug aufgeklärt — kein Code-Bug, fehlende Kalibrierung
 

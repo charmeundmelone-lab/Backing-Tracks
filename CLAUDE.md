@@ -266,11 +266,51 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-19
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.36)
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.37)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Kompletter Architektur-Neuentwurf des Teleprompter-Scrolls — ScrollState/Animation entfernt, Sprint 5.35 hat immer noch nicht gereicht
+**Commit:** Fix zwei Nebenwirkungen des 5.36-Neuentwurfs — kein Sofort-Feedback beim Tap, Touch-Durchfall zur MainScreen-TopBar
 
-### Sprint 5.36 DONE (ungetestet): Kompletter Architektur-Neuentwurf — ScrollState + Animation komplett entfernt
+### Sprint 5.37 DONE (ungetestet): Fix — Tap-Sofortsprung fehlte + Touch fiel zur TopBar durch
+
+User-Report nach Live-Test von Sprint 5.36 (Commit 279490d, CI grün): Kalibrierungspunkte
+werden jetzt endlich korrekt gespeichert (5.36 hat den 0-Punkte-Bug also tatsächlich
+behoben!), ABER zwei neue Symptome: (1) der Text bewegt sich während der Kalibrierung
+selbst überhaupt nicht sichtbar; (2) Stop drücken, dann X (Schließen) drücken öffnet
+stattdessen das "Alle Songs löschen"-Menü der normalen App-Titelleiste.
+
+**Ursache 1 — kein Sofort-Feedback bei Tap:** In 5.36 wurde `handleTap()` bewusst
+so umgebaut, dass NUR der Anker gesetzt wird ("die Frame-Loop holt sich den neuen
+Wert automatisch"). Rechnerisch stimmt das — aber während einer laufenden
+Kalibrierung existieren noch keine Kalibrierungspunkte, also rechnet die Loop bei
+jedem Tap weiterhin mit "Rest des GANZEN Songs bis zum Ende" als Zielspanne. Zwischen
+zwei Taps (typischerweise wenige Sekunden) bewegt sich der Text bei dieser Rate nur
+um Bruchteile eines Pixels — praktisch nicht wahrnehmbar. **Fix:** `handleTap()`
+springt jetzt zusätzlich sofort sichtbar zur getippten Zeile (`scrollOffsetPx =
+entry.value`, monoton geklemmt). Das ist hier sicher (anders als in der alten
+ScrollState-Version) — kein `animateScrollTo()`, keine konkurrierende Coroutine,
+nur eine einfache Zuweisung, exakt wie in der Frame-Loop selbst.
+
+**Ursache 2 — Touch-Durchfall zur TopBar:** Mein Schließen-Button (X) sitzt oben
+rechts — an fast derselben Bildschirmposition wie der "⋮"-Menü-Button der
+MainScreen-`TopBar` dahinter (beide direkt unter dem Statusbalken, ganz rechts).
+Die äußerste `Box` des Teleprompters deckt den Screen zwar optisch komplett ab,
+hatte aber selbst KEINEN Touch-Handler — nur einzelne Kind-Elemente (Buttons,
+Tap-to-Sync-Viewport). Ein Tap, der die Buttons knapp verfehlt (z.B. beim
+schnellen Antippen von Stop direkt gefolgt von X), fiel dadurch zur
+dahinterliegenden `TopBar` durch und traf dort das Menü. **Fix:** leerer
+`detectTapGestures {}`-Handler auf der äußersten Box fängt jeden nicht
+anderweitig konsumierten Tap ab — Compose testet Kind-Elemente (Buttons,
+Viewport) zuerst, die Handler der Buttons bleiben also unangetastet.
+
+- **Nicht verifiziert:** Wie 5.30–5.36 kein Gradle-Build in dieser Session
+  möglich. **Positiv:** Der User-Report bestätigt zum ersten Mal, dass der
+  Kern-Bug (0 Kalibrierungspunkte / Race-to-bottom) durch den 5.36-Neuentwurf
+  tatsächlich behoben ist — die beiden 5.37-Fixes sind reine Nebenwirkungen
+  desselben Umbaus, keine neue Baustelle. **Nächste Session: gezielt prüfen**,
+  ob der Text jetzt bei jedem Kalibrierungs-Tap sofort sichtbar springt, und
+  ob Stop→X den Screen jetzt sauber schließt statt das Lösch-Menü zu öffnen.
+
+### Sprint 5.36 DONE: Kompletter Architektur-Neuentwurf — ScrollState + Animation komplett entfernt (Commit 279490d, CI grün — Kern-Bug laut User-Report BEHOBEN, zwei Nebenwirkungen in 5.37 gefixt)
 
 User-Report nach Live-Test von Sprint 5.35 (Commit ce8d574, CI grün): Bug besteht
 ERNEUT UNVERÄNDERT ("während der Kalibrierung wird ganz schnell wieder immer noch
@@ -888,26 +928,19 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als
   eigene Volt-Überschrift gerendert. Nicht mehr offen.
-- 🔴 **Sprint 5.32–5.36 (Mehrpunkt-Kalibrierung + VIER Bugfix-Runden, davon
-  eine komplette Neuarchitektur) auf echtem Gerät testen (PRIO 1, ESKALIERT):**
-  Ersetzt den Start-Anker aus 5.31 komplett. Bug (Scroll springt schnell/
-  ruckartig bis ans Ende, 0 Kalibrierungspunkte) hat bereits DREI Fix-Versuche
-  überlebt (5.33, 5.34, 5.35) — alle laut User-Report wirkungslos. 5.36 ist
-  keine weitere Theorie-Korrektur mehr, sondern ein kompletter Architektur-
-  Neuentwurf auf User-Anweisung: `ScrollState`/`animateScrollTo` (Quelle eines
-  MutatorMutex-Konflikts mit der Frame-Loop, siehe dort) komplett entfernt und
-  durch direkt selbst gemessene Werte + `Modifier.offset` ersetzt, nur noch EIN
-  Schreiber für die Scroll-Position. **Falls der Bug in 5.36 IMMER NOCH
-  auftritt:** nicht nochmal eine Theorie fixen — `adb logcat -s LyricsOverlay`
-  mitschneiden (Diagnose-Logging aus 5.35 ist noch da, an neue Variablennamen
-  angepasst) und die geloggten Werte auswerten, statt weiter zu raten. Sonst
-  wie gehabt prüfen: Kalibrierungspunkte werden tatsächlich gespeichert
-  (Zähler > 0 nach dem Tippen), Teleprompter mitten im Song öffnen/erneut
-  öffnen läuft smooth OHNE Ruckeln, DB-Migration 15→16 greift sauber, Song neu
-  starten läuft ohne erneutes Tippen in der kalibrierten Geschwindigkeit ab,
-  niemals Rückwärtssprung (kritisch laut User — Erfahrung aus anderen Apps),
-  Live-Tap-to-Sync funktioniert weiterhin auch nach abgeschlossener
-  Kalibrierung.
+- ✅ **Kern-Bug Kalibrierung (ERLEDIGT):** Der komplette Architektur-Neuentwurf
+  in Sprint 5.36 (ScrollState/animateScrollTo entfernt) hat laut User-Report
+  tatsächlich funktioniert — Kalibrierungspunkte werden jetzt korrekt
+  gespeichert, kein Race-to-bottom mehr. Nicht mehr offen.
+- ⚠️ **Sprint 5.37 (zwei Nebenwirkungen von 5.36) auf echtem Gerät testen
+  (PRIO 1):** (1) Tap während Kalibrierung springt jetzt sofort sichtbar zur
+  getippten Zeile (vorher kein Feedback, siehe dort). (2) Äußerste Box
+  konsumiert jetzt jeden Tap, der keinen Button trifft — verhindert
+  Durchfallen zur MainScreen-TopBar (löste vorher fälschlich deren
+  "Alle Songs löschen"-Menü aus). Prüfen: Tap-Feedback während Kalibrierung
+  sichtbar sofort, Stop→X schließt sauber ohne fremdes Menü zu öffnen,
+  DB-Migration 15→16 weiterhin sauber, niemals Rückwärtssprung (kritisch
+  laut User), Live-Tap-to-Sync funktioniert weiterhin.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

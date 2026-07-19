@@ -293,8 +293,13 @@ private fun LyricsContent(
 
     // Ein Handler für beide Tap-Arten: sucht die nächste noch nicht erreichte
     // Zeile (Header oder Lyric, macht keinen Unterschied), setzt den Anker darauf
-    // — die Frame-Loop oben holt sich den neuen Zielwert automatisch im nächsten
-    // Frame (kein direkter Schreibzugriff auf scrollOffsetPx hier, siehe oben).
+    // UND springt sofort sichtbar dorthin — sonst bewegt sich während einer
+    // laufenden Kalibrierung (noch ohne Kalibrierungspunkte) zwischen zwei Taps
+    // nur ein Bruchteil-Pixel, weil die Frame-Loop bis dahin noch mit "Rest des
+    // ganzen Songs bis zum Ende" als Zielspanne rechnet. Der Sofort-Sprung ist
+    // hier sicher (im Gegensatz zur alten ScrollState-Version, siehe Architektur-
+    // Kommentar oben): kein Animate-Aufruf, keine konkurrierende Coroutine — nur
+    // eine simple, monoton geklemmte Zuweisung, genau wie in der Frame-Loop.
     // Zeichnet den Punkt zusätzlich auf, wenn gerade kalibriert wird.
     fun handleTap() {
         val entry = linePositions.entries
@@ -302,10 +307,24 @@ private fun LyricsContent(
             .minByOrNull { it.value } ?: return
         anchorPositionMs = latestPositionMs
         anchorScrollPx   = entry.value
+        if (entry.value > scrollOffsetPx) scrollOffsetPx = entry.value
         if (calibrating) calibrationPoints.add(entry.key to latestPositionMs)
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(LyricsBg)) {
+    // fillMaxSize() deckt zwar optisch den ganzen Screen ab, konsumiert aber
+    // ohne eigenen Touch-Handler keine Taps in Lücken zwischen den Buttons —
+    // Compose lässt solche Taps sonst zur dahinterliegenden MainScreen-TopBar
+    // durchfallen (die an derselben Bildschirmposition oben rechts ihr eigenes
+    // "⋮"-Menü hat). Leerer detectTapGestures-Handler auf der äußersten Box
+    // fängt jeden nicht anderweitig konsumierten Tap ab, ohne die spezifischeren
+    // Handler der Kind-Elemente (Header-Buttons, Tap-to-Sync-Viewport) zu stören
+    // — Compose testet Kind-Elemente zuerst.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LyricsBg)
+            .pointerInput(Unit) { detectTapGestures { } }
+    ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             // Header
             Row(

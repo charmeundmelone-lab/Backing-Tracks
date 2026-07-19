@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -57,6 +58,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
+private const val TAG = "LyricsOverlay"
+
 private val LyricsBg    = Color(0xFF0A0A0A)
 private val LyricsVolt  = Color(0xFFE8FF00)
 private val LyricsGray  = Color(0xFF777777)
@@ -87,6 +90,21 @@ private fun parseSyncPoints(raw: String): List<Pair<Int, Long>> =
         val ms  = parts.getOrNull(1)?.toLongOrNull()
         if (idx != null && ms != null) idx to ms else null
     }.sortedBy { it.second }
+
+// "mm:ss" (song.duration, z.B. "5:22") → ms. Diese beim Import einmalig über
+// MediaMetadataRetriever gemessene Dauer ist die verlässlichere Quelle als die
+// live von ExoPlayer gemeldete durationMs: AudioEngine.durationMs fragt bei
+// Multitrack-Songs `tracks.firstOrNull()` ab, ohne den Click-Track auszuschließen
+// — FolderImporter tut das für song.duration bewusst (siehe "Bug-Fix 2"-Kommentar
+// dort), weil einzelne Stems (v.a. Click) in der Vergangenheit falsche/kurze
+// Längen geliefert haben. Eine zu kurze durationMs lässt die Scroll-Rate im
+// Frame-Loop explodieren (siehe LaunchedEffect unten).
+private fun parseDurationString(s: String): Long {
+    val parts = s.split(":")
+    val min = parts.getOrNull(0)?.toLongOrNull() ?: return 0L
+    val sec = parts.getOrNull(1)?.toLongOrNull() ?: return 0L
+    return (min * 60 + sec) * 1000
+}
 
 /**
  * Vollbild-Teleprompter: reine Lyrics (keine Akkorde), Hochkant, Auto-Scroll
@@ -190,15 +208,24 @@ private fun LyricsContent(
     // Zuletzt gesetztes Scroll-Ziel — wird NIE verringert (Anforderung: nur abwärts, nie zurück).
     var targetScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
 
+    // Die verlässlichere der beiden Dauer-Quellen: siehe parseDurationString(). Das
+    // Maximum aus beiden zu nehmen schützt in beide Richtungen — welche der beiden
+    // auch zu kurz melden sollte, die längere gewinnt und verhindert die Explosion
+    // der Scroll-Rate.
+    val dbDurationMs = remember(song.id, song.duration) { parseDurationString(song.duration) }
     val latestPositionMs by rememberUpdatedState(positionMs)
-    val latestDurationMs by rememberUpdatedState(durationMs)
+    val latestDurationMs by rememberUpdatedState(maxOf(durationMs, dbDurationMs))
 
     // Kontinuierlicher Frame-für-Frame-Scroll. Rate wird pro Segment (zwischen
     // zwei aufeinanderfolgenden Kalibrierungspunkten, bzw. Songanfang/-ende als
     // Rand) neu berechnet — dadurch abschnittsweise konstante Geschwindigkeit
     // statt einer einzigen globalen Rate für den ganzen Song.
     LaunchedEffect(song.id, openSession, song.lyricsSyncPoints) {
+        Log.d(TAG, "Lyrics-Loop start: song='${song.title}' liveDurationMsParam=$durationMs " +
+            "dbDurationMs=$dbDurationMs (song.duration='${song.duration}') breakpoints=$breakpoints")
         var nextIdx = 0
+        var guardBlockLogged = false
+        var bigJumpLogCount = 0
         while (isActive) {
             withFrameNanos { }
             val pos = latestPositionMs
@@ -222,6 +249,10 @@ private fun LyricsContent(
             // diese Prüfung würde raw sofort auf max geklemmt (pos > dur → Rate viel zu hoch)
             // und blieb wegen der Monoton-Klemmung fälschlich für den Rest der Wiedergabe dort
             // hängen — noch bevor überhaupt ein Kalibrierungs-Tap ankommen konnte.
+            if (dur in 1..<pos && !guardBlockLogged) {
+                guardBlockLogged = true
+                Log.w(TAG, "Guard blockiert: dur=$dur < pos=$pos (max=$max) — durationMs war zu klein")
+            }
             if (dur > anchorPositionMs && dur >= pos && max > 0) {
                 val nextBreak = breakpoints.getOrNull(nextIdx)
                 val segEndMs  = nextBreak?.second ?: dur
@@ -236,7 +267,16 @@ private fun LyricsContent(
                         (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat() else 0f
                     val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
                     val clamped = raw.coerceIn(0f, max.toFloat())
-                    if (clamped > targetScrollPx) targetScrollPx = clamped
+                    if (clamped > targetScrollPx) {
+                        val jump = clamped - targetScrollPx
+                        if (jump > 30f && bigJumpLogCount < 10) {
+                            bigJumpLogCount++
+                            Log.w(TAG, "Großer Scroll-Sprung: +${jump}px in einem Frame " +
+                                "(pos=$pos dur=$dur anchor=($anchorPositionMs,$anchorScrollPx) " +
+                                "segEnd=($segEndMs,$segEndPx) rate=$rate max=$max)")
+                        }
+                        targetScrollPx = clamped
+                    }
                 }
             }
             if (targetScrollPx.roundToInt() != scrollState.value) {

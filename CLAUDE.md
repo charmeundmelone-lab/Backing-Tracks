@@ -239,12 +239,56 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-18
-**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.34)
+**Datum:** 2026-07-19
+**CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.35)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix — echter Root Cause des Race-Bugs (dur/pos-Plausibilität + Session-Reset), Sprint 5.33 hat nicht gereicht
+**Commit:** Fix — durationMs-Quelle vertauscht (Click-Track-Bug) + Diagnose-Logging, Sprint 5.34 hat immer noch nicht gereicht
 
-### Sprint 5.34 DONE (ungetestet): Fix — Sprint-5.33-Fix hat nicht gereicht, echter Root Cause gefunden
+### Sprint 5.35 DONE (ungetestet): Fix — vermutlich echte Root Cause (falsche durationMs-Quelle) + Diagnose-Logging als Sicherheitsnetz
+
+User-Report nach Live-Test von Sprint 5.34 (Commit 1600120, CI grün): Bug besteht
+UNVERÄNDERT ("scrollt während der Kalibrierung immer noch schnell und ruckelig
+nach unten"). Das ist jetzt der DRITTE erfolglose Fix-Versuch in Folge — Grund
+zur Sorge, dass die bisherigen Theorien (Layout-Race, dur/pos-Plausibilität,
+Session-Reset) zwar echte Verbesserungen waren, aber nicht die eigentliche
+Ursache getroffen haben.
+
+**Neue Spur gefunden:** `FolderImporter.kt` Zeile 70 hat einen Kommentar
+`// Bug-Fix 2: case-insensitive, auch "klick" (deutsch)` und berechnet
+`song.duration` bewusst aus einem `nonClick`-Stem — dokumentierter Beleg, dass
+der Click-Track in diesem Projekt schon mal falsche/kurze Audiolängen geliefert
+hat. Genau diese Vorsicht fehlt in `AudioEngine.durationMs`
+(`tracks.firstOrNull()?.duration`), das für die LIVE-Wiedergabe (und damit für
+den Teleprompter) verwendet wird — bei Multitrack-Songs ohne Click-Ausschluss.
+Eine zu kurze `durationMs` lässt im Frame-Loop die Scroll-Rate explodieren
+(`rate = max/dur` mit kleinem `dur`) → Text rast in den ersten paar Sekunden
+ans Ende, noch bevor ein Kalibrierungs-Tap greifen kann (erklärt "schnell +
+ruckelig" UND "0 Punkte gespeichert" in einem).
+
+**Fix:** `LyricsOverlay.kt` nutzt jetzt `max(engine.durationMs, song.duration
+als ms geparst)` statt nur der live gemeldeten `durationMs` — `song.duration`
+wurde beim Import einmalig über `MediaMetadataRetriever` aus einem
+Nicht-Click-Stem gemessen und ist damit die robustere Quelle. `AudioEngine`
+selbst wurde bewusst NICHT angefasst (würde Loop-Punkte/Auto-Stop/Progress-Bar
+für ALLE Songs betreffen, zu riskant ohne Testmöglichkeit in dieser Session)
+— der Fix ist bewusst auf den Teleprompter beschränkt.
+
+**Zusätzlich: Diagnose-Logging als Sicherheitsnetz** (`Log.d`/`Log.w`, Tag
+`LyricsOverlay`), falls diese Theorie IMMER NOCH nicht die volle Antwort ist:
+- Beim Start jeder Session: `song.duration`, live `durationMs`, Breakpoints.
+- Einmalig falls der `dur >= pos`-Guard blockiert (Sprint 5.34) — zeigt, ob
+  die durationMs-Quelle selbst nach dem Fix noch zu klein ist.
+- Die ersten 10 "großen Sprünge" (>30px in einem Frame) mit allen Werten
+  (pos, dur, anchor, segEnd, rate, max) — das war bisher der Kern des Problems
+  und ist jetzt direkt sichtbar statt erraten. Per `adb logcat -s
+  LyricsOverlay` auslesbar.
+
+- **Nicht verifiziert:** Wie 5.30–5.34 kein Gradle-Build in dieser Session
+  möglich. **Nächste Session, falls der Bug immer noch auftritt:** zuerst
+  `adb logcat -s LyricsOverlay` während eines Kalibrierungsversuchs
+  mitschneiden und die Werte auswerten, statt eine weitere Theorie zu raten.
+
+### Sprint 5.34 DONE: Fix — Sprint-5.33-Fix hat nicht gereicht, echter Root Cause gefunden (Commit 1600120, CI grün — hat laut User-Report NICHT ausgereicht, siehe Sprint 5.35)
 
 User-Report nach Live-Test von Sprint 5.33 (Commit 614aca3, CI grün): Bug besteht
 weiter UNVERÄNDERT ("scrollt immer noch mit Rucklern schnell nach unten"),
@@ -754,21 +798,23 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als
   eigene Volt-Überschrift gerendert. Nicht mehr offen.
-- ⚠️ **Sprint 5.32–5.34 (Mehrpunkt-Kalibrierung + zwei Bugfix-Runden) auf
-  echtem Gerät testen (PRIO 1):** Ersetzt den Start-Anker aus 5.31 komplett.
-  User meldete nach 5.32 einen Bug (Scroll springt schnell/ruckartig bis ans
-  Ende) — 5.33-Fix hat laut User-Report NICHT gereicht (gleicher Bug weiter,
-  zusätzlich 0 Kalibrierungspunkte trotz Tippens). Echter Root Cause in 5.34
-  gefunden (dur/pos-Plausibilität + fehlender Session-Reset, siehe dort) —
-  wieder NICHT live gegengetestet (kein Gradle-Build in der Sandbox möglich).
-  Vor allem prüfen: Kalibrierungspunkte werden jetzt tatsächlich gespeichert
-  (Zähler > 0 nach dem Tippen), der ursprünglich gemeldete Fall (Teleprompter
-  mitten im Song öffnen/erneut öffnen, auch mehrfach hintereinander mit
-  demselben Song) läuft smooth statt zu springen, DB-Migration 15→16 greift
-  sauber, Song neu starten läuft ohne erneutes Tippen in der kalibrierten
-  Geschwindigkeit ab, niemals Rückwärtssprung (kritisch laut User — Erfahrung
-  aus anderen Apps), Live-Tap-to-Sync funktioniert weiterhin auch nach
-  abgeschlossener Kalibrierung.
+- 🔴 **Sprint 5.32–5.35 (Mehrpunkt-Kalibrierung + DREI Bugfix-Runden) auf
+  echtem Gerät testen (PRIO 1, ESKALIERT):** Ersetzt den Start-Anker aus 5.31
+  komplett. Bug (Scroll springt schnell/ruckartig bis ans Ende, 0 Kalibrierungs-
+  punkte) hat bereits ZWEI Fix-Versuche überlebt (5.33, 5.34) — beide waren
+  laut User-Report wirkungslos. 5.35 hat eine neue, besser fundierte Theorie
+  (falsche durationMs-Quelle beim Multitrack-Click-Track, siehe dort) UND
+  Diagnose-Logging als Rückfallebene. **Falls der Bug in 5.35 IMMER NOCH
+  auftritt:** nicht nochmal blind eine Theorie fixen — stattdessen
+  `adb logcat -s LyricsOverlay` während eines Kalibrierungsversuchs mitschneiden
+  und die geloggten pos/dur/rate-Werte auswerten (siehe Sprint 5.35). Sonst wie
+  gehabt prüfen: Kalibrierungspunkte werden tatsächlich gespeichert (Zähler > 0
+  nach dem Tippen), Teleprompter mitten im Song öffnen/erneut öffnen läuft
+  smooth, DB-Migration 15→16 greift sauber, Song neu starten läuft ohne
+  erneutes Tippen in der kalibrierten Geschwindigkeit ab, niemals
+  Rückwärtssprung (kritisch laut User — Erfahrung aus anderen Apps),
+  Live-Tap-to-Sync funktioniert weiterhin auch nach abgeschlossener
+  Kalibrierung.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

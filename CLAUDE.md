@@ -281,6 +281,21 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       Wiedergabe, ohne etwas zu persistieren — komponiert automatisch
       korrekt mit der Kalibrierungs-Logik durch dieselbe
       `scrollOffsetPx`-Monoton-Klemmung (siehe oben), ohne Sonderfall-Code.
+    - **Granularität: pro ZEILE, nicht pro Abschnitt (Sprint 5.47):** Für "jede
+      gesungene Zeile steht zu ihrem Einsatz oben" braucht es einen Anker pro
+      Zeile — Abschnitts-Taps sind zu grob, da die lineare Pixel-Interpolation
+      über einen langen Abschnitt die Zeilen dazwischen nach unten (Mitte)
+      driften lässt und Zeilen vor dem ersten Tap gar nicht verankert sind
+      (Intro läuft davon). Hinweistexte/KDoc sagen deshalb "bei jeder Zeile
+      tippen (auch der ersten)". Der Frame-Loop kann beliebig viele Punkte, es
+      war reine Anleitung.
+    - **Recalibration-Isolation (Sprint 5.47):** Während `calibrating == true`
+      treibt die ALTE gespeicherte Kalibrierung den Auto-Scroll NICHT
+      (`useBreakpoints = !calibrating` → keine Anker-Weiterschaltung, kein
+      nextBreak, nur langsamer Drift ab dem letzten Tap). Sonst kämpfen altes
+      Auto-Scrolling und frische Taps gegeneinander und `handleTap()` zeichnet
+      Zeilen relativ zur alten, falschen Scroll-Position auf. Beim Nicht-
+      Kalibrieren identisches Verhalten wie zuvor.
     - **Struktur-Labels ohne Akkorde:** Zeilen im Format `[Chorus]`/`[Verse 1]`
       im Lyrics-Text werden per `sectionTagRegex` erkannt und als eigene,
       Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
@@ -349,9 +364,51 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Teleprompter — Abschnitts-Modell: jeder Abschnitts-Anfang gleitet zu seinem Einsatz an den OBEREN Rand (löst den 30%-Lesepunkt ab, der die eigentliche Nachhinken-Ursache war)
+**Commit:** Teleprompter — Kalibrierung pro ZEILE (statt pro Abschnitt) + Alt-Kalibrierung stört Neu-Kalibrierung nicht mehr
 
-### Sprint 5.46 DONE (ungetestet): Abschnitts-Modell — Oben-Anker statt 30%-Lesepunkt
+### Sprint 5.47 DONE (ungetestet): Kalibrierung pro Zeile + Recalibration-Isolation
+
+User-Test von 5.46 (Oben-Anker, CI grün) mit drei präzisen Beobachtungen:
+(1) kurze Intro → die ersten 1–2 Zeilen sind oben schon durchgelaufen, bevor der
+Gesang einsetzt; (2) 2. Vers stand korrekt oben (Modell funktioniert an den
+kalibrierten Punkten!), gefühlt kurzes Innehalten vor dem Weiterscrollen;
+(3) die tatsächlich zu singenden Zeilen standen eher im MITTLEREN statt oberen
+Bereich.
+
+**Diagnose (kein Bug im Modell):** (2) beweist, dass das Oben-Anker-Modell an den
+Kalibrierungspunkten exakt sitzt. (1) und (3) sind beide Symptome derselben
+Ursache — **ein Tap pro ABSCHNITT ist zu grob.** Zwischen zwei Punkten
+interpoliert die App nur linear in Pixeln; über einen langen Abschnitt mit vielen
+Zeilen passt das nicht zur echten Gesangs-Zeilenfolge → die Zeilen dazwischen
+driften nach unten (Mitte), bis der nächste Tap sie wieder hochsnappt. Die
+Intro-Zeilen VOR dem ersten Tap sind gar nicht verankert → laufen ungebremst
+durch. Für "jede gesungene Zeile steht oben, wenn ich sie singe" braucht es einen
+Anker PRO ZEILE — mathematisch zwingend, nicht optional.
+
+**Umsetzung (Code konnte beliebige Granularität schon immer, es war die Anleitung):**
+- Kalibrier-Hinweistexte (Toast + Statuszeile) + KDoc auf **"bei jeder Zeile
+  tippen, sobald du sie singst (auch die erste!)"** geändert. Je feiner, desto
+  genauer sitzt jede Zeile oben; besonders die erste Gesangszeile mittappen löst
+  das Intro-Problem (davor bleibt der Anker bei (0,0), die ersten Zeilen driften
+  nur minimal statt davonzulaufen).
+- **Recalibration-Isolation (echte Robustheits-Verbesserung):** Während einer
+  laufenden neuen Kalibrierung (`calibrating == true`) treibt die ALTE
+  gespeicherte Kalibrierung den Auto-Scroll NICHT mehr (`useBreakpoints =
+  !calibrating` im Frame-Loop → keine Anker-Weiterschaltung, kein nextBreak,
+  nur langsamer Drift ab dem letzten Tap). Sonst hätten altes Auto-Scrolling und
+  frische Taps gegeneinander gekämpft und `handleTap()` hätte Zeilen relativ zur
+  alten, falschen Scroll-Position aufgezeichnet. Beim Stop wird die neue Punkt-
+  liste gespeichert → LaunchedEffect startet mit den neuen Breakpoints neu. Beim
+  Nicht-Kalibrieren ist das Verhalten identisch zu vorher (risikoarm). Siehe
+  Gotcha 12.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich (nur statisch
+  geprüft: Klammerbalance, Scope, keine verwaisten Referenzen). **Nächste Session:**
+  Bed of Roses FRISCH kalibrieren — Record → bei JEDER Zeile tippen (mit der ersten
+  Gesangszeile anfangen) → Stop, dann mitsingen und prüfen, ob jetzt jede Zeile zu
+  ihrem Einsatz oben steht.
+
+### Sprint 5.46 DONE: Abschnitts-Modell — Oben-Anker statt 30%-Lesepunkt
 
 User-Ansage nach 5.45 (Vorlauf-Regler): "das gefällt mir so nicht", stattdessen
 eine eigene Vorstellung — einmal durchtippen, dann soll **jeder Abschnitt als
@@ -1308,16 +1365,16 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
   `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
   diesen einen Song vermerkt.
-- 🔴 **Teleprompter Abschnitts-Modell (Oben-Anker) live testen (PRIO 1, NEU in
-  Sprint 5.46):** Wurzel des Nachhinkens gefunden — der 30%-Lesepunkt (5.39)
-  zeigte über der aktuellen Zeile permanent ~15 Zeilen bereits gesungenen Text.
-  Fix: Oben-Anker (jeder Abschnitts-Anfang gleitet zu seinem Einsatz an den
-  oberen Rand), Vorlauf-Regler zurückgenommen (User wollte ihn nicht). Rein
-  Platzierung geändert, Scroll-Mechanik unangetastet. **Nächste Session: mit
-  Bed of Roses live mitsingen** (Kalibrierung bleibt gespeichert) — kommt der
-  aktuelle Abschnitt oben an, ist das Nachhinken weg, fühlt es sich smooth an?
-  Falls ein kleiner konstanter Rest bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration
-  noch da) sauber wieder aktivierbar.
+- 🔴 **Teleprompter: FRISCH pro Zeile kalibrieren + live testen (PRIO 1, Sprint
+  5.47):** Oben-Anker-Modell (5.46) sitzt an den kalibrierten Punkten exakt
+  (vom User bestätigt: 2. Vers stand oben), ABER Abschnitts-Taps sind zu grob →
+  Zeilen dazwischen driften in die Mitte, Intro-Zeilen vor dem ersten Tap laufen
+  davon. Fix (5.47): Anleitung auf "bei jeder Zeile tippen (auch der ersten)"
+  + Recalibration-Isolation (alte Kalibrierung stört neue nicht mehr). **Nächste
+  Session:** Bed of Roses FRISCH kalibrieren (Record → jede Zeile tippen, mit der
+  ersten Gesangszeile beginnen → Stop), dann mitsingen und prüfen, ob jede Zeile
+  zu ihrem Einsatz oben steht. Falls danach noch ein winziger konstanter Rest-
+  Versatz bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration noch da) reaktivierbar.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

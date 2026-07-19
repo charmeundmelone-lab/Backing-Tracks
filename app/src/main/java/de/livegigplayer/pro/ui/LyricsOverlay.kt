@@ -104,10 +104,14 @@ private fun parseDurationString(s: String): Long {
  * gekoppelt an die echte Wiedergabeposition. Zwei Sync-Mechanismen:
  *
  * 1. **Kalibrierung** (Record-Button im Header): einmal pro Song durchtippen —
- *    ein Tap pro Abschnittswechsel (Intro, Vers, Chorus, …). Jeder Tap speichert
- *    (Zeilen-Index, Wiedergabeposition) als Kalibrierungspunkt. Danach läuft der
- *    Scroll bei jedem künftigen Play abschnittsweise mit konstanter, aus den
- *    gespeicherten Punkten interpolierter Geschwindigkeit — kein Live-Tippen
+ *    idealerweise ein Tap pro ZEILE, sobald man sie singt (auch die erste!),
+ *    nicht nur pro Abschnitt. Jeder Tap speichert (Zeilen-Index,
+ *    Wiedergabeposition) als Kalibrierungspunkt. Zwischen zwei Punkten wird
+ *    linear interpoliert — je feiner die Punkte, desto genauer steht jede Zeile
+ *    zu ihrem Einsatz oben. Grobe Abschnitts-Taps reichen NICHT, um jede
+ *    gesungene Zeile am oberen Rand zu halten (lineare Interpolation über einen
+ *    langen Abschnitt lässt die Zeilen dazwischen nach unten driften). Danach
+ *    läuft der Scroll bei jedem künftigen Play automatisch — kein Live-Tippen
  *    mehr nötig. Siehe Gotcha 12.
  * 2. **Live-Tap-to-Sync** (Tap irgendwo im Textbereich, außerhalb Kalibrierung):
  *    einmalige, NICHT gespeicherte Korrektur für die laufende Wiedergabe.
@@ -318,9 +322,19 @@ private fun LyricsContent(
             val pos = estimatedPositionMs()
             val dur = latestDurationMs
 
+            // Während einer laufenden NEUEN Kalibrierung dürfen die ALTEN gespeicherten
+            // Kalibrierungspunkte den Scroll NICHT mehr treiben — sonst kämpfen das
+            // alte Auto-Scrolling und die frischen Taps gegeneinander, und handleTap()
+            // würde Zeilen relativ zur alten (falschen) Scroll-Position aufzeichnen.
+            // Bei aktivem `calibrating`: keine Anker-Weiterschaltung, kein nextBreak →
+            // der Anker bleibt exakt dort, wohin der letzte Tap ihn gesetzt hat, und der
+            // Text gleitet nur langsam Richtung Songende (Drift), bis der nächste Tap
+            // neu verankert. Identisch zum Verhalten einer Erst-Kalibrierung ohne Punkte.
+            val useBreakpoints = !calibrating
+
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
             var segmentJustChanged = false
-            while (nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
+            while (useBreakpoints && nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
                 val (lineIdx, ms) = breakpoints[nextIdx]
                 val px = linePositions[lineIdx]
                 if (px != null) {
@@ -344,7 +358,7 @@ private fun LyricsContent(
             }
             if (dur <= 0L || dur < pos || dur <= anchorPositionMs) continue
 
-            val nextBreak = breakpoints.getOrNull(nextIdx)
+            val nextBreak = if (useBreakpoints) breakpoints.getOrNull(nextIdx) else null
             val segEndMs  = nextBreak?.second ?: dur
             val segEndPx  = nextBreak?.let { linePositions[it.first] } ?: maxScrollPx
             if (segEndMs <= anchorPositionMs) continue
@@ -430,7 +444,7 @@ private fun LyricsContent(
                     } else {
                         calibrating = true
                         calibrationPoints.clear()
-                        Toast.makeText(context, "Kalibrierung läuft — bei jedem Abschnittswechsel tippen", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Kalibrierung läuft — bei JEDER Zeile tippen, sobald du sie singst (auch die erste!)", Toast.LENGTH_LONG).show()
                     }
                 }) {
                     Icon(
@@ -464,7 +478,7 @@ private fun LyricsContent(
 
             if (calibrating) {
                 Text(
-                    "● Kalibrierung läuft — ${calibrationPoints.size} Punkte — bei jedem Abschnittswechsel tippen",
+                    "● Kalibrierung läuft — ${calibrationPoints.size} Punkte — bei jeder Zeile tippen (je mehr, desto genauer)",
                     color = LyricsRed, fontSize = 11.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )

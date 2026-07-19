@@ -285,13 +285,59 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
       — bewusst NICHT aus dem Text entfernt wie Akkord-Zeilen, weil es reine
       Songstruktur ist, kein Akkord.
+    - **Fester Lesepunkt (Sprint 5.39):** `ANCHOR_FRACTION = 0.3f` (Top-Level-
+      Konstante). Der Content-Placeable wird im `layout{}`-Block nicht mehr ab
+      `-scrollOffsetPx` (= Viewport-Oberrand), sondern ab `readingAnchorPx -
+      scrollOffsetPx` platziert, wobei `readingAnchorPx = constraints.maxHeight
+      * ANCHOR_FRACTION` direkt aus der Messphase kommt (kein Lag durch
+      separates `viewportHeightPx`-State). Reine Verschiebung des
+      Platzierungs-Nullpunkts — `scrollOffsetPx` selbst (Rate-Berechnung pro
+      Segment, Monoton-Klemmung, `handleTap()`) bleibt unverändert, dadurch
+      automatisch weiterhin korrekt mit Kalibrierung/Live-Tap-to-Sync
+      komponierbar, ohne Sonderfall-Code. Eine dünne, NICHT mitscrollende
+      Indikator-Linie (`Box`, 1dp, Volt 25% Alpha) liegt als zweites Kind
+      derselben äußeren `Box` bei `viewportHeightPx * ANCHOR_FRACTION` über
+      dem `Layout` — rein optische Markierung des festen Lesepunkts, kein
+      Einfluss auf die Scroll-Mechanik. Dafür musste das bisher alleinstehende
+      `Layout` in eine `Box(fillMaxSize())` gewrappt werden (zwei Geschwister:
+      `Layout` + Indikator-`Box`).
 
 ## Letzter Stand
 
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.38)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix — Text scrollte trotz 5.36/5.37 komplett gar nicht (Box-Constraint-Bug), eigenes Layout ersetzt Box+Column
+**Commit:** Feature — fester Lesepunkt (~30% von oben) im Teleprompter, Text läuft smooth durch eine feste Markierungslinie statt am Viewport-Oberrand zu verschwinden
+
+### Sprint 5.39 DONE (ungetestet): Fester Lesepunkt im Teleprompter
+
+User-Wunsch nach Sprint 5.38 (Scroll-Stillstand-Fix, damals noch ungetestet): der
+jeweils aktuelle Abschnitt/die aktuelle Zeile soll optisch besser im Fokus stehen —
+konkret nachgefragt am Beispiel Vers→Chorus-Übergang. Vor der Umsetzung explizit per
+Rückfrage (User-Anweisung: "sag mir bitte, ob Du alles korrekt verstanden hast und
+lass uns die Sachen in eine Frage Antwort Session klären") drei Optionen zur Wahl
+gestellt; User hat sich für **"Fester Lesepunkt"** entschieden: Scroll bleibt exakt
+so smooth/monoton wie bisher, aber der Text wird nicht mehr ab dem Viewport-Oberrand
+platziert, sondern ab einer festen Position bei ~30% Bildschirmhöhe — jede Zeile läuft
+beim Durchscrollen sichtbar durch diese Position, mit einer dünnen Linie als visueller
+Anker markiert.
+
+- **Umsetzung:** siehe Gotcha 12, Abschnitt "Fester Lesepunkt". Nur eine Verschiebung
+  des Platzierungs-Nullpunkts im bestehenden `Layout` plus eine rein dekorative,
+  nicht-scrollende Indikator-Linie — keinerlei Änderung an der Rate-/Segment-Berechnung,
+  der Monoton-Klemmung oder `handleTap()`. Dadurch strukturell risikoarm: die am
+  meisten gefürchtete Fehlerklasse dieses Features (Rückwärtssprung, Ruckeln,
+  Race-Bugs) betraf ausschließlich `scrollOffsetPx`, das hier unangetastet bleibt.
+- Zusätzlich beantwortet (keine Code-Änderung nötig, nur Erklärung an den User): wie
+  die App weiß, welche Zeile "im Fokus" sein muss (aus den beim Kalibrieren gemessenen
+  `(Zeilen-Index, Position)`-Paaren, siehe Kalibrierung oben) und wie textarme
+  Abschnitte wie "[Solo]" korrekt langsamer/schneller laufen (ergibt sich automatisch
+  aus der Segment-Rate-Formel `Pixel-Distanz / Zeit-Distanz` zwischen zwei
+  Kalibrierungspunkten — kein Sonderfall nötig).
+- **Nicht verifiziert:** Wie 5.30–5.38 kein Gradle-Build in dieser Session möglich.
+  **Nächste Session: live testen**, ob der Lesepunkt bei ~30% sitzt, der Text sauber
+  hindurchläuft, und ob Sprint 5.38 (Scroll überhaupt bewegt sich) zusammen mit diesem
+  Fix funktioniert — das war die letzte ungetestete Baustelle vor diesem Feature.
 
 ### Sprint 5.38 DONE (ungetestet): Fix — Text scrollte überhaupt nicht (struktureller Box-Constraint-Bug)
 
@@ -997,7 +1043,7 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   mehr zur MainScreen-TopBar durch. Beides laut User-Report weiterhin korrekt
   (das eigentliche Problem beim erneuten Test war der Scroll-Stillstand aus
   5.38, keine Regression bei diesen beiden Fixes). Nicht mehr offen.
-- ⚠️ **Sprint 5.38 (Scroll-Stillstand-Fix) auf echtem Gerät testen (PRIO 1,
+- ⚠️ **Sprint 5.38 + 5.39 zusammen auf echtem Gerät testen (PRIO 1,
   ESKALIERT):** Nach 5.36/5.37 bewegte sich der Text überhaupt nicht mehr —
   weder während der Kalibrierung noch danach beim normalen Abspielen. Root
   Cause war ein struktureller Compose-Layout-Bug (`Box` reicht ihre
@@ -1006,12 +1052,16 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   Timing-/Race-Problem wie in 5.33–5.35 vermutet, sondern deterministisch
   reproduzierbar bei jedem Öffnen. Fix: eigenes `Layout`-Composable statt
   `Box { Column {...} }`, misst die Content-Column explizit mit
-  `maxHeight = Constraints.Infinity`. **Das ist der Kernzweck der ganzen
-  Funktion — unbedingt gründlich testen:** nach abgeschlossener Kalibrierung
-  muss der Text beim normalen Songabspielen kontinuierlich, smooth und in der
-  kalibrierten Geschwindigkeit mitlaufen (nicht nur beim Tippen selbst).
-  Zusätzlich: niemals Rückwärtssprung (kritisch laut User), DB-Migration
-  15→16 weiterhin sauber, Live-Tap-to-Sync funktioniert weiterhin.
+  `maxHeight = Constraints.Infinity`. Sprint 5.39 baut direkt darauf auf
+  (fester Lesepunkt bei ~30% Höhe statt Scroll ab Viewport-Oberrand, siehe
+  Gotcha 12) — ändert nur den Platzierungs-Nullpunkt, keine Scroll-Mechanik.
+  **Das ist der Kernzweck der ganzen Funktion — unbedingt gründlich testen:**
+  nach abgeschlossener Kalibrierung muss der Text beim normalen Songabspielen
+  kontinuierlich, smooth und in der kalibrierten Geschwindigkeit durch die
+  Lesepunkt-Linie laufen (nicht nur beim Tippen selbst). Zusätzlich: niemals
+  Rückwärtssprung (kritisch laut User), DB-Migration 15→16 weiterhin sauber,
+  Live-Tap-to-Sync funktioniert weiterhin, Lesepunkt-Linie sitzt sichtbar bei
+  ~30% von oben.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

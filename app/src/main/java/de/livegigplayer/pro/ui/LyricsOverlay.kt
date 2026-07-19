@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -51,6 +52,7 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
@@ -58,6 +60,10 @@ import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 
 private const val TAG = "LyricsOverlay"
+
+// Fester Lesepunkt: Anteil der Viewport-Höhe von oben, an dem die aktuelle Zeile
+// beim Durchlaufen sichtbar "im Fokus" steht (siehe Layout-Platzierung unten).
+private const val ANCHOR_FRACTION = 0.3f
 
 private val LyricsBg    = Color(0xFF0A0A0A)
 private val LyricsVolt  = Color(0xFFE8FF00)
@@ -404,57 +410,78 @@ private fun LyricsContent(
             // EXPLIZIT mit `maxHeight = Constraints.Infinity` — Höhe und Platzierung
             // (inkl. Scroll-Offset) werden hier direkt selbst kontrolliert, kein Verlass
             // mehr auf automatische Constraint-Weitergabe.
-            Layout(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { handleTap() })
-                    },
-                content = {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
-                        lines.forEachIndexed { index, line ->
-                            val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
-                            when {
-                                line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
-                                sectionLabel != null -> Text(
-                                    text = sectionLabel.uppercase(),
-                                    color = LyricsVolt,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 2.sp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 20.dp, bottom = 6.dp)
-                                        .onGloballyPositioned { coords ->
-                                            linePositions[index] = coords.positionInParent().y
-                                        }
-                                )
-                                else -> Text(
-                                    text = line,
-                                    color = LyricsWhite,
-                                    fontSize = 26.sp,
-                                    lineHeight = 36.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .onGloballyPositioned { coords ->
-                                            linePositions[index] = coords.positionInParent().y
-                                        }
-                                )
+            Box(modifier = Modifier.fillMaxSize()) {
+                Layout(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clipToBounds()
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { handleTap() })
+                        },
+                    content = {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
+                            lines.forEachIndexed { index, line ->
+                                val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
+                                when {
+                                    line.isBlank() -> Spacer(modifier = Modifier.height(24.dp))
+                                    sectionLabel != null -> Text(
+                                        text = sectionLabel.uppercase(),
+                                        color = LyricsVolt,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 2.sp,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 20.dp, bottom = 6.dp)
+                                            .onGloballyPositioned { coords ->
+                                                linePositions[index] = coords.positionInParent().y
+                                            }
+                                    )
+                                    else -> Text(
+                                        text = line,
+                                        color = LyricsWhite,
+                                        fontSize = 26.sp,
+                                        lineHeight = 36.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .onGloballyPositioned { coords ->
+                                                linePositions[index] = coords.positionInParent().y
+                                            }
+                                    )
+                                }
                             }
+                            // Platzhalter am Ende, damit auch die letzte Zeile bis zum Lesepunkt scrollen kann.
+                            Spacer(modifier = Modifier.height(240.dp))
                         }
-                        // Platzhalter am Ende, damit auch die letzte Zeile bis ganz oben scrollen kann.
-                        Spacer(modifier = Modifier.height(240.dp))
+                    }
+                ) { measurables, constraints ->
+                    viewportHeightPx = constraints.maxHeight.toFloat()
+                    val contentConstraints = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+                    val placeable = measurables.first().measure(contentConstraints)
+                    contentHeightPx = placeable.height.toFloat()
+                    // Fester Lesepunkt: Inhalt wird nicht ab dem Viewport-Oberrand platziert,
+                    // sondern ab ANCHOR_FRACTION * Viewport-Höhe — die "aktuelle" Zeile läuft
+                    // dadurch sichtbar durch diese feste Bildschirmposition, statt oben zu
+                    // verschwinden. Reine Verschiebung des Platzierungs-Nullpunkts, ändert
+                    // nichts an scrollOffsetPx selbst (Rate-Berechnung, Monoton-Klemmung).
+                    val readingAnchorPx = (constraints.maxHeight * ANCHOR_FRACTION).roundToInt()
+                    layout(constraints.maxWidth, constraints.maxHeight) {
+                        placeable.placeRelative(0, readingAnchorPx - scrollOffsetPx.roundToInt())
                     }
                 }
-            ) { measurables, constraints ->
-                viewportHeightPx = constraints.maxHeight.toFloat()
-                val contentConstraints = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
-                val placeable = measurables.first().measure(contentConstraints)
-                contentHeightPx = placeable.height.toFloat()
-                layout(constraints.maxWidth, constraints.maxHeight) {
-                    placeable.placeRelative(0, -scrollOffsetPx.roundToInt())
+
+                // Statische Indikator-Linie am festen Lesepunkt — läuft selbst nicht mit,
+                // markiert nur die Bildschirmposition, an der der Text gerade "im Fokus" ist.
+                if (viewportHeightPx > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .offset { IntOffset(0, (viewportHeightPx * ANCHOR_FRACTION).roundToInt()) }
+                            .height(1.dp)
+                            .background(LyricsVolt.copy(alpha = 0.25f))
+                    )
                 }
             }
         }

@@ -119,6 +119,7 @@ app/src/main/java/de/livegigplayer/pro/
 | lyrics | String | Songtext ohne Akkorde, mit optionalen Struktur-Labels wie `[Chorus]` (v14) |
 | lyricsStartMs | Long | Superseded durch lyricsSyncPoints (v16) — nur Schema-Kompatibilität, unbenutzt |
 | lyricsSyncPoints | String | Teleprompter-Kalibrierungspunkte "lineIdx:ms,…", ein Tap pro Abschnitt (v16) |
+| lyricsLeadMs | Long | Teleprompter-Vorlauf in ms: wie weit der Text dem Gesang vorauseilt, live per −/+ verstellbar (v17) |
 
 ## Build-Setup
 
@@ -136,7 +137,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v16** — nächste Migration wäre 16→17. Migrationen NIE doppelt anlegen.
+1. **Room v17** — nächste Migration wäre 17→18. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
@@ -331,15 +332,69 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       sowohl die Frame-Loop als auch `handleTap()` (Kalibrierungs-Aufnahme)
       dieselbe Schätzung verwenden — sonst wären Kalibrierungspunkte leicht
       verrauscht relativ zur Playback-Darstellung.
+    - **Einstellbarer Vorlauf `song.lyricsLeadMs` (Sprint 5.45, Room v17):** Nach
+      5.44 (Positions-Hochrechnung, smooth) blieb das gefühlte Nachhinken —
+      Beweis, dass es KEIN Rechenfehler in der Rate/Interpolation ist (die
+      Segment-Raten im Log variieren nachweislich korrekt 0.0128–0.0333 px/ms),
+      sondern ein KONSTANTER Zeit-Versatz. Ursache: menschliche Reaktionszeit
+      beim Kalibrieren (jeder Tap wird ~0,3–0,5s NACH dem echten
+      Abschnittswechsel gesetzt, dieser Verzug ist in jedem Kalibrierungspunkt
+      eingebacken und wird beim Abspielen exakt reproduziert) + fehlende
+      Vorlesezeit für den Sänger. Fix: `leadMs` wird im Frame-Loop auf die
+      geschätzte Position addiert (`pos = (estimatedPositionMs() + leadMs)
+      .coerceIn(0, dur)`) — der Scroll rechnet mit einer voraus liegenden
+      Position, jede Zeile erreicht den Lesepunkt `leadMs` früher. Bewusst KEIN
+      weiterer unsichtbarer Automatik-Fix (fünfter Blind-Versuch vermieden):
+      stattdessen ein DIREKT vom User verstellbarer Knopf (−/+ im Header,
+      250ms-Schritte, −3s..+8s), live während der Wiedergabe, sofort pro Song
+      persistiert (`SongDao.updateLyricsLeadMs`) — der User dial't den Text
+      exakt dorthin, wo er singt, unabhängig von der genauen Ursache. Lead wirkt
+      NUR auf die Playback-Position im Scroll, NICHT auf `handleTap()`/die
+      Kalibrierungs-Aufnahme (die zeichnet weiter Roh-Positionen auf) — Lead ist
+      eine reine Playback-Kompensation ON TOP der Kalibrierung, komponiert
+      dadurch automatisch korrekt, ohne Sonderfall-Code.
 
 ## Letzter Stand
 
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix — Scroll hinkt hinterher/wirkt konstant (200ms-Poll vs. 60fps-Loop), Positions-Hochrechnung ergänzt
+**Commit:** Teleprompter — einstellbarer Vorlauf (−/+ Knopf, pro Song gespeichert) gegen konstantes Nachhinken (Room v17)
 
-### Sprint 5.44 DONE (ungetestet): Fix — echter Root Cause für "läuft konstant/hinkt hinterher" gefunden
+### Sprint 5.45 DONE (ungetestet): Einstellbarer Vorlauf gegen konstantes Nachhinken (Room v16→17)
+
+User-Report nach 5.44 (Positions-Hochrechnung, CI grün): "das Problem besteht
+weiterhin" — der Text hinkt beim Mitsingen weiterhin konstant hinterher, die
+Geschwindigkeit fühlt sich unverändert an. User-Anweisung: die komplette Logik
+nochmal ganz genau auf Denkfehler durchgehen.
+
+**Analyse-Ergebnis:** Der 5.44-Fix (60fps-Interpolation) hat das Nachhinken NICHT
+behoben — Beweis, dass die Ursache KEIN <200ms-Glättungsproblem und KEIN
+Rechenfehler in Rate/Interpolation ist (die Segment-Raten im geteilten Log
+variieren nachweislich korrekt 0.0128–0.0333 px/ms über 11 Kalibrierungspunkte).
+Übrig bleibt strukturell nur ein KONSTANTER Zeit-Versatz. Ursache: (1) menschliche
+Reaktionszeit beim Kalibrieren — jeder Tap wird ~0,3–0,5s NACH dem echten
+Abschnittswechsel gesetzt, dieser Verzug ist in jeden Kalibrierungspunkt eingebacken
+und wird beim Abspielen 1:1 reproduziert; (2) ein Sänger will die Zeile SEHEN, bevor
+er sie singt, nicht genau wenn.
+
+**Fix (bewusst KEIN fünfter unsichtbarer Automatik-Versuch):** direkt vom User
+verstellbarer **Vorlauf** statt weiterem Raten an der Automatik. Room v16→17:
+`Song.lyricsLeadMs: Long = 0L`, `MIGRATION_16_17`, `SongDao.updateLyricsLeadMs`,
+`PlayerViewModel.updateLyricsLeadMs`. Im Frame-Loop wird `leadMs` auf die geschätzte
+Position addiert (`pos = (estimatedPositionMs() + leadMs).coerceIn(0, dur)`) → der
+Scroll rechnet mit einer voraus liegenden Position, jede Zeile erreicht den Lesepunkt
+`leadMs` früher. −/+ Buttons im Header (250ms-Schritte, −3s..+8s), live während der
+Wiedergabe verstellbar, sofort pro Song persistiert. Lead wirkt NUR auf die
+Playback-Position, NICHT auf `handleTap()` (Kalibrierung zeichnet weiter Roh-Positionen
+auf) — reine Kompensation ON TOP, komponiert automatisch korrekt. Siehe Gotcha 12.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich. **Nächste
+  Session: live testen** — Bed of Roses mitsingen, per + den Vorlauf so weit
+  hochdrehen, bis der Text genau da steht, wo gesungen wird. Prüfen, ob der Wert
+  pro Song erhalten bleibt (Screen schließen/neu öffnen).
+
+### Sprint 5.44 DONE: Fix — Positions-Hochrechnung (200ms-Poll vs. 60fps-Loop), hat das Nachhinken laut User NICHT behoben (siehe 5.45)
 
 User-Report nach 5.43 (persistenter Diagnose-Log, CI grün): Mit dem jetzt korrekt
 zugeordneten, vollständigen Log für Bed of Roses (11 Kalibrierungspunkte, echte
@@ -1226,17 +1281,17 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
   `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
   diesen einen Song vermerkt.
-- ⚠️ **Sprint 5.43 (persistenter Diagnose-Log) + Sprint 5.44 (Positions-
-  Hochrechnung) auf echtem Gerät testen (PRIO 1):** Mit korrekt zugeordnetem
-  Log (5.43) zeigte sich der ECHTE Bug: `positionMs` aus `PlayerViewModel`
-  aktualisiert nur alle 200ms, der 60fps-Frame-Loop lief bis dahin mit
-  eingefrorenen Werten in "Treppenstufen" statt smooth — erklärt "läuft
-  konstant" UND "hinkt beim Mitsingen hinterher" exakt. Fix (5.44):
-  `estimatedPositionMs()` rechnet zwischen den 200ms-Werten per realer
-  Systemzeit hoch (siehe Gotcha 12). **Nächste Session: gezielt live
-  testen**, ob sich der Scroll beim Mitsingen jetzt smooth und ohne
-  Nachhinken anfühlt — das war der Kernzweck der ganzen Funktion und bisher
-  nie erfolgreich bestätigt.
+- 🔴 **Teleprompter-Nachhinken: einstellbarer Vorlauf live testen (PRIO 1,
+  NEU in Sprint 5.45):** 5.44 (60fps-Interpolation) hat das gefühlte Nachhinken
+  NICHT behoben → Ursache ist kein Rechenfehler (Segment-Raten laut Log korrekt),
+  sondern ein konstanter Zeit-Versatz (Reaktionszeit beim Kalibrieren + fehlende
+  Vorlesezeit). Fix (5.45): direkt verstellbarer Vorlauf (`song.lyricsLeadMs`,
+  Room v17, −/+ im Header, pro Song gespeichert), addiert auf die Playback-
+  Position im Scroll (siehe Gotcha 12). **Nächste Session: live testen** —
+  Bed of Roses mitsingen, Vorlauf per + hochdrehen bis der Text passt, prüfen
+  ob der Wert pro Song erhalten bleibt. Falls der Vorlauf-Knopf das Nachhinken
+  nicht löst, ist die Annahme "konstanter Zeit-Versatz" falsch und die Ursache
+  liegt tiefer (dann erneut Log auswerten).
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

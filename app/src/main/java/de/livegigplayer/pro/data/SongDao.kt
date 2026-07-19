@@ -52,6 +52,9 @@ interface SongDao {
     @Query("UPDATE songs SET lyricsSyncPoints=:points WHERE id=:id")
     suspend fun updateLyricsSyncPoints(id: Long, points: String)
 
+    @Query("UPDATE songs SET lyricsLeadMs=:leadMs WHERE id=:id")
+    suspend fun updateLyricsLeadMs(id: Long, leadMs: Long)
+
     @Query("DELETE FROM songs")
     suspend fun deleteAll()
 }

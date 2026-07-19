@@ -33,5 +33,10 @@ data class Song(
     val lyricsStartMs: Long = 0L,
     // Kalibrierungspunkte aus dem Teleprompter: "lineIndex:positionMs" kommagetrennt,
     // sortiert nach positionMs. Siehe LyricsOverlay.parseSyncPoints/serializeSyncPoints.
-    val lyricsSyncPoints: String = ""
+    val lyricsSyncPoints: String = "",
+    // Vorlauf des Teleprompter-Scrolls in ms (v17): um wie viel der Text dem echten
+    // Gesang vorauseilt. Kompensiert die menschliche Reaktionszeit beim Kalibrieren
+    // (jeder Tap wird ~0,3–0,5s NACH dem echten Abschnittswechsel gesetzt) und gibt
+    // dem Sänger Vorlesezeit. Live im Teleprompter per −/+ verstellbar.
+    val lyricsLeadMs: Long = 0L
 )

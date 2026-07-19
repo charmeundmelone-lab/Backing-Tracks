@@ -24,9 +24,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -164,6 +166,7 @@ fun LyricsOverlay(
     isPlaying: Boolean,
     onClose: () -> Unit,
     onSetLyricsSyncPoints: (Long, String) -> Unit = { _, _ -> },
+    onSetLyricsLeadMs: (Long, Long) -> Unit = { _, _ -> },
     debugLog: List<String> = emptyList(),
     onLogDebug: (String) -> Unit = {},
     onLogWarn: (String) -> Unit = {}
@@ -194,6 +197,7 @@ fun LyricsOverlay(
                 isPlaying             = isPlaying,
                 onClose               = onClose,
                 onSetLyricsSyncPoints = onSetLyricsSyncPoints,
+                onSetLyricsLeadMs     = onSetLyricsLeadMs,
                 debugLog              = debugLog,
                 onLogDebug            = onLogDebug,
                 onLogWarn             = onLogWarn
@@ -211,6 +215,7 @@ private fun LyricsContent(
     isPlaying: Boolean,
     onClose: () -> Unit,
     onSetLyricsSyncPoints: (Long, String) -> Unit,
+    onSetLyricsLeadMs: (Long, Long) -> Unit,
     debugLog: List<String>,
     onLogDebug: (String) -> Unit,
     onLogWarn: (String) -> Unit
@@ -250,6 +255,13 @@ private fun LyricsContent(
     // die Loop übernimmt den neuen Wert automatisch im nächsten Frame — dadurch gibt
     // es nur einen einzigen Mutationspfad, keine konkurrierende Animation mehr.
     var scrollOffsetPx by remember(song.id, openSession) { mutableStateOf(0f) }
+
+    // Einstellbarer Vorlauf: um wie viel ms der Text dem echten Gesang vorauseilt.
+    // Startwert aus der DB (song.lyricsLeadMs), live per −/+ im Header verstellbar,
+    // Änderung wird sofort persistiert. Kompensiert die beim Kalibrieren eingebackene
+    // Reaktionszeit (jeder Tap ~0,3–0,5s zu spät) und gibt dem Sänger Vorlesezeit.
+    var leadMs by remember(song.id, openSession) { mutableStateOf(song.lyricsLeadMs) }
+    val latestLeadMs by rememberUpdatedState(leadMs)
 
     // Zusätzliche Absicherung gegen eine zu kurze live gemeldete durationMs.
     val dbDurationMs = remember(song.id, song.duration) { parseDurationString(song.duration) }
@@ -309,8 +321,12 @@ private fun LyricsContent(
                 continue
             }
 
-            val pos = estimatedPositionMs()
             val dur = latestDurationMs
+            // Vorlauf anwenden: der Scroll rechnet mit einer um leadMs voraus liegenden
+            // Position → jede Zeile erreicht den Lesepunkt leadMs früher als kalibriert.
+            // Auf [0, dur] geklemmt, damit der Vorlauf am Songende nicht über die letzte
+            // Zeile hinausschießt (der Rest wird ohnehin durch maxScrollPx begrenzt).
+            val pos = (estimatedPositionMs() + latestLeadMs).coerceIn(0L, dur)
 
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
             var segmentJustChanged = false
@@ -453,6 +469,39 @@ private fun LyricsContent(
                     onClose()
                 }) {
                     Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = LyricsGray)
+                }
+            }
+
+            // Vorlauf-Steuerung: regelt live, wie weit der Text dem Gesang vorauseilt.
+            // Direkt kompensierbar, wenn der Text "hinterherhinkt" (+ drücken) oder
+            // vorauseilt (− drücken). Wird pro Song sofort gespeichert.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Vorlauf", color = LyricsGray, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = {
+                        leadMs = (leadMs - 250L).coerceIn(-3000L, 8000L)
+                        onSetLyricsLeadMs(song.id, leadMs)
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Filled.Remove, contentDescription = "Vorlauf verringern", tint = LyricsVolt, modifier = Modifier.size(20.dp))
+                }
+                Text(
+                    (if (leadMs >= 0) "+" else "") + "%.2f s".format(leadMs / 1000f),
+                    color = LyricsWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                IconButton(
+                    onClick = {
+                        leadMs = (leadMs + 250L).coerceIn(-3000L, 8000L)
+                        onSetLyricsLeadMs(song.id, leadMs)
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "Vorlauf erhöhen", tint = LyricsVolt, modifier = Modifier.size(20.dp))
                 }
             }
 

@@ -274,10 +274,19 @@ private fun LyricsContent(
             val dur = latestDurationMs
 
             // Anker automatisch durch bereits erreichte Kalibrierungspunkte weiterschalten.
+            var segmentJustChanged = false
             while (nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
                 val (lineIdx, ms) = breakpoints[nextIdx]
                 val px = linePositions[lineIdx]
-                if (px != null) { anchorPositionMs = ms; anchorScrollPx = px }
+                if (px != null) {
+                    anchorPositionMs = ms
+                    anchorScrollPx = px
+                    segmentJustChanged = true
+                } else {
+                    Log.w(TAG, "Kalibrierungspunkt #${nextIdx + 1}/${breakpoints.size} " +
+                        "(lineIdx=$lineIdx, ms=$ms) hat KEINE gemessene Zeilen-Position " +
+                        "— Anker NICHT aktualisiert, Segment wird übersprungen!")
+                }
                 nextIdx++
             }
 
@@ -296,6 +305,11 @@ private fun LyricsContent(
             if (segEndMs <= anchorPositionMs) continue
 
             val rate    = (segEndPx - anchorScrollPx) / (segEndMs - anchorPositionMs).toFloat()
+            if (segmentJustChanged) {
+                Log.d(TAG, "Neues Segment: anchor=(${anchorPositionMs}ms, ${anchorScrollPx}px) -> " +
+                    "segEnd=(${segEndMs}ms, ${segEndPx}px) rate=${rate}px/ms " +
+                    "(nextIdx=$nextIdx von ${breakpoints.size} Punkten)")
+            }
             val raw     = anchorScrollPx + rate * (pos - anchorPositionMs).toFloat()
             val clamped = raw.coerceIn(0f, maxScrollPx)
             if (clamped > scrollOffsetPx) {

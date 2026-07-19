@@ -307,7 +307,38 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-19
 **CI Build:** noch nicht gepusht — lokal implementiert, kein Gradle-Build in dieser Session möglich (siehe Sprint 5.38)
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Feature — fester Lesepunkt (~30% von oben) im Teleprompter, Text läuft smooth durch eine feste Markierungslinie statt am Viewport-Oberrand zu verschwinden
+**Commit:** Diagnose-Logging für Segment-Wechsel-Bug (Rate wirkt trotz frischer Kalibrierung konstant)
+
+### Sprint 5.40 DONE (Diagnose, kein Fix): Logging für Segment-Wechsel-Bug
+
+User-Report nach Live-Test von Sprint 5.39 (fester Lesepunkt): der Text läuft "immer
+ganz konstant anstatt seine Geschwindigkeit dynamisch anzupassen", manche Songteile
+scrollen zu langsam. Explizit bestätigt: eine komplett frische Kalibrierung (Record →
+durchtippen → Stop) wurde in diesem Build bereits gemacht — das schließt "keine/kaputte
+Kalibrierungsdaten" als Ursache aus. Die Rate-Formel selbst (`Pixel-Distanz /
+Zeit-Distanz` pro Segment) ist mathematisch korrekt und sollte bei unterschiedlich
+langen Abschnitten automatisch unterschiedliche Geschwindigkeiten ergeben — dass es
+trotzdem konstant wirkt, deutet auf einen Bug im Segment-Wechsel selbst hin, nicht auf
+fehlende Daten.
+
+**Bewusst KEIN Blind-Fix (Lehre aus 5.33–5.35):** Statt eine fünfte Theorie zu raten,
+wurde nur zusätzliches Logging ergänzt (rein additiv, keine Verhaltensänderung):
+- `Log.w`, falls ein Kalibrierungspunkt beim Anker-Weiterschalten KEINE gemessene
+  Zeilen-Position findet (`linePositions[lineIdx] == null`) — dieser Fall wurde bisher
+  still übersprungen (Punkt zählt als "erledigt", Anker bleibt aber unverändert), was
+  mehrere echte Segmente unsichtbar zu einem einzigen verschmelzen lassen könnte
+  (Hauptverdacht für "wirkt konstant").
+- `Log.d` bei jedem tatsächlichen Segment-Wechsel mit Anker, Segment-Ende und
+  berechneter Rate — macht sichtbar, ob und wie stark sich die Rate zwischen
+  Abschnitten wirklich unterscheidet.
+- Die bereits vorhandene Logzeile beim Öffnen (`Lyrics-Loop start: ... breakpoints=…`,
+  Sprint 5.35) zeigt zusätzlich die komplette geparste Kalibrierungsliste.
+
+**Nächste Session:** `adb logcat -s LyricsOverlay` während eines kompletten Songdurchlaufs
+mitschneiden und auswerten — zeigt, ob (a) Kalibrierungspunkte beim Abspielen
+übersprungen werden (Log-Warnung) oder (b) die Segmente korrekt wechseln, aber mit
+falscher/zu ähnlicher Rate (Segment-Wechsel-Logzeilen vergleichen). Erst danach den
+eigentlichen Fix gezielt umsetzen.
 
 ### Sprint 5.39 DONE (ungetestet): Fester Lesepunkt im Teleprompter
 
@@ -1043,25 +1074,22 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   mehr zur MainScreen-TopBar durch. Beides laut User-Report weiterhin korrekt
   (das eigentliche Problem beim erneuten Test war der Scroll-Stillstand aus
   5.38, keine Regression bei diesen beiden Fixes). Nicht mehr offen.
-- ⚠️ **Sprint 5.38 + 5.39 zusammen auf echtem Gerät testen (PRIO 1,
-  ESKALIERT):** Nach 5.36/5.37 bewegte sich der Text überhaupt nicht mehr —
-  weder während der Kalibrierung noch danach beim normalen Abspielen. Root
-  Cause war ein struktureller Compose-Layout-Bug (`Box` reicht ihre
-  `maxHeight`-Constraint automatisch an Kinder weiter, Content-Column konnte
-  nie höher gemessen werden als der Viewport, siehe Gotcha 12) — KEIN
-  Timing-/Race-Problem wie in 5.33–5.35 vermutet, sondern deterministisch
-  reproduzierbar bei jedem Öffnen. Fix: eigenes `Layout`-Composable statt
-  `Box { Column {...} }`, misst die Content-Column explizit mit
-  `maxHeight = Constraints.Infinity`. Sprint 5.39 baut direkt darauf auf
-  (fester Lesepunkt bei ~30% Höhe statt Scroll ab Viewport-Oberrand, siehe
-  Gotcha 12) — ändert nur den Platzierungs-Nullpunkt, keine Scroll-Mechanik.
-  **Das ist der Kernzweck der ganzen Funktion — unbedingt gründlich testen:**
-  nach abgeschlossener Kalibrierung muss der Text beim normalen Songabspielen
-  kontinuierlich, smooth und in der kalibrierten Geschwindigkeit durch die
-  Lesepunkt-Linie laufen (nicht nur beim Tippen selbst). Zusätzlich: niemals
-  Rückwärtssprung (kritisch laut User), DB-Migration 15→16 weiterhin sauber,
-  Live-Tap-to-Sync funktioniert weiterhin, Lesepunkt-Linie sitzt sichtbar bei
-  ~30% von oben.
+- ✅ **Sprint 5.38 (Scroll-Stillstand) + Sprint 5.39 (fester Lesepunkt)
+  (ERLEDIGT):** Vom User bestätigt funktionsfähig — Text bewegt sich, Lesepunkt
+  sitzt sichtbar bei ~30%. Nicht mehr offen.
+- 🔴 **Segment-Wechsel-Bug: Scroll-Geschwindigkeit wirkt konstant trotz
+  frischer Kalibrierung (PRIO 1, NEU in Sprint 5.40):** User hat nach 5.39
+  eine komplett frische Kalibrierung durchgetippt (bestätigt, kein Daten-
+  problem) — Scroll läuft trotzdem "immer ganz konstant" statt abschnittsweise
+  unterschiedlich schnell, manche Songteile laufen zu langsam. Die Rate-Formel
+  selbst ist korrekt; Verdacht (unbestätigt) auf Segmente, die beim Anker-
+  Weiterschalten stillschweigend übersprungen werden, wenn ein Kalibrierungs-
+  punkt keine gemessene Zeilen-Position findet (`linePositions[lineIdx] ==
+  null`). Sprint 5.40 hat dafür NUR Diagnose-Logging ergänzt (kein Blind-Fix,
+  siehe Lehre aus 5.33–5.35): `Log.w` bei übersprungenen Kalibrierungspunkten,
+  `Log.d` mit Rate bei jedem echten Segment-Wechsel. **Nächste Session:**
+  `adb logcat -s LyricsOverlay` während eines kompletten Songdurchlaufs
+  mitschneiden, auswerten, dann gezielt fixen.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

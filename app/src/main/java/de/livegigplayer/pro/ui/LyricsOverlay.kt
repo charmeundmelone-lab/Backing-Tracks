@@ -450,6 +450,17 @@ private fun LyricsContent(
             val segT    = (segEndMs - anchorPositionMs).toFloat()
             val elapsed = (pos - anchorPositionMs).toFloat()
 
+            // Diagnose: bei JEDEM Abschnittswechsel loggen, unabhängig davon, in welcher
+            // Phase wir uns in diesem Frame gerade befinden (vorher feuerte das Log nur,
+            // wenn der Wechsel-Frame zufällig noch in Phase 1 lag — z.B. direkt nach dem
+            // Neustart des Loops, wenn mehrere Breakpoints in einem Frame aufgeholt
+            // werden, blieb das Log stumm, obwohl der Wechsel echt passiert ist).
+            if (segmentJustChanged) {
+                val segWLog = if (hasModel) weightBetween(anchorLineIdx, segEndLine) else -1f
+                onLogDebug("Segment: anchorLine=$anchorLineIdx->$segEndLine segW=$segWLog " +
+                    "segT=${segT}ms pace=$naturalPace pos=$pos")
+            }
+
             val targetPx: Float
             if (!hasModel) {
                 // Fallback (Kalibrierung / noch keine Punkte): einfache lineare Fahrt.
@@ -465,10 +476,6 @@ private fun LyricsContent(
                         // Phase 1 — Lesen im Sing-Tempo.
                         val targetW = (elapsed / readDuration) * segW
                         targetPx = readingPixel(anchorLineIdx, segEndLine, targetW)
-                        if (segmentJustChanged) {
-                            onLogDebug("Segment: anchorLine=$anchorLineIdx->$segEndLine segW=$segW " +
-                                "readDur=${readDuration}ms/${segT}ms pace=$naturalPace")
-                        }
                     } else {
                         // Phase 2 — Instrumental/Ausklang aussitzen, sanft zum nächsten Anker.
                         val readEndPx  = readingPixel(anchorLineIdx, segEndLine, segW)

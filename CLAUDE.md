@@ -396,7 +396,43 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-20
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix — Datenverlust-Bug: Kalibrierung ging verloren, wenn der Song während der Aufnahme zu Ende lief
+**Commit:** Diagnose-Logging feuert jetzt bei JEDEM Abschnittswechsel, unabhängig von der Phase
+
+### Sprint 5.50 DONE (Diagnose, kein Fix): Logging-Lücke behoben — "Segment:"-Zeile feuerte nur zufällig
+
+Nach dem 5.49-Fix (Datenverlust) hat der User erfolgreich neu kalibriert — der Log
+zeigte diesmal korrekt FRISCHE Breakpoints (7 Punkte statt der alten 11), der Fix
+wirkt also. Trotzdem enthielt der geteilte Log wieder keine einzige "Segment:
+..."-Zeile, obwohl der Song bis zum Ende durchgesungen wurde. Per Rückfrage
+bestätigt: der Log wurde korrekt direkt über den Share-Button geteilt (kein
+Abtippen/Kürzen durch den User).
+
+**Root Cause (echte Logging-Lücke, im Code verifiziert):** Die `onLogDebug("Segment:
+...")`-Zeile stand bisher NUR im Phase-1-Zweig (`if (elapsed < readDuration)`).
+Direkt nach dem Speichern der Kalibrierung (Stop-Tap kurz vor Songende) startet die
+Auswertung neu (`LaunchedEffect` neu gekeyt durch geändertes `song.lyricsSyncPoints`)
+— und wenn `pos` zu diesem Zeitpunkt schon weit fortgeschritten ist, werden beim
+Neustart ggf. mehrere/alle Breakpoints in einem einzigen Frame aufgeholt und die
+Auswertung landet direkt in Phase 2, ohne dass die Log-Zeile in diesem Frame je
+Phase 1 durchläuft — der Wechsel passiert real, wird aber nicht geloggt. Zusätzlich
+plausibel: Falls nach dem Stop-Tap kein nennenswertes weiteres Playback mehr
+stattfand, gab es schlicht keine weiteren echten Abschnittswechsel mehr, die das
+Log hätten füllen können.
+
+**Fix:** Die Log-Zeile steht jetzt VOR der Phase-1/Phase-2-Verzweigung und feuert
+bei jedem `segmentJustChanged`, unabhängig davon, in welcher Phase der aktuelle
+Frame gerade landet. Zusätzlich wird jetzt auch bei "kein Modell"/"reines
+Instrumental-Segment" (`segW<=0`) geloggt (vorher gar nicht), erkennbar an
+`segW=-1` bzw. `segW=0` in der Log-Zeile.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich. **Nächste
+  Session:** sauberer Test — Bed of Roses frisch kalibrieren, Song bis zum Ende
+  laufen lassen, DANACH den Song nochmal von vorne abspielen (damit die neue
+  Kalibrierung unter realer Wiedergabe mehrfach durchläuft), dann den kompletten
+  Log senden. Erst mit "Segment:"-Zeilen für alle 6 Übergänge lässt sich die
+  Lese-Uhr wirklich beurteilen.
+
+### Sprint 5.49 DONE: Fix — Datenverlust-Bug: Kalibrierung ging verloren, wenn der Song während der Aufnahme zu Ende lief
 
 ### Sprint 5.49 DONE (ungetestet): Fix — Kalibrierung übersteht Songwechsel während der Aufnahme
 
@@ -1493,20 +1529,28 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   wurde dabei verworfen, bevor Stop etwas speichern konnte. Fix:
   `DisposableEffect(song.id) { onDispose { ... } }` speichert beim Songwechsel
   automatisch, falls noch kalibriert wurde (siehe Gotcha 12). Nicht mehr offen.
+- ✅ **Logging-Lücke: "Segment:"-Zeile feuerte nur zufällig (ERLEDIGT, Sprint
+  5.50):** Nach erfolgreicher Neu-Kalibrierung (5.49-Fix bestätigt, frische 7
+  Punkte im Log sichtbar) enthielt der Log trotzdem keine "Segment: ..."-Zeilen.
+  Root Cause: die Log-Zeile stand nur im Phase-1-Zweig, feuerte also nur, wenn
+  der Wechsel-Frame zufällig noch in Phase 1 lag. Fix: Log steht jetzt vor der
+  Phase-Verzweigung, feuert bei jedem echten Abschnittswechsel. Nicht mehr offen.
 - 🔴 **Teleprompter: FRISCH pro ABSCHNITT kalibrieren + SAUBER retesten (PRIO 1,
-  Sprint 5.48 Lese-Uhr, jetzt mit Sprint-5.49-Fix):** Wurzel des Mitte-Driftens =
-  lineares Pixel-Scrollen schmiert Instrumental-Zeit (Intro/Solo/Ausklänge) über
-  die Gesangszeilen. Fix (5.48): Lese-Uhr-Modell — Gesangszeilen laufen im
-  gelernten Sing-Tempo, Instrumental wird in Phase 2 ausgesessen (siehe
-  Gotcha 12). Nur ein Tap pro Abschnitts-Anfang, Intro/Solo NICHT tippen. Der
-  erste Testlauf war durch den 5.49-Datenverlust-Bug verfälscht (lief mit
-  uralten, nicht passenden Kalibrierungsdaten) — die Intro-/Sprung-Beobachtungen
-  sind dadurch NICHT zuverlässig der Lese-Uhr-Logik zuzuordnen. **Nächste
-  Session:** Bed of Roses FRISCH kalibrieren (Record → bei jedem Abschnitts-
-  Anfang tippen inkl. der allerersten Gesangszeile nach der Intro, Intro/Solo
-  selbst überspringen → Stop), Song bis zum Ende laufen lassen, dann den
-  KOMPLETTEN Diagnose-Log senden (alle "Segment: ..."-Zeilen, nicht nur die
-  Start-Zeile) — erst danach lässt sich die Lese-Uhr wirklich beurteilen. Falls
+  Sprint 5.48 Lese-Uhr, jetzt mit Sprint-5.49/5.50-Fixes):** Wurzel des
+  Mitte-Driftens = lineares Pixel-Scrollen schmiert Instrumental-Zeit
+  (Intro/Solo/Ausklänge) über die Gesangszeilen. Fix (5.48): Lese-Uhr-Modell —
+  Gesangszeilen laufen im gelernten Sing-Tempo, Instrumental wird in Phase 2
+  ausgesessen (siehe Gotcha 12). Nur ein Tap pro Abschnitts-Anfang, Intro/Solo
+  NICHT tippen. Die bisherigen zwei Testläufe waren beide nicht auswertbar (1.
+  durch den 5.49-Datenverlust-Bug mit uralten Daten, 2. durch die 5.50-
+  Logging-Lücke ohne Segment-Zeilen trotz korrekter frischer Kalibrierung).
+  **Nächste Session:** Bed of Roses FRISCH kalibrieren (Record → bei jedem
+  Abschnitts-Anfang tippen inkl. der allerersten Gesangszeile nach der Intro,
+  Intro/Solo selbst überspringen → Stop), Song bis zum Ende laufen lassen,
+  DANACH nochmal von vorne abspielen lassen (damit die Kalibrierung unter
+  realer Wiedergabe durchläuft und alle Übergänge geloggt werden), dann den
+  KOMPLETTEN Diagnose-Log senden (alle "Segment: ..."-Zeilen) — erst danach
+  lässt sich die Lese-Uhr wirklich beurteilen. Falls
   winziger konstanter Rest-Versatz bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration
   v17 da) reaktivierbar.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live

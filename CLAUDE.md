@@ -281,14 +281,31 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       Wiedergabe, ohne etwas zu persistieren — komponiert automatisch
       korrekt mit der Kalibrierungs-Logik durch dieselbe
       `scrollOffsetPx`-Monoton-Klemmung (siehe oben), ohne Sonderfall-Code.
-    - **Granularität: pro ZEILE, nicht pro Abschnitt (Sprint 5.47):** Für "jede
-      gesungene Zeile steht zu ihrem Einsatz oben" braucht es einen Anker pro
-      Zeile — Abschnitts-Taps sind zu grob, da die lineare Pixel-Interpolation
-      über einen langen Abschnitt die Zeilen dazwischen nach unten (Mitte)
-      driften lässt und Zeilen vor dem ersten Tap gar nicht verankert sind
-      (Intro läuft davon). Hinweistexte/KDoc sagen deshalb "bei jeder Zeile
-      tippen (auch der ersten)". Der Frame-Loop kann beliebig viele Punkte, es
-      war reine Anleitung.
+    - **LESE-UHR-MODELL — Zwei-Phasen-Scroll (Idee 1, Sprint 5.48, LÖST das
+      Mitte-Driften):** Der Scroll läuft NICHT mehr linear über die Pixel,
+      sondern nach einer "Lese-Uhr". Vorberechnet: `lineIsLyric[i]` (echte
+      Textzeile = nicht leer UND kein `[Label]`) und `lineWeight[i]`
+      (Zeichenzahl bei Gesang, sonst 0). Pro Segment (zwischen zwei Ankern,
+      `anchorLineIdx`→`segEndLine`): `segW = weightBetween(...)`.
+      **Phase 1 (Lesen):** solange `elapsed < readDuration` (=`segW ×
+      naturalPace`, gekappt auf Segmentzeit) laufen die Gesangszeilen im
+      Sing-Tempo — `readingPixel()` verbraucht Gewicht und bleibt auf jeder
+      Zeile ∝ ihrer Länge stehen. **Phase 2 (Warten):** Rest der Segmentzeit
+      (= Instrumental-Ausklang/Solo/Intro) gleitet der Scroll sanft von der
+      Lese-End-Position zum nächsten Anker. Dadurch wird Instrumental-Zeit
+      AUSGESESSEN statt über die Gesangszeilen geschmiert (= die Ursache des
+      Mitte-Driftens aus 5.47). `naturalPace` (ms/Gewicht) wird EINMAL beim
+      Loop-Start aus den dichtesten Segmenten gelernt (~20. Perzentil der
+      time-per-weight über "volle" Segmente ≥40% des größten) — ein eher
+      schnelles Tempo lässt Zeilen minimal zu FRÜH oben ankommen (gut zum
+      Vorlesen). **Folge fürs Tappen:** nur noch ein Tap pro ABSCHNITTS-Anfang
+      nötig; Intro/Solo werden von Phase 2 automatisch abgefangen (kein Tap).
+      **Messung:** jetzt werden ALLE Zeilen inkl. Leerzeilen vermessen
+      (`onGloballyPositioned` auch auf den Blank-Spacern) plus ein Sentinel bei
+      Index `lines.size` (Oberkante des End-Platzhalters) — damit hat auch die
+      letzte Zeile eine gemessene Unterkante für `readingPixel`. `handleTap()`
+      verankert nur noch echte Gesangszeilen (`lineIsLyric`-Filter). Oben-Anker
+      (5.46) und Monoton-Klemmung bleiben unverändert.
     - **Recalibration-Isolation (Sprint 5.47):** Während `calibrating == true`
       treibt die ALTE gespeicherte Kalibrierung den Auto-Scroll NICHT
       (`useBreakpoints = !calibrating` → keine Anker-Weiterschaltung, kein
@@ -361,12 +378,52 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-19
+**Datum:** 2026-07-20
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Teleprompter — Kalibrierung pro ZEILE (statt pro Abschnitt) + Alt-Kalibrierung stört Neu-Kalibrierung nicht mehr
+**Commit:** Teleprompter — Lese-Uhr-Modell (Idee 1): Gesangszeilen im Sing-Tempo, Instrumental wird ausgesessen (löst Mitte-Driften)
 
-### Sprint 5.47 DONE (ungetestet): Kalibrierung pro Zeile + Recalibration-Isolation
+### Sprint 5.48 DONE (ungetestet): Lese-Uhr-Modell (Idee 1) — Instrumental-Zeit aussitzen statt schmieren
+
+User nach 5.46/5.47-Tests: das Oben-Anker-Modell sitzt an den Kalibrierungspunkten
+exakt, aber die zu singenden Zeilen landeten im MITTLEREN Bereich und die kurze Intro
+lief davon. **Nach Analyse des formatierten Bed-of-Roses-Texts + der echten
+Breakpoints die Wurzel gefunden:** Das lineare Scrollen über die PIXEL verteilt die
+Zeit der Instrumental-Teile ([Intro], [Solo]) und der Ausklänge auf die Gesangszeilen
+— die haben viel Zeit, aber kaum Pixel, ziehen also die Scroll-Geschwindigkeit runter
+→ Gesangszeilen kriechen zu langsam (Mitte). Der User wollte KEIN Viel-Tappen; er bat
+um geniale, einfache Lösungen und eine immer anwendbare Routine. Idee 1 ("Lese-Uhr")
+wurde gemeinsam geplant, Denkfehler ausgemerzt, dann freigegeben.
+
+**Umsetzung (siehe Gotcha 12, Abschnitt "Lese-Uhr-Modell"):**
+- Vorberechnung `lineIsLyric` / `lineWeight` (Zeichenzahl bei Gesang, sonst 0).
+- Zwei-Phasen-Scroll pro Segment: Phase 1 (Lesen im gelernten `naturalPace`),
+  Phase 2 (Instrumental/Ausklang sanft aussitzen bis zum nächsten Anker).
+- `naturalPace` (ms/Gewicht) wird aus den dichtesten Segmenten gelernt (~20.
+  Perzentil), einmal beim Loop-Start.
+- ALLE Zeilen werden jetzt vermessen (auch Leerzeilen-Spacer) + Sentinel bei
+  Index `lines.size` → `readingPixel()`/`weightBetween()` haben saubere Pixel.
+- `handleTap()` verankert nur echte Gesangszeilen; `anchorLineIdx` neu.
+- Kalibrier-Anleitung + KDoc: nur noch ein Tap pro ABSCHNITTS-Anfang, Intro/Solo
+  überspringen (Phase 2 fängt sie ab). Oben-Anker (5.46), Monoton-Klemmung,
+  60fps-Positions-Hochrechnung (5.44), Recalibration-Isolation (5.47): unverändert.
+
+**Text-Routine (immer anwendbar):** jeder Abschnitt ein Label ([Intro], [Verse n],
+[Chorus], [Bridge], [Solo], [Outro]); reine Instrumental-Teile als eigenes Label
+ohne Textzeilen; eine Gesangsphrase pro Zeile. Der bestehende Bed-of-Roses-Text
+erfüllt das bereits — kein Neu-Formatieren nötig.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session (Google-Maven 403).
+  Statisch geprüft: Klammerbalance (nur Real-Code), alle Symbole konsistent,
+  keine verwaisten Referenzen, Phasen-/Anker-Logik von Hand durchgerechnet
+  (Intro & Solo werden von Phase 2 korrekt abgefangen, ohne eigenen Tap).
+  **Nächste Session:** Bed of Roses FRISCH kalibrieren — Record → bei jedem
+  Abschnitts-Anfang tippen, sobald du ihn ansingst, Intro/Solo NICHT tippen →
+  Stop. Dann mitsingen: steht der Abschnitt oben, laufen die Zeilen im Sing-Tempo,
+  werden Intro/Solo sanft ausgesessen? Falls ein winziger konstanter Rest bleibt:
+  Vorlauf (`lyricsLeadMs`, Feld+Migration v17 noch da) reaktivierbar.
+
+### Sprint 5.47 DONE: Kalibrierung pro Zeile + Recalibration-Isolation — durch Lese-Uhr (5.48) überholt
 
 User-Test von 5.46 (Oben-Anker, CI grün) mit drei präzisen Beobachtungen:
 (1) kurze Intro → die ersten 1–2 Zeilen sind oben schon durchgelaufen, bevor der
@@ -1365,16 +1422,19 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
   `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
   diesen einen Song vermerkt.
-- 🔴 **Teleprompter: FRISCH pro Zeile kalibrieren + live testen (PRIO 1, Sprint
-  5.47):** Oben-Anker-Modell (5.46) sitzt an den kalibrierten Punkten exakt
-  (vom User bestätigt: 2. Vers stand oben), ABER Abschnitts-Taps sind zu grob →
-  Zeilen dazwischen driften in die Mitte, Intro-Zeilen vor dem ersten Tap laufen
-  davon. Fix (5.47): Anleitung auf "bei jeder Zeile tippen (auch der ersten)"
-  + Recalibration-Isolation (alte Kalibrierung stört neue nicht mehr). **Nächste
-  Session:** Bed of Roses FRISCH kalibrieren (Record → jede Zeile tippen, mit der
-  ersten Gesangszeile beginnen → Stop), dann mitsingen und prüfen, ob jede Zeile
-  zu ihrem Einsatz oben steht. Falls danach noch ein winziger konstanter Rest-
-  Versatz bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration noch da) reaktivierbar.
+- 🔴 **Teleprompter: FRISCH pro ABSCHNITT kalibrieren + live testen (PRIO 1,
+  Sprint 5.48 Lese-Uhr):** Wurzel des Mitte-Driftens = lineares Pixel-Scrollen
+  schmiert Instrumental-Zeit (Intro/Solo/Ausklänge) über die Gesangszeilen. Fix
+  (5.48): Lese-Uhr-Modell — Gesangszeilen laufen im gelernten Sing-Tempo,
+  Instrumental wird in Phase 2 ausgesessen (siehe Gotcha 12). Weniger Tappen:
+  nur ein Tap pro Abschnitts-Anfang, Intro/Solo NICHT tippen. **Nächste Session:**
+  Bed of Roses FRISCH kalibrieren (Record → bei jedem Abschnitts-Anfang tippen,
+  sobald angesungen, Intro/Solo überspringen → Stop), dann mitsingen: steht der
+  Abschnitt oben, laufen die Zeilen im Sing-Tempo, werden Intro/Solo sanft
+  ausgesessen (nicht davonlaufen, nicht in die Mitte driften)? Diagnose-Log
+  zeigt jetzt `naturalPace` + pro Segment `segW/readDur`. Falls winziger
+  konstanter Rest-Versatz: Vorlauf (`lyricsLeadMs`, Feld+Migration v17 da)
+  reaktivierbar.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

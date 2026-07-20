@@ -414,7 +414,67 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-20
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Lese-Uhr wartet nur noch in Segmenten mit echtem Instrumental-Label, sonst lokales statt globales Tempo
+**Commit:** Fix stale durationMs bei Songwechsel + weicher Übergang Lese-/Warte-Phase (kein Tempo-Sprung mehr)
+
+### Sprint 5.52 DONE (ungetestet): Fix stale durationMs bei Songwechsel + weicher Lese-/Warte-Übergang
+
+User-Report anhand eines geteilten Diagnose-Logs zu zwei Symptomen: (1) Nach einem
+Songwechsel ("Can't judge a book K0") änderte sich am Scroll-Verhalten "nichts",
+wirkte quasi eingefroren/zu langsam; (2) generell fühlt sich der Scroll "holperig"
+an, manchmal zu langsam — der User wünscht sich, dass jeder neue Abschnitt sanft
+oben landet und von dort butterweich weiterläuft ("wie eine Rolltreppe").
+
+**Root Cause 1 (stale durationMs — erklärt Symptom 1):** `PlayerViewModel._durationMs`
+wird nur alle 200ms aus `engine.durationMs` aktualisiert (Poll-Loop). Beim
+Songwechsel ändert sich `currentSong`/`song.id` sofort, aber `_durationMs` hält für
+bis zu 200ms (oft länger, bis ExoPlayer die neue Dauer kennt) noch den Wert des
+VORHERIGEN Songs. `LyricsOverlay.latestDurationMs = maxOf(durationMs, dbDurationMs)`
+— dieser Guard wurde ursprünglich gebaut, um eine live zu KURZ gemeldete Dauer
+abzufangen (siehe FolderImporter "Bug-Fix 2"-Kontext), wirkt aber genau verkehrt,
+wenn `durationMs` stale vom VORHERIGEN, längeren Song ist: `maxOf()` wählt dann die
+falsche, zu große alte Zahl statt der korrekten `dbDurationMs` des neuen Songs. Im
+Log sichtbar: `dur=410425 (db=204000)` für einen frisch gewechselten Song — `dur`
+war exakt der Wert des vorherigen Songs.
+
+**Fix 1:** `PlayerViewModel.selectSong()` setzt `_positionMs`/`_durationMs` jetzt
+sofort auf `0L`, bevor die Engine die neue Dauer meldet — kein Konsument sieht
+mehr den Stale-Wert des alten Songs, `maxOf(0, dbDurationMs)` liefert sofort den
+korrekten DB-Wert. Nebeneffekt (gewollt): auch die neue Seek-Bar (Sprint zuvor)
+zeigt nach einem Songwechsel sofort 0% statt kurz den alten Fortschritt.
+
+**Root Cause 2 (harter Tempo-Sprung — erklärt Symptom 2, unabhängig von Root Cause 1):**
+Im Lese-Uhr-Modell (Sprint 5.48/5.51) wird jedes Segment mit Instrumental-Anteil in
+zwei Phasen berechnet — Phase 1 (Lesen im Sing-Tempo `naturalPace`) und Phase 2
+(Warten/Gleiten zum nächsten Anker). Der Code schaltete an der Grenze
+(`elapsed < readDuration`) HART zwischen beiden Formeln um. Positions-mäßig gab es
+dabei keinen Sprung (beide Formeln liefern an der Grenze denselben Pixelwert) —
+aber die GESCHWINDIGKEIT ändert sich an dieser Stelle abrupt, teils sehr stark
+(Phase 1 und Phase 2 haben oft sehr unterschiedliche Tempi). Das Auge nimmt so eine
+Geschwindigkeitsänderung als Ruckeln wahr, auch ohne Positions-Sprung.
+
+**Fix 2:** Beide Phasen werden jetzt über ein kurzes Zeitfenster (symmetrisch um
+`readDuration`, max. 1200ms Gesamtlänge) per Smoothstep verblendet, statt hart
+umzuschalten. Beide Teilkurven (`pRead`/`pWait`) sind jeweils außerhalb ihres
+eigenen Gültigkeitsbereichs flach geklemmt (`coerceIn(0f, 1f)` auf den Fortschritt)
+statt linear extrapoliert — dadurch ist jede für sich monoton (nie rückwärts), und
+die gewichtete Mischung zwei monotoner, beschränkter Kurven bleibt selbst monoton.
+Die bestehende "nur vorwärts"-Klemmung (`scrollOffsetPx` darf nie sinken) bleibt
+dadurch strukturell sicher, ohne Sonderfall-Code. Endpunkte (Segment-Anfang landet
+exakt oben, Segment-Ende trifft exakt den nächsten Anker) bleiben unverändert —
+nur der ÜBERGANG dazwischen ist jetzt weich. Betrifft ausschließlich den
+Lese-/Warte-Zweig (Segmente MIT Instrumental-Label); die beiden anderen Zweige
+(reines Instrumental-Segment, Segment ohne Instrumental-Label) hatten ohnehin nie
+diesen harten Umschaltpunkt und sind unverändert.
+
+- **Nicht verifiziert:** Kein Gradle-Build in dieser Session möglich (Gradle-
+  Distribution 403, wie in den Vorsprints dokumentiert). Statisch geprüft:
+  Klammerbalance, Typen, Variablen-Scope, Grenzfälle von Hand durchgerechnet
+  (`phase2Dur<=0`, `window<=0`, Verhalten exakt an den Segmentgrenzen). **Nächste
+  Session: live testen** — Bed of Roses (bestehende Kalibrierung reicht) UND einen
+  Songwechsel innerhalb eines Sets testen. Erwartung: (a) nach einem Songwechsel
+  läuft die Lese-Uhr sofort mit der richtigen Songlänge, kein "eingefroren"-Gefühl
+  mehr; (b) der Übergang zwischen Sing-Tempo und Instrumental-Warten fühlt sich
+  jetzt weich an statt ruckelig, Abschnitts-Anfänge landen weiterhin exakt oben.
 
 ### Sprint 5.51 DONE (ungetestet): Strukturelle Instrumental-Erkennung — behebt falsche "Wartezeiten"
 
@@ -1607,16 +1667,20 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   siehe Gotcha 12) — nur Segmente MIT echtem Instrumental-Label behalten das
   Warte-Modell, alle anderen nutzen jetzt lokales statt globales Tempo. Nicht
   mehr offen (Fix gemacht, aber ungetestet — siehe nächster Punkt).
-- 🔴 **Teleprompter: Sprint-5.51-Fix (lokales Tempo) live testen (PRIO 1):**
-  Bestehende Kalibrierung von Bed of Roses reicht, KEIN Neu-Tippen nötig. Song
-  einmal komplett durchlaufen lassen. **Erwartung laut Handrechnung:** die 3
-  Segmente, die vorher rechnerisch "hängenblieben" (19→29, 29→45, 45→58 in der
-  letzten Kalibrierung), sollten jetzt gleichmäßig ohne Pause laufen; das
-  Bridge→Solo-Segment sollte weiterhin sichtbar warten. Diagnose-Log senden und
-  prüfen: taucht `instrumental=true` nur beim Solo-Segment auf, `false` bei den
-  anderen? Fühlt sich der Scroll jetzt insgesamt smooth/nicht-willkürlich an?
-  Falls
-  v17 da) reaktivierbar.
+- 🔴 **Teleprompter: Sprint 5.52 (Stale-durationMs-Fix + weicher Lese-/Warte-
+  Übergang) live testen (PRIO 1):** Bestehende Kalibrierung von Bed of Roses
+  reicht, KEIN Neu-Tippen nötig. Zwei Dinge gezielt prüfen: **(a)** Songwechsel
+  innerhalb eines Sets — läuft die Lese-Uhr beim neuen Song sofort mit der
+  richtigen Songlänge (kein "wirkt eingefroren/zu langsam" mehr direkt nach dem
+  Wechsel)? **(b)** Bed of Roses komplett durchlaufen lassen — fühlt sich der
+  Übergang zwischen Sing-Tempo (Lesen) und Instrumental-Warten jetzt weich an
+  statt ruckelig, landet jeder Abschnitts-Anfang weiterhin exakt oben? Diagnose-
+  Log bei Problemen erneut senden. Der 5.51-Fix (lokales statt globales Tempo
+  bei Segmenten ohne Instrumental-Label) ist inhaltlich weiterhin ungetestet —
+  bei diesem Durchlauf gleich mitbeurteilen: taucht `instrumental=true` nur beim
+  Solo-Segment auf, `false` bei den anderen? Falls nach diesem Test noch ein
+  kleiner konstanter Zeitversatz spürbar bleibt: Vorlauf-Feld (`lyricsLeadMs`,
+  Migration v17 bereits da) wäre die naheliegende, saubere Feinjustierung.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

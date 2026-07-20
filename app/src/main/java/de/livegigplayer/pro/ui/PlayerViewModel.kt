@@ -437,6 +437,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         engine.setVolumeDb("keys",  song.volKeys);  engine.setVolumeDb("vocals", song.volVocals)
         engine.setVolumeDb("click", song.volClick); engine.setVolumeDb("cue",    song.volCue)
         _currentSong.value = song; _trackMode.value = mode; _isPlaying.value = false
+        // Sofort zurücksetzen statt auf den nächsten 200ms-Poll zu warten — sonst sehen
+        // Konsumenten (z.B. LyricsOverlay) für bis zu 200ms noch Position/Dauer des ALTEN
+        // Songs, obwohl currentSong schon der neue ist. War Ursache eines Bugs, bei dem
+        // die Lese-Uhr nach einem Songwechsel mit der alten, meist zu großen Dauer
+        // weiterrechnete (siehe Gotcha 12).
+        _positionMs.value = 0L
+        _durationMs.value = 0L
         // Loop-Punkte vorladen wenn in DB gespeichert — aber NICHT automatisch aktivieren
         if (song.loopStartMs > 0L && song.loopEndMs > song.loopStartMs) {
             _loopStartMs.value    = song.loopStartMs

@@ -515,19 +515,49 @@ private fun LyricsContent(
                     val targetW = (elapsed / segT) * segW
                     targetPx = readingPixel(anchorLineIdx, segEndLine, targetW)
                 } else {
+                    // Lese-Phase (Sing-Tempo `naturalPace`) und Warte-Phase (Instrumental-
+                    // Ausklang, gleitet zum nächsten Anker) werden NICHT mehr hart an der
+                    // Grenze `readDuration` umgeschaltet, sondern über ein kurzes Fenster
+                    // per Smoothstep verblendet (Sprint 5.52 — behebt "Ruckeln"/Holpern).
+                    // Grund: beide Phasen haben i.d.R. sehr unterschiedliche Geschwindig-
+                    // keiten — ein harter Schnitt erzeugt einen spürbaren Tempo-Sprung,
+                    // obwohl die POSITION selbst nie sprang (das Auge reagiert stark auf
+                    // Geschwindigkeitsänderungen, nicht nur auf Sprünge). Endpunkte
+                    // (Segment-Anfang/-Ende, Ankerzeile landet exakt oben) bleiben exakt
+                    // erhalten — nur der Übergang dazwischen wird weich. Beide Teilkurven
+                    // sind außerhalb ihres eigenen Gültigkeitsbereichs flach geklemmt
+                    // (`coerceIn(0f, 1f)` auf den jeweiligen Fortschritt) statt linear
+                    // extrapoliert — dadurch ist jede der beiden für sich monoton
+                    // (nie rückwärts), und eine gewichtete Mischung zwei monotoner,
+                    // beschränkter Kurven ist selbst wieder monoton — die "nur vorwärts"-
+                    // Garantie (siehe unten) bleibt also auch während der Verblendung
+                    // strukturell sicher, kein Sonderfall nötig.
                     val readDuration = (segW * naturalPace).coerceAtMost(segT)
-                    if (elapsed < readDuration) {
-                        // Phase 1 — Lesen im Sing-Tempo.
-                        val targetW = (elapsed / readDuration) * segW
+                    val phase2Dur    = segT - readDuration
+                    if (phase2Dur <= 0f) {
+                        // Kein Instrumental-Rest — Sing-Tempo würde bis ans Segmentende
+                        // reichen: reine Lese-Phase über die volle Segmentzeit.
+                        val targetW = (elapsed / readDuration).coerceIn(0f, 1f) * segW
                         targetPx = readingPixel(anchorLineIdx, segEndLine, targetW)
                     } else {
-                        // Phase 2 — Instrumental/Ausklang aussitzen, sanft zum nächsten Anker.
-                        val readEndPx  = readingPixel(anchorLineIdx, segEndLine, segW)
-                        val phase2Dur  = segT - readDuration
-                        targetPx = if (phase2Dur > 0f)
-                            readEndPx + (segEndPx - readEndPx) *
-                                ((elapsed - readDuration) / phase2Dur).coerceIn(0f, 1f)
-                        else segEndPx
+                        val readEndPx = readingPixel(anchorLineIdx, segEndLine, segW)
+                        val pRead = readingPixel(
+                            anchorLineIdx, segEndLine,
+                            (elapsed / readDuration).coerceIn(0f, 1f) * segW
+                        )
+                        val pWait = readEndPx + (segEndPx - readEndPx) *
+                            ((elapsed - readDuration) / phase2Dur).coerceIn(0f, 1f)
+                        // Fenster symmetrisch um die Phase-Grenze, gekappt auf max. 1200ms
+                        // Gesamtlänge — lang genug für einen sanften Übergang, kurz genug,
+                        // um kein ganzes Segment zu verschmieren.
+                        val window = minOf(readDuration, phase2Dur, 1200f) * 0.5f
+                        targetPx = if (window <= 0f) {
+                            if (elapsed < readDuration) pRead else pWait
+                        } else {
+                            val s = ((elapsed - (readDuration - window)) / (2f * window)).coerceIn(0f, 1f)
+                            val blend = s * s * (3f - 2f * s)   // Smoothstep, C1-stetig an beiden Enden
+                            pRead * (1f - blend) + pWait * blend
+                        }
                     }
                 }
             }

@@ -240,6 +240,24 @@ private fun LyricsContent(
             if (lineIsLyric[i]) lines[i].trim().length.coerceAtLeast(1).toFloat() else 0f
         }
     }
+    // Strukturelle Instrumental-Erkennung (Idee-1-Verfeinerung, Sprint 5.51): KEIN
+    // Keyword-Abgleich ("Solo"/"Intro"/…) — ein Label gilt als instrumental, wenn bis
+    // zum nächsten Label (oder Songende) keine einzige Gesangszeile folgt. Das nutzt
+    // nur die ohnehin geltende Text-Konvention aus (reine Instrumental-Teile als
+    // eigenes Label OHNE Textzeilen) und funktioniert unabhängig vom Wortlaut/der
+    // Sprache des Labels. isInstrumentalLabel[i] ist nur an Label-Zeilen true.
+    val isInstrumentalLabel = remember(lines, lineWeight) {
+        val labelIdx = lines.indices.filter { sectionTagRegex.find(lines[it].trim()) != null }
+        val flags = BooleanArray(lines.size)
+        for ((pos, idx) in labelIdx.withIndex()) {
+            val nextBoundary = labelIdx.getOrNull(pos + 1) ?: lines.size
+            var hasLyricAfter = false
+            var j = idx + 1
+            while (j < nextBoundary) { if (lineWeight[j] > 0f) { hasLyricAfter = true; break }; j++ }
+            flags[idx] = !hasLyricAfter
+        }
+        flags
+    }
     val measuredLineCount = lines.size
 
     // Gespeicherte Kalibrierungspunkte dieses Songs, sortiert nach Position.
@@ -342,6 +360,17 @@ private fun LyricsContent(
         return sum
     }
 
+    // Enthält [fromLine, toLine) ein strukturell erkanntes Instrumental-Label
+    // (siehe isInstrumentalLabel)? Nur für solche Segmente ist eine "Warte"-Phase
+    // (Phase 2) inhaltlich gerechtfertigt — sonst wäre eine niedrige Gewicht/Zeit-
+    // Relation nur ein Zeichen für langsameren Gesang, kein echtes Instrumental.
+    fun segmentHasInstrumental(fromLine: Int, toLine: Int): Boolean {
+        var i = fromLine.coerceAtLeast(0)
+        val end = toLine.coerceAtMost(isInstrumentalLabel.size)
+        while (i < end) { if (isInstrumentalLabel[i]) return true; i++ }
+        return false
+    }
+
     // Scroll-Pixel während der LESE-Phase: verbraucht `targetW` Gewicht ab `fromLine`
     // und bleibt dabei auf jeder Gesangszeile proportional zu ihrem Gewicht stehen
     // (lange Zeilen länger). Nicht-Gesangszeilen (Gewicht 0) werden übersprungen.
@@ -384,7 +413,12 @@ private fun LyricsContent(
             val segWs = ArrayList<Float>()
             var maxW = 0f
             for (j in 0 until breakpoints.size - 1) {
-                val w = weightBetween(breakpoints[j].first, breakpoints[j + 1].first)
+                val fromL = breakpoints[j].first
+                val toL   = breakpoints[j + 1].first
+                // Segmente mit echtem Instrumental-Anteil ausschließen — ihre Zeit
+                // enthält Warte-Anteile, die das gelernte Sing-Tempo sonst verzerren.
+                if (segmentHasInstrumental(fromL, toL)) continue
+                val w = weightBetween(fromL, toL)
                 val t = (breakpoints[j + 1].second - breakpoints[j].second).toFloat()
                 if (w > 0f && t > 0f) { segWs.add(w); tpws.add(t / w); if (w > maxW) maxW = w }
             }
@@ -457,8 +491,9 @@ private fun LyricsContent(
             // werden, blieb das Log stumm, obwohl der Wechsel echt passiert ist).
             if (segmentJustChanged) {
                 val segWLog = if (hasModel) weightBetween(anchorLineIdx, segEndLine) else -1f
+                val instrLog = if (hasModel) segmentHasInstrumental(anchorLineIdx, segEndLine) else null
                 onLogDebug("Segment: anchorLine=$anchorLineIdx->$segEndLine segW=$segWLog " +
-                    "segT=${segT}ms pace=$naturalPace pos=$pos")
+                    "segT=${segT}ms pace=$naturalPace instrumental=$instrLog pos=$pos")
             }
 
             val targetPx: Float
@@ -470,6 +505,15 @@ private fun LyricsContent(
                 if (segW <= 0f) {
                     // Reines Instrumental-/Übergangssegment: gleichmäßig gleiten.
                     targetPx = anchorScrollPx + (segEndPx - anchorScrollPx) * (elapsed / segT).coerceIn(0f, 1f)
+                } else if (!segmentHasInstrumental(anchorLineIdx, segEndLine)) {
+                    // KEIN Instrumental-Label in diesem Segment (Sprint 5.51): eine
+                    // niedrige Gewicht/Zeit-Relation hier bedeutet NICHT "es gibt eine
+                    // Pause zu warten", sondern nur "hier wird langsamer gesungen als im
+                    // Referenz-Segment". Deshalb KEINE Phase 2 — die volle Segmentzeit
+                    // wird mit dem SEGMENT-EIGENEN (lokalen) Tempo gleichmäßig auf die
+                    // eigenen Zeilen verteilt statt mit dem globalen naturalPace.
+                    val targetW = (elapsed / segT) * segW
+                    targetPx = readingPixel(anchorLineIdx, segEndLine, targetW)
                 } else {
                     val readDuration = (segW * naturalPace).coerceAtMost(segT)
                     if (elapsed < readDuration) {

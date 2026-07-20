@@ -306,6 +306,24 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       letzte Zeile eine gemessene Unterkante für `readingPixel`. `handleTap()`
       verankert nur noch echte Gesangszeilen (`lineIsLyric`-Filter). Oben-Anker
       (5.46) und Monoton-Klemmung bleiben unverändert.
+    - **Strukturelle Instrumental-Erkennung — löst falsche Wartezeiten (Sprint
+      5.51):** Nach dem ersten vollständig auswertbaren Log (Bed of Roses) zeigte
+      sich: ein GLOBALES `naturalPace` ist zu grob — 3 von 6 Segmenten hatten
+      12–19s rechnerische "Wartezeit" (Phase 2), obwohl dort vermutlich kein
+      echtes Instrumental liegt, nur langsamerer Gesang als im Referenz-Segment.
+      Fix, bewusst OHNE Keyword-Abgleich ("Solo"/"Intro"/…, fehleranfällig/
+      sprachabhängig): `isInstrumentalLabel[i]` markiert ein Label strukturell
+      als instrumental, wenn bis zum nächsten Label (oder Songende) keine
+      einzige Gesangszeile folgt — nutzt nur die bestehende Text-Konvention aus.
+      `segmentHasInstrumental(from, to)` prüft ein Segment darauf. **Neue Regel:**
+      nur Segmente MIT erkanntem Instrumental-Label bekommen weiterhin das
+      Phase-1(Lesen)/Phase-2(Warten)-Modell mit dem globalen `naturalPace`;
+      Segmente OHNE Instrumental-Label verteilen ihre volle Segmentzeit mit dem
+      SEGMENT-EIGENEN lokalen Tempo (`segT/segW`) gleichmäßig auf die eigenen
+      Zeilen — keine künstliche Wartezeit mehr. Die `naturalPace`-Lernschleife
+      schließt Segmente mit Instrumental-Anteil ebenfalls aus (sonst würde deren
+      Warte-Zeit-Anteil das gelernte Tempo verzerren). Diagnose-Log zeigt jetzt
+      zusätzlich `instrumental=true/false/null` pro Segment.
     - **Recalibration-Isolation (Sprint 5.47):** Während `calibrating == true`
       treibt die ALTE gespeicherte Kalibrierung den Auto-Scroll NICHT
       (`useBreakpoints = !calibrating` → keine Anker-Weiterschaltung, kein
@@ -396,7 +414,52 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-20
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Diagnose-Logging feuert jetzt bei JEDEM Abschnittswechsel, unabhängig von der Phase
+**Commit:** Lese-Uhr wartet nur noch in Segmenten mit echtem Instrumental-Label, sonst lokales statt globales Tempo
+
+### Sprint 5.51 DONE (ungetestet): Strukturelle Instrumental-Erkennung — behebt falsche "Wartezeiten"
+
+Mit dem jetzt vollständigen Diagnose-Log (Sprint 5.50-Fix hat funktioniert) konnte
+das Lese-Uhr-Modell zum ersten Mal wirklich durchgerechnet werden. Ergebnis: die
+Segment-Mathematik war korrekt — aber 3 von 6 Segmenten hatten rechnerisch 12–19
+Sekunden "Wartezeit" (Phase 2), obwohl dort vermutlich KEIN echtes Instrumental
+liegt (z.B. Vers-Ende → Chorus-Anfang). Ursache: das global gelernte `naturalPace`
+(vom dichtesten Referenz-Segment) war für diese langsameren Segmente zu schnell —
+der Text "liest" dort zu früh fertig und "parkt" dann künstlich, bis der nächste
+Tap kommt. Nur 1 Segment (Bridge → Solo → Verse 4) hatte plausibel eine echte
+Instrumental-Pause. User-Wunsch: keine zusätzlichen Taps, stattdessen eine
+intelligentere Erkennung — explizit KEIN Keyword-Abgleich ("Solo"/"Intro"/…, zu
+fehleranfällig/sprachabhängig), sondern strukturell.
+
+**Umsetzung:**
+- `isInstrumentalLabel: BooleanArray` (parse-zeit, pro Song einmalig): ein Label
+  gilt als instrumental, wenn bis zum nächsten Label (oder Songende) keine
+  einzige Gesangszeile folgt — nutzt nur die ohnehin geltende Text-Konvention
+  (reine Instrumental-Teile als eigenes Label OHNE Textzeilen) aus, funktioniert
+  unabhängig vom Wortlaut/der Sprache des Labels.
+- `segmentHasInstrumental(fromLine, toLine)`: prüft, ob ein Segment ein solches
+  Label enthält.
+- **Neue Segment-Regel im Frame-Loop:** enthält das Segment kein Instrumental-
+  Label, aber `segW > 0`, wird NICHT mehr Phase 1/Phase 2 mit dem globalen
+  `naturalPace` gerechnet, sondern die volle Segmentzeit mit dem
+  SEGMENT-EIGENEN (lokalen) Tempo (`segT/segW`) gleichmäßig auf die eigenen
+  Zeilen verteilt — keine künstliche Wartezeit mehr. Nur bei erkanntem
+  Instrumental-Label bleibt das bisherige Phase-1(Lesen)/Phase-2(Warten)-Modell
+  bestehen (dort ist eine Wartezeit inhaltlich korrekt).
+- **`naturalPace`-Lernschleife ebenfalls angepasst:** Segmente mit erkanntem
+  Instrumental-Anteil werden von der Tempo-Schätzung ausgeschlossen (ihre Zeit
+  enthält Warte-Anteile, die das gelernte Sing-Tempo sonst verzerren würden).
+- Diagnose-Log zeigt jetzt zusätzlich `instrumental=true/false/null` pro Segment.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich. Statisch
+  geprüft (Klammerbalance, Symbole) UND von Hand gegen die echten Log-Zahlen aus
+  Bed of Roses durchgerechnet — die 3 auffälligen Segmente (19→29, 29→45, 45→58)
+  sollten jetzt ohne künstliche Wartezeit laufen, das Bridge→Solo-Segment (58→65)
+  sollte weiterhin korrekt warten. **Nächste Session: live testen** — bestehende
+  Kalibrierung reicht (kein Neu-Tippen nötig), Song einmal durchlaufen lassen,
+  fühlt es sich jetzt gleichmäßig an statt "hängenbleibend"? Log prüfen, ob
+  `instrumental=true` nur beim Solo-Segment auftaucht.
+
+### Sprint 5.50 DONE: Logging-Lücke behoben — "Segment:"-Zeile feuerte nur zufällig
 
 ### Sprint 5.50 DONE (Diagnose, kein Fix): Logging-Lücke behoben — "Segment:"-Zeile feuerte nur zufällig
 
@@ -1535,23 +1598,24 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   Root Cause: die Log-Zeile stand nur im Phase-1-Zweig, feuerte also nur, wenn
   der Wechsel-Frame zufällig noch in Phase 1 lag. Fix: Log steht jetzt vor der
   Phase-Verzweigung, feuert bei jedem echten Abschnittswechsel. Nicht mehr offen.
-- 🔴 **Teleprompter: FRISCH pro ABSCHNITT kalibrieren + SAUBER retesten (PRIO 1,
-  Sprint 5.48 Lese-Uhr, jetzt mit Sprint-5.49/5.50-Fixes):** Wurzel des
-  Mitte-Driftens = lineares Pixel-Scrollen schmiert Instrumental-Zeit
-  (Intro/Solo/Ausklänge) über die Gesangszeilen. Fix (5.48): Lese-Uhr-Modell —
-  Gesangszeilen laufen im gelernten Sing-Tempo, Instrumental wird in Phase 2
-  ausgesessen (siehe Gotcha 12). Nur ein Tap pro Abschnitts-Anfang, Intro/Solo
-  NICHT tippen. Die bisherigen zwei Testläufe waren beide nicht auswertbar (1.
-  durch den 5.49-Datenverlust-Bug mit uralten Daten, 2. durch die 5.50-
-  Logging-Lücke ohne Segment-Zeilen trotz korrekter frischer Kalibrierung).
-  **Nächste Session:** Bed of Roses FRISCH kalibrieren (Record → bei jedem
-  Abschnitts-Anfang tippen inkl. der allerersten Gesangszeile nach der Intro,
-  Intro/Solo selbst überspringen → Stop), Song bis zum Ende laufen lassen,
-  DANACH nochmal von vorne abspielen lassen (damit die Kalibrierung unter
-  realer Wiedergabe durchläuft und alle Übergänge geloggt werden), dann den
-  KOMPLETTEN Diagnose-Log senden (alle "Segment: ..."-Zeilen) — erst danach
-  lässt sich die Lese-Uhr wirklich beurteilen. Falls
-  winziger konstanter Rest-Versatz bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration
+- ✅ **Erste vollständige Log-Auswertung + Root Cause "falsche Wartezeiten"
+  (ERLEDIGT, Sprint 5.51):** Mit dem 5.50-Fix kam der erste komplette Log
+  (alle 6 Segmente). Ergebnis: Mathematik korrekt, aber 3 von 6 Segmenten
+  hatten 12–19s künstliche Wartezeit ohne echtes Instrumental (globales
+  `naturalPace` zu schnell für diese Segmente). Fix: strukturelle
+  Instrumental-Erkennung (`isInstrumentalLabel`/`segmentHasInstrumental`,
+  siehe Gotcha 12) — nur Segmente MIT echtem Instrumental-Label behalten das
+  Warte-Modell, alle anderen nutzen jetzt lokales statt globales Tempo. Nicht
+  mehr offen (Fix gemacht, aber ungetestet — siehe nächster Punkt).
+- 🔴 **Teleprompter: Sprint-5.51-Fix (lokales Tempo) live testen (PRIO 1):**
+  Bestehende Kalibrierung von Bed of Roses reicht, KEIN Neu-Tippen nötig. Song
+  einmal komplett durchlaufen lassen. **Erwartung laut Handrechnung:** die 3
+  Segmente, die vorher rechnerisch "hängenblieben" (19→29, 29→45, 45→58 in der
+  letzten Kalibrierung), sollten jetzt gleichmäßig ohne Pause laufen; das
+  Bridge→Solo-Segment sollte weiterhin sichtbar warten. Diagnose-Log senden und
+  prüfen: taucht `instrumental=true` nur beim Solo-Segment auf, `false` bei den
+  anderen? Fühlt sich der Scroll jetzt insgesamt smooth/nicht-willkürlich an?
+  Falls
   v17 da) reaktivierbar.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in

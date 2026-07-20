@@ -313,6 +313,21 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
       Auto-Scrolling und frische Taps gegeneinander und `handleTap()` zeichnet
       Zeilen relativ zur alten, falschen Scroll-Position auf. Beim Nicht-
       Kalibrieren identisches Verhalten wie zuvor.
+    - **Kalibrierung übersteht Songwechsel während der Aufnahme (Sprint 5.49,
+      DATENVERLUST-BUG):** `calibrating`/`calibrationPoints` sind
+      `remember(song.id, openSession)`-gebunden — läuft der Song während einer
+      laufenden Kalibrierung zu Ende und die App armt lautlos den nächsten Song
+      (CUE-Modus, siehe Sprint 5.22/5.43), wechselt `song.id`, und der
+      komplette Kalibrierungs-Zustand wird verworfen, BEVOR ein manueller
+      Stop-Tap etwas speichern konnte — alle Taps sind ersatzlos weg, die App
+      fällt still auf die alte gespeicherte Kalibrierung zurück (vom User live
+      reproduziert: "ich habe neu kalibriert, aber es hat nicht funktioniert").
+      Fix: `DisposableEffect(song.id) { onDispose { ... } }` — `onDispose`
+      feuert exakt in dem Moment, in dem der ALTE `song.id`-Kontext (samt der
+      darin gefangenen `calibrationPoints`-Closure) durch den neuen ersetzt
+      wird; dort wird, falls `calibrating` noch aktiv war, sofort mit den noch
+      vorhandenen alten Werten gespeichert — kein Datenverlust mehr, unabhängig
+      davon, ob der User rechtzeitig Stop drückt.
     - **Struktur-Labels ohne Akkorde:** Zeilen im Format `[Chorus]`/`[Verse 1]`
       im Lyrics-Text werden per `sectionTagRegex` erkannt und als eigene,
       Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
@@ -381,7 +396,56 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Datum:** 2026-07-20
 **CI Build:** noch nicht gepusht — lokal implementiert
 **Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Teleprompter — Lese-Uhr-Modell (Idee 1): Gesangszeilen im Sing-Tempo, Instrumental wird ausgesessen (löst Mitte-Driften)
+**Commit:** Fix — Datenverlust-Bug: Kalibrierung ging verloren, wenn der Song während der Aufnahme zu Ende lief
+
+### Sprint 5.49 DONE (ungetestet): Fix — Kalibrierung übersteht Songwechsel während der Aufnahme
+
+User-Report nach 5.48 (Lese-Uhr): beim Live-Test wirkte alles "willkürlich" — Intro
+lief weg, Übergänge sprangen mal, blieben mal "in der Mitte" stehen, kein
+erkennbares Muster. Auf Nachfrage (Diagnose-Log) zeigte sich: die geloggten
+Breakpoints waren **exakt die uralten 11 Punkte aus einer Kalibrierung von vor
+mehreren Sprints** — obwohl der User für diesen Test ausdrücklich neu kalibriert
+hatte ("ich habe aber neu kalibriert, dann hat das Log nicht funktioniert").
+
+**Root Cause gefunden (echter Datenverlust-Bug, kein Lese-Uhr-Logikfehler):**
+`calibrating`/`calibrationPoints` sind `remember(song.id, openSession)`-gebunden.
+User bestätigt: der Song lief beim Kalibrieren bis ganz zum Ende durch. Dabei
+armt die App im CUE-Modus lautlos den nächsten Song (Sprint 5.22/5.43) —
+`song.id` wechselt, und der GESAMTE Kalibrierungs-Zustand (alle bereits
+getippten Punkte) wird dabei verworfen, BEVOR ein manueller Stop-Tap sie
+speichern konnte. Die App fiel danach still auf die alten, längst überholten
+Kalibrierungsdaten zurück. Diese alten Daten hatten zudem eine andere
+Zeilen-Granularität (Punkt 1 auf Zeile 4 statt der ersten Verszeile) — von Hand
+durchgerechnet ergibt das für das allererste Segment: nur eine Zeile Gewicht
+vor einem 22-Sekunden-Break → Lese-Phase dauert bei gelerntem Tempo nur ~5s,
+die restlichen ~17s "parkt" der Text bereits an der Zielposition. Das erklärt
+plausibel, wie sich beides zusammen als "wirkt willkürlich" angefühlt haben kann
+— OHNE dass die Lese-Uhr-Logik selbst falsch wäre.
+
+**Fix:** `DisposableEffect(song.id) { onDispose { ... } }` in `LyricsContent` —
+`onDispose` feuert exakt in dem Moment, in dem der alte `song.id`-Kontext durch
+den neuen ersetzt wird. Ist `calibrating` zu diesem Zeitpunkt noch aktiv, werden
+die (in der Closure noch vorhandenen) alten `calibrationPoints` sofort
+gespeichert, bevor sie weg sind — kein Datenverlust mehr, unabhängig davon, ob
+der User rechtzeitig manuell Stop drückt. Zusätzliche Warn-Logzeile im
+(jetzt persistenten, Sprint 5.43) Diagnose-Log macht diesen Fall künftig sofort
+sichtbar. Siehe Gotcha 12.
+
+**Wichtig:** Die Lese-Uhr-Logik selbst (Sprint 5.48) wurde NICHT angefasst — der
+Verdacht auf ein Problem bei sehr kurzen/isolierten Segmenten (wie dem
+Intro-Segment mit nur einer Zeile Gewicht) bleibt vorerst unbestätigte Theorie,
+da der Test mit falschen (alten) Daten lief. Braucht einen sauberen Retest mit
+garantiert frisch gespeicherten Daten.
+
+- **Nicht verifiziert:** kein Gradle-Build in dieser Session möglich (nur
+  statisch geprüft: Klammerbalance, DisposableEffect-Closure-Verhalten von Hand
+  durchdacht). **Nächste Session: sauber retesten** — Bed of Roses neu
+  kalibrieren (ein Tap pro Abschnitts-Anfang inkl. der allerersten Gesangszeile
+  nach der Intro, Intro/Solo selbst überspringen), Song bis zum Ende laufen
+  lassen (testet automatisch den Fix), danach den KOMPLETTEN Diagnose-Log per
+  Share schicken (inkl. aller "Segment: ..."-Zeilen, nicht nur die Start-Zeile)
+  — erst mit dieser sauberen Datenbasis lässt sich beurteilen, ob die
+  Intro-/Sprung-Beobachtungen durch die Lese-Uhr selbst verursacht wurden.
 
 ### Sprint 5.48 DONE (ungetestet): Lese-Uhr-Modell (Idee 1) — Instrumental-Zeit aussitzen statt schmieren
 
@@ -1422,19 +1486,29 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   diesen Song war ~Faktor 2 kleiner als die live gemeldete `durationMs` — durch
   `maxOf()` bereits unkritisch abgefangen, aber als bekannte Dateninkonsistenz für
   diesen einen Song vermerkt.
-- 🔴 **Teleprompter: FRISCH pro ABSCHNITT kalibrieren + live testen (PRIO 1,
-  Sprint 5.48 Lese-Uhr):** Wurzel des Mitte-Driftens = lineares Pixel-Scrollen
-  schmiert Instrumental-Zeit (Intro/Solo/Ausklänge) über die Gesangszeilen. Fix
-  (5.48): Lese-Uhr-Modell — Gesangszeilen laufen im gelernten Sing-Tempo,
-  Instrumental wird in Phase 2 ausgesessen (siehe Gotcha 12). Weniger Tappen:
-  nur ein Tap pro Abschnitts-Anfang, Intro/Solo NICHT tippen. **Nächste Session:**
-  Bed of Roses FRISCH kalibrieren (Record → bei jedem Abschnitts-Anfang tippen,
-  sobald angesungen, Intro/Solo überspringen → Stop), dann mitsingen: steht der
-  Abschnitt oben, laufen die Zeilen im Sing-Tempo, werden Intro/Solo sanft
-  ausgesessen (nicht davonlaufen, nicht in die Mitte driften)? Diagnose-Log
-  zeigt jetzt `naturalPace` + pro Segment `segW/readDur`. Falls winziger
-  konstanter Rest-Versatz: Vorlauf (`lyricsLeadMs`, Feld+Migration v17 da)
-  reaktivierbar.
+- ✅ **Datenverlust-Bug: Kalibrierung ging beim Songende verloren (ERLEDIGT,
+  Sprint 5.49):** User hatte korrekt neu kalibriert, aber das Log zeigte trotzdem
+  uralte Punkte — der Song lief beim Kalibrieren bis zum Ende, die App armte
+  lautlos den nächsten Song (CUE-Modus), der komplette Kalibrierungs-Zustand
+  wurde dabei verworfen, bevor Stop etwas speichern konnte. Fix:
+  `DisposableEffect(song.id) { onDispose { ... } }` speichert beim Songwechsel
+  automatisch, falls noch kalibriert wurde (siehe Gotcha 12). Nicht mehr offen.
+- 🔴 **Teleprompter: FRISCH pro ABSCHNITT kalibrieren + SAUBER retesten (PRIO 1,
+  Sprint 5.48 Lese-Uhr, jetzt mit Sprint-5.49-Fix):** Wurzel des Mitte-Driftens =
+  lineares Pixel-Scrollen schmiert Instrumental-Zeit (Intro/Solo/Ausklänge) über
+  die Gesangszeilen. Fix (5.48): Lese-Uhr-Modell — Gesangszeilen laufen im
+  gelernten Sing-Tempo, Instrumental wird in Phase 2 ausgesessen (siehe
+  Gotcha 12). Nur ein Tap pro Abschnitts-Anfang, Intro/Solo NICHT tippen. Der
+  erste Testlauf war durch den 5.49-Datenverlust-Bug verfälscht (lief mit
+  uralten, nicht passenden Kalibrierungsdaten) — die Intro-/Sprung-Beobachtungen
+  sind dadurch NICHT zuverlässig der Lese-Uhr-Logik zuzuordnen. **Nächste
+  Session:** Bed of Roses FRISCH kalibrieren (Record → bei jedem Abschnitts-
+  Anfang tippen inkl. der allerersten Gesangszeile nach der Intro, Intro/Solo
+  selbst überspringen → Stop), Song bis zum Ende laufen lassen, dann den
+  KOMPLETTEN Diagnose-Log senden (alle "Segment: ..."-Zeilen, nicht nur die
+  Start-Zeile) — erst danach lässt sich die Lese-Uhr wirklich beurteilen. Falls
+  winziger konstanter Rest-Versatz bleibt: Vorlauf (`lyricsLeadMs`, Feld+Migration
+  v17 da) reaktivierbar.
 - ✅ **Q-List (ERLEDIGT):** Swipes funktionieren jetzt zuverlässig — vom User live
   bestätigt ("es funktioniert perfekt!"). Root Cause war Stale Lambda Capture in
   `pointerInput` (Commit 6de5488). Nicht mehr offen.

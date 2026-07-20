@@ -262,6 +262,26 @@ private fun LyricsContent(
         }
     }
 
+    // Sicherheitsnetz gegen Datenverlust (Sprint 5.49): Wenn der Song WÄHREND einer
+    // laufenden Kalibrierung wechselt — z.B. weil er zu Ende ist und die App im
+    // CUE-Modus lautlos den nächsten Song armt (siehe Gotcha 12/Sprint 5.43) —
+    // werden calibrating/calibrationPoints normalerweise sofort verworfen, weil sie
+    // an song.id gebunden sind (remember(song.id, openSession)), BEVOR der User
+    // manuell auf Stop tippen konnte. onDispose feuert exakt in dem Moment, in dem
+    // der alte song.id-Kontext (samt calibrationPoints) durch den neuen ersetzt
+    // wird — hier wird noch mit den ALTEN, in dieser Closure gefangenen Werten
+    // gespeichert, bevor sie weg sind. Kein Datenverlust mehr, unabhängig davon,
+    // ob der User rechtzeitig Stop drückt.
+    DisposableEffect(song.id) {
+        onDispose {
+            if (calibrating && calibrationPoints.isNotEmpty()) {
+                persistCalibration()
+                onLogWarn("Song während laufender Kalibrierung gewechselt (Auto-Advance/CUE) " +
+                    "— ${calibrationPoints.size} Punkte automatisch gerettet und gespeichert.")
+            }
+        }
+    }
+
     // Segment-Anker (Zeit, Scroll-Px), ab dem die aktuelle Scroll-Rate berechnet
     // wird. Schaltet automatisch durch die Kalibrierungspunkte weiter, sobald die
     // Wiedergabe sie erreicht (siehe LaunchedEffect unten) — ohne Kalibrierung

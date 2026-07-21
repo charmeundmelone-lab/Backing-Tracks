@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +90,37 @@ private fun parseSyncPoints(raw: String): List<Pair<Int, Long>> =
         val ms  = parts.getOrNull(1)?.toLongOrNull()
         if (idx != null && ms != null) idx to ms else null
     }.sortedBy { it.second }
+
+// Sucht das nächste [Struktur-Label] rückwärts ab lineIdx (inklusive). Wird vom
+// Countdown-Balken oben genutzt, um "Chorus"/"Verse 1" o.ä. anzuzeigen. Falls
+// vor lineIdx kein Label existiert → leer.
+private fun sectionLabelAt(lines: List<String>, lineIdx: Int): String {
+    var i = lineIdx.coerceAtMost(lines.size - 1)
+    while (i >= 0) {
+        val m = sectionTagRegex.find(lines[i].trim())
+        if (m != null) return m.groupValues[1]
+        i--
+    }
+    return ""
+}
+
+// Formatiert Restzeit für den Countdown-Balken: <10s mit 0.1s-Auflösung, sonst
+// ganze Sekunden. Beispiel: 4200 → "4.2s", 15400 → "15s".
+private fun formatCountdown(ms: Long): String {
+    if (ms < 0) return "0s"
+    return if (ms < 10_000) {
+        val sec = ms / 1000
+        val tenth = (ms % 1000) / 100
+        "${sec}.${tenth}s"
+    } else {
+        "${ms / 1000}s"
+    }
+}
+
+// Schwellwert: Wenn die Lücke zwischen zwei aufeinanderfolgenden Kalibrier-Punkten
+// größer als das ist, gilt es als Instrumental-Passage (Scroll steht still,
+// Countdown-Balken zeigt Restzeit zur nächsten Vocal-Zeile).
+private const val INSTRUMENTAL_GAP_MS = 3_000L
 
 // "mm:ss" (song.duration, z.B. "5:22") → ms. Zusätzliche Absicherung gegen eine
 // zu kurze live gemeldete durationMs (siehe FolderImporter "Bug-Fix 2"-Kommentar
@@ -703,6 +735,57 @@ private fun LyricsContent(
                     color = LyricsRed, fontSize = 11.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )
+            }
+
+            // ── Countdown-Balken oben (Plan Section 6.3) ─────────────────────────
+            // Zeigt beim aktuellen Instrumental "▶ CHORUS in 4.2s", bei Vocal das
+            // laufende Sektions-Label. Rechnet direkt aus positionMs + breakpoints,
+            // unabhängig vom Frame-Loop-Anker.
+            run {
+                val currentBp = breakpoints.lastOrNull { it.second <= positionMs }
+                val nextBp: Pair<Int, Long>? = if (currentBp == null) {
+                    breakpoints.firstOrNull()
+                } else {
+                    val idx = breakpoints.indexOf(currentBp)
+                    breakpoints.getOrNull(idx + 1)
+                }
+                val gap = if (currentBp != null && nextBp != null) nextBp.second - currentBp.second else 0L
+                val isInstrumental = gap > INSTRUMENTAL_GAP_MS
+                val beforeFirst = currentBp == null && nextBp != null
+
+                val barText: String = when {
+                    beforeFirst -> {
+                        val lbl = sectionLabelAt(lines, nextBp!!.first).ifEmpty { "Start" }
+                        "▶ ${lbl.uppercase()} in ${formatCountdown(nextBp.second - positionMs)}"
+                    }
+                    isInstrumental && nextBp != null -> {
+                        val lbl = sectionLabelAt(lines, nextBp.first).ifEmpty { "weiter" }
+                        "▶ ${lbl.uppercase()} in ${formatCountdown(nextBp.second - positionMs)}"
+                    }
+                    currentBp != null -> {
+                        sectionLabelAt(lines, currentBp.first).uppercase()
+                    }
+                    else -> ""
+                }
+                val barColor = if (isInstrumental || beforeFirst) LyricsVolt else LyricsWhite
+
+                if (barText.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = barText,
+                            color = barColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
 
             // Viewport: fester Ausschnitt, Inhalt wird per eigenem Layout reingeschoben

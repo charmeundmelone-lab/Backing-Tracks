@@ -121,10 +121,24 @@ private fun formatCountdown(ms: Long): String {
     }
 }
 
-// Schwellwert: Wenn die Lücke zwischen zwei aufeinanderfolgenden Kalibrier-Punkten
-// größer als das ist, gilt es als Instrumental-Passage (Scroll steht still,
-// Countdown-Balken zeigt Restzeit zur nächsten Vocal-Zeile).
-private const val INSTRUMENTAL_GAP_MS = 3_000L
+// Textbasierte Instrumental-Erkennung (ersetzt eine frühere Zeit-Schwelle):
+// bei sparse Kalibrierung — ein Tap pro Abschnitt statt pro Zeile — dauert eine
+// normale Strophe oft länger als jede sinnvolle Zeit-Schwelle, eine reine
+// Zeit-Lücke ist daher kein verlässliches Signal. Ein Segment zwischen zwei
+// Kalibrier-Punkten gilt als Instrumental, wenn in diesem Zeilenbereich KEINE
+// einzige echte Songtext-Zeile liegt (nur Leerzeilen/[Label]-Zeilen) — nutzt
+// die ohnehin geltende Text-Konvention aus, unabhängig von Kalibrier-Dichte
+// oder tatsächlicher Abschnittsdauer.
+private fun segmentIsInstrumental(lines: List<String>, fromLine: Int, toLine: Int): Boolean {
+    var i = fromLine.coerceAtLeast(0)
+    val end = toLine.coerceAtMost(lines.size)
+    while (i < end) {
+        val line = lines[i].trim()
+        if (line.isNotEmpty() && sectionTagRegex.find(line) == null) return false
+        i++
+    }
+    return true
+}
 
 // Ease-out-Kurve für den Anlauf-Übergang INSTRUMENTAL → VOCAL (Plan Section 6.4).
 // Cubic-Bezier (0.16, 1.0, 0.3, 1.0) — sanfter Anlauf, weiches Ankommen.
@@ -137,6 +151,7 @@ private val AnticipationEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private fun computeTargetOffsetPx(
     positionMs: Long,
     breakpoints: List<Pair<Int, Long>>,
+    lines: List<String>,
     linePositions: Map<Int, Float>,
     maxScrollPx: Float,
     readpointY: Float
@@ -159,7 +174,7 @@ private fun computeTargetOffsetPx(
     val gap = nextBp.second - currentBp.second
     if (gap <= 0L) return (currentY - readpointY).coerceIn(0f, maxScrollPx)
 
-    val targetY: Float = if (gap > INSTRUMENTAL_GAP_MS) {
+    val targetY: Float = if (segmentIsInstrumental(lines, currentBp.first, nextBp.first)) {
         // Instrumental-Passage — Scroll steht still, in den letzten anticipationMs
         // vor der nächsten Vocal-Zeile beginnt die Anlaufkurve.
         val anticipationMs = kotlin.math.min(1500L, (0.4 * gap).toLong()).coerceAtLeast(400L)
@@ -806,8 +821,8 @@ private fun LyricsContent(
                     val idx = breakpoints.indexOf(currentBp)
                     breakpoints.getOrNull(idx + 1)
                 }
-                val gap = if (currentBp != null && nextBp != null) nextBp.second - currentBp.second else 0L
-                val isInstrumental = gap > INSTRUMENTAL_GAP_MS
+                val isInstrumental = currentBp != null && nextBp != null &&
+                    segmentIsInstrumental(lines, currentBp.first, nextBp.first)
                 val beforeFirst = currentBp == null && nextBp != null
 
                 val barText: String = when {
@@ -855,6 +870,7 @@ private fun LyricsContent(
             val targetOffsetPx = computeTargetOffsetPx(
                 positionMs = positionMs,
                 breakpoints = breakpoints,
+                lines = lines,
                 linePositions = linePositions,
                 maxScrollPx = maxScrollPxCalc,
                 readpointY = readpointYPx

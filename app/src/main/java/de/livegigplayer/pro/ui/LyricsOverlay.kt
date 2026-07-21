@@ -370,13 +370,20 @@ private fun LyricsContent(
     val lastTappedLineIdx = calibrationPoints.maxOfOrNull { it.first } ?: -1
     val nextLineToTap = lineIsLyric.indices.firstOrNull { it > lastTappedLineIdx && lineIsLyric[it] }
 
+    // Stale-Capture-Falle (siehe CLAUDE.md Gotcha 6): der Tap-Handler unten wird nur
+    // EINMAL erfasst (pointerInput(Unit) startet nie neu) und würde sonst dauerhaft
+    // auf nextLineToTap der ERSTEN Komposition eingefroren bleiben — nach dem ersten
+    // Tap hätte jeder weitere Tap keine Wirkung. rememberUpdatedState hält die im
+    // eingefrorenen Closure gelesene Referenz stets aktuell.
+    val latestNextLineToTap by rememberUpdatedState(nextLineToTap)
+
     // Tippen ist ausschließlich ein Kalibrier-Werkzeug — das neue Modell ist rein
     // deterministisch aus den Breakpoints berechnet, es gibt keine Laufzeit-Drift
     // mehr, die ein Live-Tap außerhalb der Kalibrierung korrigieren müsste.
     fun handleTap() {
         if (!calibrating) return
-        val target = nextLineToTap ?: return
-        calibrationPoints.add(target to positionMs)
+        val target = latestNextLineToTap ?: return
+        calibrationPoints.add(target to latestPositionMs)
     }
 
     // fillMaxSize() deckt zwar optisch den ganzen Screen ab, konsumiert aber

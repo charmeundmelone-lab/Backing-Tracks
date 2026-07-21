@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -183,6 +184,18 @@ fun LyricsOverlay(
         if (visible) activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         onDispose {
             if (visible && original != null) activity?.requestedOrientation = original
+        }
+    }
+
+    // Musiker-kritisch: Bildschirm darf während Overlay-Anzeige NICHT einschlafen.
+    // Sonst reißt der Auto-Sleep den Text während einer langen Instrumental-Passage
+    // weg — der User müsste live mit der Gitarrenhand aufwecken. Flag wird beim
+    // Schließen wieder entfernt (Batterie-Schutz für den Rest der App).
+    DisposableEffect(visible) {
+        val window = activity?.window
+        if (visible) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            if (visible) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 
@@ -564,6 +577,28 @@ private fun LyricsContent(
 
             val clamped = targetPx.coerceIn(0f, maxScrollPx)
             if (clamped > scrollOffsetPx) scrollOffsetPx = clamped   // nur vorwärts, nie zurück
+        }
+    }
+
+    // Auto-Close mit Fade-out bei Song-Ende (Plan Section 6.7): sobald die Wiedergabe
+    // sicher am Ende ist (letzter Kalibrier-Punkt + Puffer erreicht ODER durationMs
+    // überschritten), löst dieser LaunchedEffect onClose() aus. AnimatedVisibility im
+    // Wrapper übernimmt automatisch den 300ms-fadeOut. Beim Songwechsel wird der Effect
+    // neu gekeyt und startet frisch — kein voreiliges Schließen bei Auto-Advance.
+    val lastBreakpointMs = remember(breakpoints) {
+        breakpoints.maxByOrNull { it.second }?.second ?: 0L
+    }
+    val onCloseLatest by rememberUpdatedState(onClose)
+    LaunchedEffect(song.id, openSession) {
+        while (true) {
+            kotlinx.coroutines.delay(500)
+            val posNow = latestPositionMs
+            val durNow = latestDurationMs
+            val endThreshold = maxOf(durNow, lastBreakpointMs + 5000L)
+            if (durNow > 0 && posNow > endThreshold) {
+                onCloseLatest()
+                break
+            }
         }
     }
 

@@ -8,7 +8,6 @@ import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -27,6 +26,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
@@ -39,14 +40,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -61,7 +60,6 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.livegigplayer.pro.data.Song
-import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 
 private val LyricsBg    = Color(0xFF0A0A0A)
@@ -140,10 +138,6 @@ private fun segmentIsInstrumental(lines: List<String>, fromLine: Int, toLine: In
     return true
 }
 
-// Ease-out-Kurve für den Anlauf-Übergang INSTRUMENTAL → VOCAL (Plan Section 6.4).
-// Cubic-Bezier (0.16, 1.0, 0.3, 1.0) — sanfter Anlauf, weiches Ankommen.
-private val AnticipationEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-
 // Berechnet den Ziel-Scroll-Offset in Pixeln aus der aktuellen Wiedergabeposition
 // und den kalibrierten Sync-Punkten (Plan Section 6.2 / 6.4). Rein deklarativ —
 // KEIN Frame-Loop, KEIN Anker-State. Ergebnis wird über animateFloatAsState
@@ -175,17 +169,11 @@ private fun computeTargetOffsetPx(
     if (gap <= 0L) return (currentY - readpointY).coerceIn(0f, maxScrollPx)
 
     val targetY: Float = if (segmentIsInstrumental(lines, currentBp.first, nextBp.first)) {
-        // Instrumental-Passage — Scroll steht still, in den letzten anticipationMs
-        // vor der nächsten Vocal-Zeile beginnt die Anlaufkurve.
-        val anticipationMs = kotlin.math.min(1500L, (0.4 * gap).toLong()).coerceAtLeast(400L)
-        val anticipationStart = nextBp.second - anticipationMs
-        if (positionMs < anticipationStart) {
-            currentY
-        } else {
-            val t = ((positionMs - anticipationStart).toFloat() / anticipationMs).coerceIn(0f, 1f)
-            val eased = AnticipationEasing.transform(t)
-            currentY + eased * (nextY - currentY)
-        }
+        // Instrumental-Passage — Scroll steht komplett still bis zum exakten Start
+        // der nächsten Zeile. Kein Vorab-Gleiten: sobald positionMs den Breakpoint
+        // erreicht, schaltet currentBp automatisch weiter (siehe oben) — die
+        // animateFloatAsState-Glättung im Renderer macht daraus einen sanften Sprung.
+        currentY
     } else {
         // Vocal — kontinuierlicher linearer Scroll durch das Segment.
         val t = ((positionMs - currentBp.second).toFloat() / gap).coerceIn(0f, 1f)
@@ -206,68 +194,24 @@ private fun parseDurationString(s: String): Long {
 
 /**
  * Vollbild-Teleprompter: reine Lyrics (keine Akkorde), Hochkant, Auto-Scroll
- * gekoppelt an die echte Wiedergabeposition. Zwei Sync-Mechanismen:
+ * gekoppelt an die echte Wiedergabeposition.
  *
- * 1. **Kalibrierung** (Record-Button im Header): einmal pro Song durchtippen —
- *    ein Tap pro ABSCHNITTS-Anfang, sobald man ihn ansingt. Intro/Solo NICHT
- *    tippen — sie werden automatisch abgefangen (siehe Lese-Uhr unten). Jeder
- *    Tap speichert (Zeilen-Index, Wiedergabeposition). Danach läuft der Scroll
- *    bei jedem künftigen Play automatisch — kein Live-Tippen mehr nötig.
- * 2. **Live-Tap-to-Sync** (Tap irgendwo im Textbereich, außerhalb Kalibrierung):
- *    einmalige, NICHT gespeicherte Korrektur für die laufende Wiedergabe.
+ * **TabSync-Kalibrierung** (Record-Button im Header): bei jeder Zeile tippen,
+ * sobald man sie singt. Jeder Tap speichert (Zeilen-Index, Wiedergabeposition)
+ * in Reihenfolge — robust, weil der Song immer vorwärts läuft. Instrumental-
+ * Passagen werden NICHT getippt: `segmentIsInstrumental()` erkennt sie
+ * automatisch textbasiert (kein Songtext zwischen zwei Kalibrier-Punkten).
  *
- * **LESE-UHR-MODELL (Idee 1, Sprint 5.48):** Der Scroll läuft nach einer
- * "Lese-Uhr" statt linear über die Pixel. NUR Gesangszeilen verbrauchen Zeit
- * (Gewicht ∝ Zeichenzahl → lange Zeilen bleiben länger oben); Leerzeilen,
- * Struktur-Labels und Instrumental-Teile ([Intro]/[Solo]) haben Gewicht 0.
- * Pro Segment (zwischen zwei Kalibrier-Ankern) zwei Phasen: **Phase 1 (Lesen)**
- * — die Gesangszeilen laufen im gelernten natürlichen Sing-Tempo `naturalPace`
- * (ms pro Gewicht, robust aus den dichtesten Segmenten geschätzt) oben durch;
- * **Phase 2 (Warten)** — ist der Text durchgesungen, aber die Musik läuft noch
- * (Instrumental-Ausklang, Solo, Intro), gleitet der Scroll nur noch sanft zum
- * nächsten Anker. So wird die Instrumental-Zeit AUSGESESSEN, statt sie über die
- * Gesangszeilen zu schmieren — genau das war die Ursache des "Mitte-Driftens"
- * (Sprint 5.47). Der Abschnitts-Anfang steht weiterhin am OBEREN Bildschirmrand
- * (Oben-Anker, Sprint 5.46). Der frühere 30%-Lesepunkt (Sprint 5.39) rückte
- * über die aktuelle Zeile permanent ~15 Zeilen bereits gesungenen Text — die
- * strukturelle Ursache des "hinkt hinterher"-Gefühls, seit 5.46 behoben.
+ * **Rendering:** rein deklarativ aus `positionMs` + Kalibrier-Punkten
+ * (`computeTargetOffsetPx()`), kein Frame-Loop. Die zu singende Zeile landet
+ * am literalen oberen Bildschirmrand (Top-Anchor); innerhalb eines Vocal-
+ * Segments läuft der Scroll linear zur nächsten Zeile, bei Instrumental steht
+ * er still bis zum exakten nächsten Einsatz. `animateFloatAsState(tween(200))`
+ * glättet die 200ms-Position-Ticks zu 60fps.
  *
- * ARCHITEKTUR (Sprint 5.36 — bewusst ohne ScrollState/Animation): Frühere Versuche
- * nutzten Compose's `ScrollState` (`verticalScroll` + `scrollTo`/`animateScrollTo`).
- * Das Problem dabei: `handleTap()` rief `animateScrollTo()` auf, während die
- * Frame-Loop GLEICHZEITIG jeden Frame `scrollTo()` aufrief — beide konkurrieren
- * um dieselbe interne Compose-Sperre (MutatorMutex) und unterbrechen sich
- * gegenseitig, was zu sichtbarem Ruckeln führen kann, unabhängig von der
- * eigentlichen Zielberechnung. Zusätzlich hing die Rate-Berechnung von
- * `ScrollState.maxValue` ab, dessen genaues Timing/Verhalten mit `enabled=false`
- * nicht vollständig nachvollziehbar war. Beides eliminiert: eigenes `Layout`
- * (siehe unten) misst den Text-Block EXPLIZIT mit `maxHeight = Constraints.Infinity`
- * und platziert ihn direkt selbst per `placeRelative(0, -scrollOffsetPx…)` — eine
- * einzige Zustandsvariable (`scrollOffsetPx`), EIN Schreiber (die Frame-Loop;
- * `handleTap()` verschiebt nur den Anker, die Loop holt den neuen Wert im
- * nächsten Frame selbst ab), keine konkurrierende Animation.
- *
- * **Sprint 5.38 — zweiter Bug in derselben Architektur:** Die erste Version
- * (5.36/5.37) hatte Viewport und Content in einer normalen `Box(fillMaxSize) {
- * Column(fillMaxWidth) }` verschachtelt. Eine `Box` reicht ihre eigene
- * (durch den Viewport begrenzte) `maxHeight`-Constraint automatisch an ihre
- * Kinder weiter — die Content-Column konnte dadurch NIE höher gemessen werden
- * als der sichtbare Ausschnitt selbst. `contentHeightPx` blieb praktisch immer
- * gleich `viewportHeightPx`, `maxScrollPx` damit strukturell ~0 → die Frame-Loop
- * wartete für immer auf sinnvollen Scroll-Bedarf, der nie kam (kompletter
- * Stillstand, unabhängig von Taps). Das eigene `Layout` misst die Content-
- * Column jetzt mit `constraints.copy(maxHeight = Constraints.Infinity)` —
- * KEIN Verlass mehr auf automatische Constraint-Weitergabe.
- *
- * Viewport- und Content-Höhe werden direkt in der `Layout`-Messphase erfasst
- * (`constraints.maxHeight` bzw. `placeable.height`) statt über eine separate
- * `onGloballyPositioned`-Messung — `maxScrollPx` wird direkt daraus berechnet.
- * Die Frame-Loop wartet zusätzlich explizit, bis ALLE Zeilen vermessen sind
- * (`allLinesMeasured`), bevor überhaupt gerechnet wird — eliminiert die ganze
- * Klasse von Bugs durch teilweise vermessene Layouts beim (Wieder-)Öffnen.
- *
- * Scroll bewegt sich in beiden Fällen ausschließlich vorwärts/abwärts (siehe
- * scrollOffsetPx-Klemmung in LyricsContent) — niemals zurück.
+ * Eigenes `Layout` (statt `ScrollState`) misst den Text-Block explizit mit
+ * `maxHeight = Constraints.Infinity` und platziert ihn selbst per
+ * `placeRelative(0, -animatedOffsetPx…)`.
  */
 @Composable
 fun LyricsOverlay(
@@ -344,41 +288,13 @@ private fun LyricsContent(
     val context = LocalContext.current
     val lines   = remember(song.id, song.lyrics) { song.lyrics.lines() }
 
-    // Lese-Uhr-Modell (Idee 1): nur GESANGSzeilen verbrauchen Lese-Zeit; Leerzeilen
-    // und Struktur-Labels ([Verse], [Solo], …) zählen als reine Wartezeit (Gewicht 0).
-    // lineIsLyric[i]  = echte Textzeile (kein Label, nicht leer)
-    // lineWeight[i]   = Zeit-Gewicht dieser Zeile (∝ Zeichenzahl bei Gesang, sonst 0) —
-    //                   längere Zeilen bleiben proportional länger oben stehen.
+    // Echte Textzeile (kein Label, nicht leer) — Tap-Ziele beim Kalibrieren.
     val lineIsLyric = remember(lines) {
         lines.map { it.isNotBlank() && sectionTagRegex.find(it.trim()) == null }
     }
-    val lineWeight = remember(lines, lineIsLyric) {
-        FloatArray(lines.size) { i ->
-            if (lineIsLyric[i]) lines[i].trim().length.coerceAtLeast(1).toFloat() else 0f
-        }
-    }
-    // Strukturelle Instrumental-Erkennung (Idee-1-Verfeinerung, Sprint 5.51): KEIN
-    // Keyword-Abgleich ("Solo"/"Intro"/…) — ein Label gilt als instrumental, wenn bis
-    // zum nächsten Label (oder Songende) keine einzige Gesangszeile folgt. Das nutzt
-    // nur die ohnehin geltende Text-Konvention aus (reine Instrumental-Teile als
-    // eigenes Label OHNE Textzeilen) und funktioniert unabhängig vom Wortlaut/der
-    // Sprache des Labels. isInstrumentalLabel[i] ist nur an Label-Zeilen true.
-    val isInstrumentalLabel = remember(lines, lineWeight) {
-        val labelIdx = lines.indices.filter { sectionTagRegex.find(lines[it].trim()) != null }
-        val flags = BooleanArray(lines.size)
-        for ((pos, idx) in labelIdx.withIndex()) {
-            val nextBoundary = labelIdx.getOrNull(pos + 1) ?: lines.size
-            var hasLyricAfter = false
-            var j = idx + 1
-            while (j < nextBoundary) { if (lineWeight[j] > 0f) { hasLyricAfter = true; break }; j++ }
-            flags[idx] = !hasLyricAfter
-        }
-        flags
-    }
-    val measuredLineCount = lines.size
 
     // Gespeicherte Kalibrierungspunkte dieses Songs, sortiert nach Position.
-    val breakpoints = remember(song.id, song.lyricsSyncPoints) { parseSyncPoints(song.lyricsSyncPoints) }
+    val savedBreakpoints = remember(song.id, song.lyricsSyncPoints) { parseSyncPoints(song.lyricsSyncPoints) }
 
     // index -> gemessene Y-Position (px) innerhalb der Text-Column (siehe Architektur-
     // Kommentar oben). Mit openSession gekeyt: jedes Öffnen startet komplett frisch.
@@ -417,280 +333,23 @@ private fun LyricsContent(
         }
     }
 
-    // Segment-Anker (Zeit, Scroll-Px), ab dem die aktuelle Scroll-Rate berechnet
-    // wird. Schaltet automatisch durch die Kalibrierungspunkte weiter, sobald die
-    // Wiedergabe sie erreicht (siehe LaunchedEffect unten) — ohne Kalibrierung
-    // bleibt es bei (0, 0), also reine Positions-Proportion.
-    var anchorPositionMs by remember(song.id, openSession) { mutableStateOf(0L) }
-    var anchorScrollPx   by remember(song.id, openSession) { mutableStateOf(0f) }
-    // Zeilen-Index des aktuellen Ankers — nötig fürs Lese-Uhr-Modell (Segment-Grenzen).
-    var anchorLineIdx    by remember(song.id, openSession) { mutableStateOf(0) }
-    // Aktuell angewandter Scroll-Offset — EINZIGE Quelle der Wahrheit fürs Rendering
-    // (siehe Layout-placeRelative unten). Wird NIE verringert (nur abwärts, nie zurück).
-    // Einziger Schreiber ist die Frame-Loop unten; handleTap() setzt nur den Anker,
-    // die Loop übernimmt den neuen Wert automatisch im nächsten Frame — dadurch gibt
-    // es nur einen einzigen Mutationspfad, keine konkurrierende Animation mehr.
-    var scrollOffsetPx by remember(song.id, openSession) { mutableStateOf(0f) }
+    // Während der Kalibrierung treiben die frisch getippten Punkte den Scroll live —
+    // optische Referenz: die gerade getippte Zeile springt sofort an den oberen Rand.
+    // Nach dem Beenden übernehmen die gespeicherten Punkte wieder normal.
+    val breakpoints = if (calibrating) calibrationPoints.sortedBy { it.second } else savedBreakpoints
 
     // Zusätzliche Absicherung gegen eine zu kurze live gemeldete durationMs.
     val dbDurationMs = remember(song.id, song.duration) { parseDurationString(song.duration) }
     val latestPositionMs by rememberUpdatedState(positionMs)
     val latestDurationMs by rememberUpdatedState(maxOf(durationMs, dbDurationMs))
-    val latestIsPlaying   by rememberUpdatedState(isPlaying)
 
-    // positionMs kommt aus PlayerViewModel und wird dort nur alle 200ms aktualisiert
-    // (Poll-Loop, delay(200L)) — Frame-Loop UND handleTap() brauchen aber eine zum
-    // Zeitpunkt des Aufrufs möglichst genaue, kontinuierliche Schätzung, nicht den
-    // eingefrorenen 200ms-Rohwert (sonst "Treppenstufen" statt smooth, wirkt konstant/
-    // hinterher — das war der eigentliche Bug hinter "Song kommt nicht hinterher").
-    // lastRawPositionMs/-AtNanos verankern den letzten ECHTEN Messwert; solange er sich
-    // nicht ändert, wird per realer Systemzeit linear hochgerechnet (gekappt auf max.
-    // 400ms) — der nächste echte 200ms-Wert korrigiert die Hochrechnung automatisch,
-    // kein Drift. Auf Composable-Ebene gehalten (nicht lokal im LaunchedEffect), damit
-    // sowohl die Frame-Loop als auch handleTap() dieselbe Schätzung verwenden.
-    var lastRawPositionMs   by remember(song.id, openSession) { mutableStateOf(positionMs) }
-    var lastRawPositionAtNs by remember(song.id, openSession) { mutableStateOf(System.nanoTime()) }
-    var wasPlayingForEstimate by remember(song.id, openSession) { mutableStateOf(isPlaying) }
-    fun estimatedPositionMs(): Long {
-        val rawPos = latestPositionMs
-        val nowNs  = System.nanoTime()
-        val justResumed = latestIsPlaying && !wasPlayingForEstimate
-        if (rawPos != lastRawPositionMs || justResumed) {
-            lastRawPositionMs   = rawPos
-            lastRawPositionAtNs = nowNs
-        }
-        wasPlayingForEstimate = latestIsPlaying
-        return if (latestIsPlaying) {
-            val elapsedMs = (nowNs - lastRawPositionAtNs) / 1_000_000L
-            lastRawPositionMs + elapsedMs.coerceIn(0L, 400L)
-        } else {
-            lastRawPositionMs
-        }
-    }
-
-    // Summe der Gesangs-Gewichte in [fromLine, toLine).
-    fun weightBetween(fromLine: Int, toLine: Int): Float {
-        var sum = 0f
-        var i = fromLine.coerceAtLeast(0)
-        val end = toLine.coerceAtMost(lineWeight.size)
-        while (i < end) { sum += lineWeight[i]; i++ }
-        return sum
-    }
-
-    // Enthält [fromLine, toLine) ein strukturell erkanntes Instrumental-Label
-    // (siehe isInstrumentalLabel)? Nur für solche Segmente ist eine "Warte"-Phase
-    // (Phase 2) inhaltlich gerechtfertigt — sonst wäre eine niedrige Gewicht/Zeit-
-    // Relation nur ein Zeichen für langsameren Gesang, kein echtes Instrumental.
-    fun segmentHasInstrumental(fromLine: Int, toLine: Int): Boolean {
-        var i = fromLine.coerceAtLeast(0)
-        val end = toLine.coerceAtMost(isInstrumentalLabel.size)
-        while (i < end) { if (isInstrumentalLabel[i]) return true; i++ }
-        return false
-    }
-
-    // Scroll-Pixel während der LESE-Phase: verbraucht `targetW` Gewicht ab `fromLine`
-    // und bleibt dabei auf jeder Gesangszeile proportional zu ihrem Gewicht stehen
-    // (lange Zeilen länger). Nicht-Gesangszeilen (Gewicht 0) werden übersprungen.
-    // Bei vollständig verbrauchtem Gewicht steht der Pixel am Ende des letzten
-    // gesungenen Blocks — von dort übernimmt die WARTE-Phase.
-    fun readingPixel(fromLine: Int, toLine: Int, targetW: Float): Float {
-        var acc = 0f
-        var i = fromLine.coerceAtLeast(0)
-        val end = toLine.coerceAtMost(lineWeight.size)
-        while (i < end) {
-            val w = lineWeight[i]
-            if (w > 0f && acc + w >= targetW) {
-                val frac = ((targetW - acc) / w).coerceIn(0f, 1f)
-                val p0 = linePositions[i] ?: 0f
-                val p1 = linePositions[i + 1] ?: p0
-                return p0 + (p1 - p0) * frac
-            }
-            acc += w
-            i++
-        }
-        return linePositions[end] ?: (linePositions[(end - 1).coerceAtLeast(0)] ?: 0f)
-    }
-
-    // Frame-für-Frame-Scroll nach dem LESE-UHR-Modell (Idee 1, Sprint 5.48):
-    // Nur Gesangszeilen verbrauchen Zeit; jede läuft im natürlichen Sing-Tempo oben
-    // durch. Instrumental-Teile (Intro/Solo/Ausklänge) haben kein Gewicht und werden
-    // ausgesessen — statt ihre Zeit über die Gesangszeilen zu schmieren (das war die
-    // Ursache des "Mitte-Driftens"). Pro Segment (zwischen zwei Kalibrier-Ankern):
-    //   Phase 1 (Lesen):  Gesangszeilen im Tempo `naturalPace`.
-    //   Phase 2 (Warten): Rest der Segmentzeit sanft zum nächsten Anker gleiten.
-    // `naturalPace` wird aus den dichtesten Segmenten gelernt (siehe unten).
-    LaunchedEffect(song.id, openSession, song.lyricsSyncPoints) {
-        // Natürliches Sing-Tempo (ms pro Gewichtseinheit): aus den am dichtesten
-        // gesungenen Segmenten (kaum Instrumental-Luft). Robuster niedriger Wert
-        // (~20. Perzentil, nur "volle" Segmente), damit instrumental-gepolsterte
-        // Segmente das Tempo nicht künstlich verlangsamen. Ein eher schnelles Tempo
-        // lässt Zeilen minimal zu FRÜH oben ankommen (gut zum Vorlesen) statt zu spät.
-        val naturalPace: Float = run {
-            val tpws = ArrayList<Float>()
-            val segWs = ArrayList<Float>()
-            var maxW = 0f
-            for (j in 0 until breakpoints.size - 1) {
-                val fromL = breakpoints[j].first
-                val toL   = breakpoints[j + 1].first
-                // Segmente mit echtem Instrumental-Anteil ausschließen — ihre Zeit
-                // enthält Warte-Anteile, die das gelernte Sing-Tempo sonst verzerren.
-                if (segmentHasInstrumental(fromL, toL)) continue
-                val w = weightBetween(fromL, toL)
-                val t = (breakpoints[j + 1].second - breakpoints[j].second).toFloat()
-                if (w > 0f && t > 0f) { segWs.add(w); tpws.add(t / w); if (w > maxW) maxW = w }
-            }
-            val qualifying = tpws.indices
-                .filter { segWs[it] >= 0.4f * maxW }
-                .map { tpws[it] }
-                .sorted()
-            when {
-                qualifying.isNotEmpty() -> qualifying[qualifying.size / 5]
-                tpws.isNotEmpty()       -> tpws.minOrNull() ?: 250f
-                else                    -> 250f
-            }
-        }
-        onLogDebug("Lese-Uhr start: song='${song.title}' dur=$durationMs (db=$dbDurationMs) " +
-            "naturalPace=${naturalPace}ms/Gew. breakpoints=$breakpoints")
-
-        var nextIdx = 0
-        var guardBlockLogged = false
-        while (isActive) {
-            withFrameNanos { }
-
-            // Nichts tun, bevor Layout vollständig vermessen ist (inkl. Leerzeilen).
-            val maxScrollPx = (contentHeightPx - viewportHeightPx).coerceAtLeast(0f)
-            val allLinesMeasured = linePositions.size >= measuredLineCount
-            if (!allLinesMeasured || contentHeightPx <= 0f || viewportHeightPx <= 0f || maxScrollPx <= 0f) {
-                continue
-            }
-
-            val pos = estimatedPositionMs()
-            val dur = latestDurationMs
-
-            // Während einer NEUEN Kalibrierung treiben die ALTEN Punkte den Scroll nicht
-            // (sonst kämpfen altes Auto-Scrolling und frische Taps gegeneinander).
-            val useBreakpoints = !calibrating
-
-            var segmentJustChanged = false
-            while (useBreakpoints && nextIdx < breakpoints.size && breakpoints[nextIdx].second <= pos) {
-                val (lineIdx, ms) = breakpoints[nextIdx]
-                val px = linePositions[lineIdx]
-                if (px != null) {
-                    anchorPositionMs = ms; anchorScrollPx = px; anchorLineIdx = lineIdx
-                    segmentJustChanged = true
-                } else {
-                    onLogWarn("Kalibrierungspunkt #${nextIdx + 1}/${breakpoints.size} " +
-                        "(lineIdx=$lineIdx, ms=$ms) hat KEINE gemessene Zeilen-Position — übersprungen!")
-                }
-                nextIdx++
-            }
-
-            if (dur in 1..<pos && !guardBlockLogged) {
-                guardBlockLogged = true
-                onLogWarn("Guard blockiert: dur=$dur < pos=$pos — durationMs war zu klein")
-            }
-            if (dur <= 0L || dur < pos || dur <= anchorPositionMs) continue
-
-            val hasModel   = useBreakpoints && breakpoints.isNotEmpty()
-            val nextBreak  = if (useBreakpoints) breakpoints.getOrNull(nextIdx) else null
-            val segEndMs   = nextBreak?.second ?: dur
-            val segEndPx   = nextBreak?.let { linePositions[it.first] } ?: maxScrollPx
-            val segEndLine = nextBreak?.first ?: lines.size
-            if (segEndMs <= anchorPositionMs) continue
-
-            val segT    = (segEndMs - anchorPositionMs).toFloat()
-            val elapsed = (pos - anchorPositionMs).toFloat()
-
-            // Diagnose: bei JEDEM Abschnittswechsel loggen, unabhängig davon, in welcher
-            // Phase wir uns in diesem Frame gerade befinden (vorher feuerte das Log nur,
-            // wenn der Wechsel-Frame zufällig noch in Phase 1 lag — z.B. direkt nach dem
-            // Neustart des Loops, wenn mehrere Breakpoints in einem Frame aufgeholt
-            // werden, blieb das Log stumm, obwohl der Wechsel echt passiert ist).
-            if (segmentJustChanged) {
-                val segWLog = if (hasModel) weightBetween(anchorLineIdx, segEndLine) else -1f
-                val instrLog = if (hasModel) segmentHasInstrumental(anchorLineIdx, segEndLine) else null
-                onLogDebug("Segment: anchorLine=$anchorLineIdx->$segEndLine segW=$segWLog " +
-                    "segT=${segT}ms pace=$naturalPace instrumental=$instrLog pos=$pos")
-            }
-
-            val targetPx: Float
-            if (!hasModel) {
-                // Fallback (Kalibrierung / noch keine Punkte): einfache lineare Fahrt.
-                targetPx = anchorScrollPx + (segEndPx - anchorScrollPx) * (elapsed / segT).coerceIn(0f, 1f)
-            } else {
-                val segW = weightBetween(anchorLineIdx, segEndLine)
-                if (segW <= 0f) {
-                    // Reines Instrumental-/Übergangssegment: gleichmäßig gleiten.
-                    targetPx = anchorScrollPx + (segEndPx - anchorScrollPx) * (elapsed / segT).coerceIn(0f, 1f)
-                } else if (!segmentHasInstrumental(anchorLineIdx, segEndLine)) {
-                    // KEIN Instrumental-Label in diesem Segment (Sprint 5.51): eine
-                    // niedrige Gewicht/Zeit-Relation hier bedeutet NICHT "es gibt eine
-                    // Pause zu warten", sondern nur "hier wird langsamer gesungen als im
-                    // Referenz-Segment". Deshalb KEINE Phase 2 — die volle Segmentzeit
-                    // wird mit dem SEGMENT-EIGENEN (lokalen) Tempo gleichmäßig auf die
-                    // eigenen Zeilen verteilt statt mit dem globalen naturalPace.
-                    val targetW = (elapsed / segT) * segW
-                    targetPx = readingPixel(anchorLineIdx, segEndLine, targetW)
-                } else {
-                    // Lese-Phase (Sing-Tempo `naturalPace`) und Warte-Phase (Instrumental-
-                    // Ausklang, gleitet zum nächsten Anker) werden NICHT mehr hart an der
-                    // Grenze `readDuration` umgeschaltet, sondern über ein kurzes Fenster
-                    // per Smoothstep verblendet (Sprint 5.52 — behebt "Ruckeln"/Holpern).
-                    // Grund: beide Phasen haben i.d.R. sehr unterschiedliche Geschwindig-
-                    // keiten — ein harter Schnitt erzeugt einen spürbaren Tempo-Sprung,
-                    // obwohl die POSITION selbst nie sprang (das Auge reagiert stark auf
-                    // Geschwindigkeitsänderungen, nicht nur auf Sprünge). Endpunkte
-                    // (Segment-Anfang/-Ende, Ankerzeile landet exakt oben) bleiben exakt
-                    // erhalten — nur der Übergang dazwischen wird weich. Beide Teilkurven
-                    // sind außerhalb ihres eigenen Gültigkeitsbereichs flach geklemmt
-                    // (`coerceIn(0f, 1f)` auf den jeweiligen Fortschritt) statt linear
-                    // extrapoliert — dadurch ist jede der beiden für sich monoton
-                    // (nie rückwärts), und eine gewichtete Mischung zwei monotoner,
-                    // beschränkter Kurven ist selbst wieder monoton — die "nur vorwärts"-
-                    // Garantie (siehe unten) bleibt also auch während der Verblendung
-                    // strukturell sicher, kein Sonderfall nötig.
-                    val readDuration = (segW * naturalPace).coerceAtMost(segT)
-                    val phase2Dur    = segT - readDuration
-                    if (phase2Dur <= 0f) {
-                        // Kein Instrumental-Rest — Sing-Tempo würde bis ans Segmentende
-                        // reichen: reine Lese-Phase über die volle Segmentzeit.
-                        val targetW = (elapsed / readDuration).coerceIn(0f, 1f) * segW
-                        targetPx = readingPixel(anchorLineIdx, segEndLine, targetW)
-                    } else {
-                        val readEndPx = readingPixel(anchorLineIdx, segEndLine, segW)
-                        val pRead = readingPixel(
-                            anchorLineIdx, segEndLine,
-                            (elapsed / readDuration).coerceIn(0f, 1f) * segW
-                        )
-                        val pWait = readEndPx + (segEndPx - readEndPx) *
-                            ((elapsed - readDuration) / phase2Dur).coerceIn(0f, 1f)
-                        // Fenster symmetrisch um die Phase-Grenze, gekappt auf max. 1200ms
-                        // Gesamtlänge — lang genug für einen sanften Übergang, kurz genug,
-                        // um kein ganzes Segment zu verschmieren.
-                        val window = minOf(readDuration, phase2Dur, 1200f) * 0.5f
-                        targetPx = if (window <= 0f) {
-                            if (elapsed < readDuration) pRead else pWait
-                        } else {
-                            val s = ((elapsed - (readDuration - window)) / (2f * window)).coerceIn(0f, 1f)
-                            val blend = s * s * (3f - 2f * s)   // Smoothstep, C1-stetig an beiden Enden
-                            pRead * (1f - blend) + pWait * blend
-                        }
-                    }
-                }
-            }
-
-            val clamped = targetPx.coerceIn(0f, maxScrollPx)
-            if (clamped > scrollOffsetPx) scrollOffsetPx = clamped   // nur vorwärts, nie zurück
-        }
-    }
-
-    // Auto-Close mit Fade-out bei Song-Ende (Plan Section 6.7): sobald die Wiedergabe
-    // sicher am Ende ist (letzter Kalibrier-Punkt + Puffer erreicht ODER durationMs
-    // überschritten), löst dieser LaunchedEffect onClose() aus. AnimatedVisibility im
-    // Wrapper übernimmt automatisch den 300ms-fadeOut. Beim Songwechsel wird der Effect
-    // neu gekeyt und startet frisch — kein voreiliges Schließen bei Auto-Advance.
-    val lastBreakpointMs = remember(breakpoints) {
-        breakpoints.maxByOrNull { it.second }?.second ?: 0L
+    // Auto-Close mit Fade-out bei Song-Ende: sobald die Wiedergabe sicher am Ende ist
+    // (letzter Kalibrier-Punkt + Puffer erreicht ODER durationMs überschritten), löst
+    // dieser LaunchedEffect onClose() aus. AnimatedVisibility im Wrapper übernimmt
+    // automatisch den Fade-out. Beim Songwechsel wird der Effect neu gekeyt und
+    // startet frisch — kein voreiliges Schließen bei Auto-Advance.
+    val lastBreakpointMs = remember(savedBreakpoints) {
+        savedBreakpoints.maxByOrNull { it.second }?.second ?: 0L
     }
     val onCloseLatest by rememberUpdatedState(onClose)
     LaunchedEffect(song.id, openSession) {
@@ -706,28 +365,19 @@ private fun LyricsContent(
         }
     }
 
-    // Ein Handler für beide Tap-Arten: sucht die nächste noch nicht erreichte
-    // Zeile (Header oder Lyric, macht keinen Unterschied), setzt den Anker darauf
-    // UND springt sofort sichtbar dorthin — sonst bewegt sich während einer
-    // laufenden Kalibrierung (noch ohne Kalibrierungspunkte) zwischen zwei Taps
-    // nur ein Bruchteil-Pixel, weil die Frame-Loop bis dahin noch mit "Rest des
-    // ganzen Songs bis zum Ende" als Zielspanne rechnet. Der Sofort-Sprung ist
-    // hier sicher (im Gegensatz zur alten ScrollState-Version, siehe Architektur-
-    // Kommentar oben): kein Animate-Aufruf, keine konkurrierende Coroutine — nur
-    // eine simple, monoton geklemmte Zuweisung, genau wie in der Frame-Loop.
-    // Zeichnet den Punkt zusätzlich auf, wenn gerade kalibriert wird.
+    // Nächste zu tippende Zeile: erste Gesangszeile NACH dem zuletzt getippten
+    // Index — robust nach reiner Reihenfolge, unabhängig von Scroll-Position oder
+    // Layout-Messung (Layout-Timing-Race war in der Vorversion mehrfach Bug-Ursache).
+    val lastTappedLineIdx = calibrationPoints.maxOfOrNull { it.first } ?: -1
+    val nextLineToTap = lineIsLyric.indices.firstOrNull { it > lastTappedLineIdx && lineIsLyric[it] }
+
+    // Tippen ist ausschließlich ein Kalibrier-Werkzeug — das neue Modell ist rein
+    // deterministisch aus den Breakpoints berechnet, es gibt keine Laufzeit-Drift
+    // mehr, die ein Live-Tap außerhalb der Kalibrierung korrigieren müsste.
     fun handleTap() {
-        // Nur echte GESANGSzeilen sind Tap-Ziele (keine Leerzeilen/Labels/Sentinel) —
-        // so verankert ein Tap immer die nächste zu singende Zeile, nicht eine Lücke.
-        val entry = linePositions.entries
-            .filter { it.key < lineIsLyric.size && lineIsLyric[it.key] && it.value > scrollOffsetPx + 4f }
-            .minByOrNull { it.value } ?: return
-        val pos = estimatedPositionMs()
-        anchorPositionMs = pos
-        anchorScrollPx   = entry.value
-        anchorLineIdx    = entry.key
-        if (entry.value > scrollOffsetPx) scrollOffsetPx = entry.value
-        if (calibrating) calibrationPoints.add(entry.key to pos)
+        if (!calibrating) return
+        val target = nextLineToTap ?: return
+        calibrationPoints.add(target to positionMs)
     }
 
     // fillMaxSize() deckt zwar optisch den ganzen Screen ab, konsumiert aber
@@ -769,7 +419,7 @@ private fun LyricsContent(
                     } else {
                         calibrating = true
                         calibrationPoints.clear()
-                        Toast.makeText(context, "Kalibrierung: bei jedem Abschnitts-Anfang tippen, sobald du ihn ansingst. Intro/Solo überspringen — die App fängt sie selbst ab.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Kalibrierung: bei jeder Zeile tippen, sobald du sie singst. Instrumental-Teile werden automatisch erkannt.", Toast.LENGTH_LONG).show()
                     }
                 }) {
                     Icon(
@@ -803,7 +453,7 @@ private fun LyricsContent(
 
             if (calibrating) {
                 Text(
-                    "● Kalibrierung läuft — ${calibrationPoints.size} Punkte — bei jedem Abschnitts-Anfang tippen (Intro/Solo überspringen)",
+                    "● Kalibrierung läuft — ${calibrationPoints.size} Punkte — bei jeder Zeile tippen, sobald du sie singst",
                     color = LyricsRed, fontSize = 11.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )
@@ -860,12 +510,8 @@ private fun LyricsContent(
                 }
             }
 
-            // ── NEUE Scroll-Berechnung (Plan Section 6.2) ────────────────────────
-            // Deklarativ aus positionMs + breakpoints — ersetzt den alten Frame-Loop.
-            // Compose glättet die 200ms-Position-Ticks via animateFloatAsState auf 60fps.
-            // Lesepunkt bei 40 % der Viewport-Höhe: Text scrollt so, dass die zu
-            // singende Zeile am Lesepunkt-Y ankommt (statt am oberen Rand wie vorher).
-            val readpointYPx = viewportHeightPx * 0.4f
+            // Scroll-Berechnung: deklarativ aus positionMs + breakpoints. Die zu
+            // singende Zeile landet am literalen oberen Bildschirmrand (Top-Anchor).
             val maxScrollPxCalc = (contentHeightPx - viewportHeightPx).coerceAtLeast(0f)
             val targetOffsetPx = computeTargetOffsetPx(
                 positionMs = positionMs,
@@ -873,7 +519,7 @@ private fun LyricsContent(
                 lines = lines,
                 linePositions = linePositions,
                 maxScrollPx = maxScrollPxCalc,
-                readpointY = readpointYPx
+                readpointY = 0f
             )
             val animatedOffsetPx by animateFloatAsState(
                 targetValue = targetOffsetPx,
@@ -929,18 +575,34 @@ private fun LyricsContent(
                                                 linePositions[index] = coords.positionInParent().y
                                             }
                                     )
-                                    else -> Text(
-                                        text = line,
-                                        color = LyricsWhite,
-                                        fontSize = 26.sp,
-                                        lineHeight = 36.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .onGloballyPositioned { coords ->
-                                                linePositions[index] = coords.positionInParent().y
-                                            }
-                                    )
+                                    else -> {
+                                        val isNextToTap = calibrating && index == nextLineToTap
+                                        val isTapped = calibrating && index <= lastTappedLineIdx
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .onGloballyPositioned { coords ->
+                                                    linePositions[index] = coords.positionInParent().y
+                                                }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(4.dp)
+                                                    .height(30.dp)
+                                                    .background(if (isNextToTap) LyricsVolt else Color.Transparent)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = line,
+                                                color = if (isTapped) LyricsGray else LyricsWhite,
+                                                fontSize = 26.sp,
+                                                lineHeight = 36.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             // Platzhalter am Ende, damit die Zeilen des letzten Abschnitts
@@ -962,12 +624,6 @@ private fun LyricsContent(
                     val contentConstraints = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
                     val placeable = measurables.first().measure(contentConstraints)
                     contentHeightPx = placeable.height.toFloat()
-                    // Oben-Anker (Abschnitts-Modell, Sprint 5.46): Inhalt wird ab dem
-                    // Viewport-Oberrand platziert. Bei scrollOffsetPx == Pixel eines
-                    // Abschnitts-Anfangs steht dieser damit exakt oben — genau das, was
-                    // die Kalibrierung anpeilt (Abschnitt erreicht zu seinem Zeitpunkt den
-                    // oberen Rand). Reine Platzierung, ändert nichts an scrollOffsetPx
-                    // selbst (Rate-Berechnung pro Segment, Monoton-Klemmung).
                     layout(constraints.maxWidth, constraints.maxHeight) {
                         placeable.placeRelative(0, -animatedOffsetPx.roundToInt())
                     }

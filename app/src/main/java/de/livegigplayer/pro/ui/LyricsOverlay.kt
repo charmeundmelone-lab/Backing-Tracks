@@ -8,6 +8,10 @@ import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -121,6 +125,59 @@ private fun formatCountdown(ms: Long): String {
 // größer als das ist, gilt es als Instrumental-Passage (Scroll steht still,
 // Countdown-Balken zeigt Restzeit zur nächsten Vocal-Zeile).
 private const val INSTRUMENTAL_GAP_MS = 3_000L
+
+// Ease-out-Kurve für den Anlauf-Übergang INSTRUMENTAL → VOCAL (Plan Section 6.4).
+// Cubic-Bezier (0.16, 1.0, 0.3, 1.0) — sanfter Anlauf, weiches Ankommen.
+private val AnticipationEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+
+// Berechnet den Ziel-Scroll-Offset in Pixeln aus der aktuellen Wiedergabeposition
+// und den kalibrierten Sync-Punkten (Plan Section 6.2 / 6.4). Rein deklarativ —
+// KEIN Frame-Loop, KEIN Anker-State. Ergebnis wird über animateFloatAsState
+// geglättet, damit die 200ms-Position-Ticks in 60fps-Scroll umgesetzt werden.
+private fun computeTargetOffsetPx(
+    positionMs: Long,
+    breakpoints: List<Pair<Int, Long>>,
+    linePositions: Map<Int, Float>,
+    maxScrollPx: Float,
+    readpointY: Float
+): Float {
+    if (breakpoints.isEmpty()) return 0f
+    val currentBpIdx = breakpoints.indexOfLast { it.second <= positionMs }
+    val currentBp = if (currentBpIdx >= 0) breakpoints[currentBpIdx] else null
+    val nextBp = if (currentBpIdx + 1 < breakpoints.size) breakpoints[currentBpIdx + 1] else null
+
+    // Vor dem ersten Kalibrier-Punkt: Scroll bleibt bei 0 (Song-Anfang, Balken oben
+    // zeigt Countdown zur ersten Vocal-Zeile).
+    if (currentBp == null) return 0f
+
+    val currentY = linePositions[currentBp.first] ?: return 0f
+
+    // Nach dem letzten Kalibrier-Punkt: letzte Zeile am Lesepunkt einfrieren.
+    if (nextBp == null) return (currentY - readpointY).coerceIn(0f, maxScrollPx)
+
+    val nextY = linePositions[nextBp.first] ?: return (currentY - readpointY).coerceIn(0f, maxScrollPx)
+    val gap = nextBp.second - currentBp.second
+    if (gap <= 0L) return (currentY - readpointY).coerceIn(0f, maxScrollPx)
+
+    val targetY: Float = if (gap > INSTRUMENTAL_GAP_MS) {
+        // Instrumental-Passage — Scroll steht still, in den letzten anticipationMs
+        // vor der nächsten Vocal-Zeile beginnt die Anlaufkurve.
+        val anticipationMs = kotlin.math.min(1500L, (0.4 * gap).toLong()).coerceAtLeast(400L)
+        val anticipationStart = nextBp.second - anticipationMs
+        if (positionMs < anticipationStart) {
+            currentY
+        } else {
+            val t = ((positionMs - anticipationStart).toFloat() / anticipationMs).coerceIn(0f, 1f)
+            val eased = AnticipationEasing.transform(t)
+            currentY + eased * (nextY - currentY)
+        }
+    } else {
+        // Vocal — kontinuierlicher linearer Scroll durch das Segment.
+        val t = ((positionMs - currentBp.second).toFloat() / gap).coerceIn(0f, 1f)
+        currentY + t * (nextY - currentY)
+    }
+    return (targetY - readpointY).coerceIn(0f, maxScrollPx)
+}
 
 // "mm:ss" (song.duration, z.B. "5:22") → ms. Zusätzliche Absicherung gegen eine
 // zu kurze live gemeldete durationMs (siehe FolderImporter "Bug-Fix 2"-Kommentar
@@ -788,6 +845,26 @@ private fun LyricsContent(
                 }
             }
 
+            // ── NEUE Scroll-Berechnung (Plan Section 6.2) ────────────────────────
+            // Deklarativ aus positionMs + breakpoints — ersetzt den alten Frame-Loop.
+            // Compose glättet die 200ms-Position-Ticks via animateFloatAsState auf 60fps.
+            // Lesepunkt bei 40 % der Viewport-Höhe: Text scrollt so, dass die zu
+            // singende Zeile am Lesepunkt-Y ankommt (statt am oberen Rand wie vorher).
+            val readpointYPx = viewportHeightPx * 0.4f
+            val maxScrollPxCalc = (contentHeightPx - viewportHeightPx).coerceAtLeast(0f)
+            val targetOffsetPx = computeTargetOffsetPx(
+                positionMs = positionMs,
+                breakpoints = breakpoints,
+                linePositions = linePositions,
+                maxScrollPx = maxScrollPxCalc,
+                readpointY = readpointYPx
+            )
+            val animatedOffsetPx by animateFloatAsState(
+                targetValue = targetOffsetPx,
+                animationSpec = tween(200, easing = LinearEasing),
+                label = "lyricsScroll"
+            )
+
             // Viewport: fester Ausschnitt, Inhalt wird per eigenem Layout reingeschoben
             // (siehe Architektur-Kommentar oben) statt über Compose's ScrollState.
             //
@@ -876,7 +953,7 @@ private fun LyricsContent(
                     // oberen Rand). Reine Platzierung, ändert nichts an scrollOffsetPx
                     // selbst (Rate-Berechnung pro Segment, Monoton-Klemmung).
                     layout(constraints.maxWidth, constraints.maxHeight) {
-                        placeable.placeRelative(0, -scrollOffsetPx.roundToInt())
+                        placeable.placeRelative(0, -animatedOffsetPx.roundToInt())
                     }
                 }
             }

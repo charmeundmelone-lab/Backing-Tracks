@@ -1,5 +1,7 @@
 package de.livegigplayer.pro.ui
 
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,6 +62,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -295,6 +298,7 @@ private fun TopBar(
 ) {
     var menuExpanded        by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var showUsbDiagnostic   by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth().background(BgDeep)
@@ -322,6 +326,13 @@ private fun TopBar(
         }
         IconButton(onClick = onMixerToggle) {
             Icon(Icons.Filled.Tune, contentDescription = "Mixer",
+                tint = Gray, modifier = Modifier.size(26.dp))
+        }
+        // Diagnose für geplantes USB-Multitrack-Feature (CQ20B): zeigt, wie viele
+        // Kanäle Android für ein angeschlossenes USB-Audiogerät tatsächlich meldet,
+        // BEVOR die Audio-Engine für echtes Multichannel-Output umgebaut wird.
+        IconButton(onClick = { showUsbDiagnostic = true }) {
+            Icon(Icons.Filled.Usb, contentDescription = "USB-Audio-Diagnose",
                 tint = Gray, modifier = Modifier.size(26.dp))
         }
         IconButton(onClick = onLockToggle) {
@@ -373,6 +384,61 @@ private fun TopBar(
             }
         )
     }
+
+    if (showUsbDiagnostic) {
+        UsbAudioDiagnosticDialog(onDismiss = { showUsbDiagnostic = false })
+    }
+}
+
+// Zeigt für jedes aktuell angeschlossene USB-Audiogerät die von Android gemeldete
+// Kanalzahl (AudioDeviceInfo.channelCounts) — reiner Lesevorgang, keine eigene
+// Berechtigung nötig. Diente als schneller Vorab-Check fürs geplante
+// USB-Multitrack-Feature (CQ20B): bevor die Audio-Engine für echtes
+// Multichannel-Output umgebaut wird, muss klar sein, ob Android für das konkrete
+// Handy überhaupt mehr als 2 Kanäle über USB freigibt.
+@Composable
+private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val usbDevices = remember {
+        val audioManager = context.getSystemService(AudioManager::class.java)
+        audioManager
+            ?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            ?.filter {
+                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+            }
+            ?: emptyList()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = BgCard,
+        title = { Text("USB-Audio-Diagnose", color = White, fontWeight = FontWeight.Bold) },
+        text = {
+            if (usbDevices.isEmpty()) {
+                Text(
+                    "Kein USB-Audiogerät verbunden. CQ20B per USB-C→USB-B anschließen und Dialog erneut öffnen.",
+                    color = Gray, fontSize = 13.sp
+                )
+            } else {
+                Column {
+                    usbDevices.forEach { device ->
+                        val channels = device.channelCounts
+                        val channelText = if (channels.isEmpty()) "unbekannt" else channels.joinToString(", ")
+                        Text(
+                            "${device.productName} — Kanäle: $channelText",
+                            color = White, fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Schließen", color = Volt) }
+        }
+    )
 }
 
 // ── Tab A: Archiv ─────────────────────────────────────────────────────────────

@@ -208,238 +208,41 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
     `editSongsMode` (End-Aktion/Entfernen-Controls in `SetSongRow`). Einstieg in den
     einen setzt den anderen explizit auf `false` (kein `LaunchedEffect`, da beide
     gleichrangig sind, nicht wie früher Gig-weites `isEditing` vs. lokales `sortMode`).
-12. **Lyrics-Teleprompter — Scroll an Wiedergabeposition, NICHT an BPM, KEIN
-    ScrollState, EIGENES `Layout`** — `LyricsOverlay.kt` scrollt proportional zu
-    `positionMs / durationMs` (echte Player-Position), nicht über eine
-    BPM-Rechnung. Dadurch ist der Song immer exakt zu Ende gescrollt, wenn er
-    zu Ende gespielt ist — unabhängig davon, ob die in der DB hinterlegte BPM
-    stimmt.
-    **WICHTIG (Sprint 5.36–5.38, nach fünf gescheiterten Fix-Versuchen):**
-    Der Text-Block wird NICHT über `Modifier.verticalScroll()`/`ScrollState`
-    UND NICHT über ein simples `Box(fillMaxSize) { Column(fillMaxWidth) }`
-    gescrollt, sondern über ein eigenes `Layout`-Composable, das die
-    Content-Column explizit mit `constraints.copy(maxHeight =
-    Constraints.Infinity)` misst und selbst per `placeable.placeRelative(0,
-    -scrollOffsetPx…)` platziert. **Bei künftigen Änderungen an diesem Screen
-    NIEMALS folgendes wieder einführen:**
-    - `ScrollState`/`verticalScroll`/`scrollTo`/`animateScrollTo` — Grund
-      (Sprint 5.36): `ScrollState.scrollTo()` (Frame-Loop, jeden Frame) und
-      `ScrollState.animateScrollTo()` (früher in `handleTap()`) konkurrieren
-      um dieselbe interne `MutatorMutex` und unterbrechen sich gegenseitig.
-    - Ein simples `Box(fillMaxSize) { Column(fillMaxWidth) }` als Viewport/
-      Content-Struktur — Grund (Sprint 5.38): eine `Box` reicht ihre eigene,
-      durch den Viewport begrenzte `maxHeight`-Constraint automatisch an ihre
-      Kinder weiter. Die Content-Column konnte dadurch NIE höher gemessen
-      werden als der sichtbare Ausschnitt selbst — `maxScrollPx` blieb
-      strukturell ~0, die Frame-Loop wartete für immer auf Scroll-Bedarf, der
-      nie kam. Kompletter Stillstand, unabhängig von Taps — kein Timing-Bug,
-      sondern garantiert reproduzierbar bei jedem Öffnen. Das eigene `Layout`
-      erfasst Viewport-Höhe (`constraints.maxHeight`) und Content-Höhe
-      (`placeable.height`) direkt in der Messphase, `maxScrollPx` wird direkt
-      daraus berechnet — kein Verlass mehr auf automatische
-      Constraint-Weitergabe.
-    Es gibt nur EINEN Schreiber für die kontinuierliche Vorwärtsbewegung von
-    `scrollOffsetPx` (die Frame-Loop); `handleTap()` setzt den Anker UND
-    springt zusätzlich sofort sichtbar dorthin (Sprint 5.37 — ohne den
-    Sofort-Sprung bewegt sich während einer laufenden Kalibrierung ohne
-    vorhandene Kalibrierungspunkte zwischen zwei Taps nur ein Bruchteil-Pixel,
-    weil die Frame-Loop dann noch mit "Rest des ganzen Songs bis zum Ende" als
-    Zielspanne rechnet). Das ist sicher — anders als bei der alten
-    `ScrollState`-Version handelt es sich um eine simple, monoton geklemmte
-    Zuweisung ohne Animate-Aufruf oder konkurrierende Coroutine, exakt wie in
-    der Frame-Loop selbst. Zwei Garantien, beide bewusst doppelt abgesichert:
-    - **Nur abwärts, nie zurück:** `scrollOffsetPx` wird ausschließlich über
-      `if (neuerWert > scrollOffsetPx) scrollOffsetPx = neuerWert` erhöht — sowohl
-      im Frame-Loop als auch bei Tap-to-Sync. Ein kurzzeitiger Jitter in der
-      Positionsschätzung (oder ein Rückwärts-Seek) kann den Scroll dadurch
-      NIEMALS nach oben reißen, er bleibt höchstens stehen.
-    - **Tap-to-Sync verschiebt den Anker, nicht nur die Zeile fix:** Tap sucht
-      per `linePositions` (gemessen via `onGloballyPositioned`, siehe unten) die
-      nächste noch nicht erreichte Zeile, setzt `anchorPositionMs`/`anchorScrollPx`
-      auf (jetzt, diese Zeile) — die Frame-Loop rechnet die Scroll-Rate für den
-      Rest des Songs ab diesem neuen Anker neu — kompensiert damit automatisch
-      ungleichmäßige Zeilendichte (Strophe vs. Instrumental-Teil vs. Refrain).
-    - **`allLinesMeasured`-Gate:** Die Frame-Loop tut buchstäblich nichts
-      (`continue`), bevor `linePositions.size >= nonBlankLineCount` UND
-      Viewport-/Content-Höhe beide > 0 sind — eliminiert die Fehlerklasse
-      "teilweise vermessenes Layout beim (Wieder-)Öffnen" strukturell, statt sie
-      Fall für Fall mit Nullable-Checks abzufangen.
-    - Frame-Loop (`withFrameNanos` in einer Endlosschleife) treibt
-      kontinuierliches 60fps-Scrollen — keine separate Animation mehr, die mit
-      der Loop um denselben Zustand konkurrieren könnte.
-    - `linePositions[index]` wird NICHT analytisch aus Zeilenhöhe berechnet
-      (bricht bei Zeilenumbruch auf schmalen Screens), sondern real gemessen —
-      robust unabhängig von Fontgröße/Gerätebreite. `positionInParent()` ist
-      relativ zur Text-Column selbst (nicht zum Screen) und bleibt dadurch
-      stabil, auch während die Column per `placeRelative` bewegt wird.
-    - **Touch-Durchfall zur MainScreen-TopBar (Sprint 5.37):** Der
-      Schließen-Button (X) sitzt an fast derselben Bildschirmposition wie das
-      "⋮"-Menü der `TopBar` dahinter (beide oben rechts, direkt unter dem
-      Statusbalken). Die äußerste Box des Screens hat deshalb einen leeren
-      `detectTapGestures {}`-Handler, der jeden nicht anderweitig konsumierten
-      Tap abfängt, statt ihn zur TopBar durchfallen zu lassen — Compose testet
-      Kind-Elemente (Buttons, Tap-to-Sync-Viewport) zuerst, deren Handler
-      bleiben also unangetastet.
-    - Der Screen erzwingt Hochkant nur für sich selbst (`activity.requestedOrientation`
-      in `DisposableEffect`, zurückgesetzt beim Schließen) — der Rest der App bleibt
-      unangetastet, es gibt sonst nirgends eine Orientierungssperre.
-    - Auto-Öffnen nur EINMAL pro frisch angewähltem Song (`lyricsAutoShownForSongId`
-      in `PlayerViewModel`, zurückgesetzt in `selectSong`) — sonst würde jedes
-      Pause/Play-Toggle den Screen erneut aufreißen.
-    - **Mehrpunkt-Kalibrierung (`song.lyricsSyncPoints`, Record-Button im
-      Header) — löst den einmaligen Start-Anker aus Sprint 5.31 ab:** eine
-      live gespielte Version hat oft nicht nur eine andere Intro-Länge,
-      sondern generell eine andere Zeilendichte pro Abschnitt als die
-      BPM-Rechnung annimmt (Strophe/Chorus/Bridge unterschiedlich lang
-      relativ zur Studio-Version). Eine einzelne globale Rate reicht dafür
-      nicht. Stattdessen: Record-Button startet eine Aufnahme-Session, User
-      tippt einmal pro Abschnittswechsel durch den kompletten Song — jeder
-      Tap speichert `(Zeilen-Index, aktuelle Position)` in
-      `calibrationPoints`. Beim Beenden wird die sortierte Liste als
-      `"lineIdx:ms,lineIdx:ms,…"` persistiert (`SongDao.updateLyricsSyncPoints`).
-      Danach läuft der Scroll bei jedem künftigen Play automatisch
-      abschnittsweise mit der aus den gespeicherten Punkten interpolierten
-      Rate — kein Live-Tippen mehr nötig. Ohne Kalibrierungspunkte (leerer
-      String) verhält sich alles exakt wie die ursprüngliche reine
-      Positions-Proportion (Fallback bleibt erhalten, kein Sonderfall nötig).
-      **Umsetzung im Frame-Loop:** `anchorPositionMs`/`anchorScrollPx`
-      schalten pro Frame automatisch auf den nächsten bereits erreichten
-      Kalibrierungspunkt weiter (`while`-Schleife über den sortierten
-      Breakpoints, verglichen mit der aktuellen Position) — die Rate wird
-      dann nur für das AKTUELLE Segment (bis zum nächsten Punkt bzw.
-      Songende) berechnet, nicht mehr global für den ganzen Song. Live-
-      Tap-to-Sync (außerhalb der Kalibrierung) nutzt denselben Anker
-      (`handleTap()`), überschreibt ihn aber nur ephemer für die laufende
-      Wiedergabe, ohne etwas zu persistieren — komponiert automatisch
-      korrekt mit der Kalibrierungs-Logik durch dieselbe
-      `scrollOffsetPx`-Monoton-Klemmung (siehe oben), ohne Sonderfall-Code.
-    - **LESE-UHR-MODELL — Zwei-Phasen-Scroll (Idee 1, Sprint 5.48, LÖST das
-      Mitte-Driften):** Der Scroll läuft NICHT mehr linear über die Pixel,
-      sondern nach einer "Lese-Uhr". Vorberechnet: `lineIsLyric[i]` (echte
-      Textzeile = nicht leer UND kein `[Label]`) und `lineWeight[i]`
-      (Zeichenzahl bei Gesang, sonst 0). Pro Segment (zwischen zwei Ankern,
-      `anchorLineIdx`→`segEndLine`): `segW = weightBetween(...)`.
-      **Phase 1 (Lesen):** solange `elapsed < readDuration` (=`segW ×
-      naturalPace`, gekappt auf Segmentzeit) laufen die Gesangszeilen im
-      Sing-Tempo — `readingPixel()` verbraucht Gewicht und bleibt auf jeder
-      Zeile ∝ ihrer Länge stehen. **Phase 2 (Warten):** Rest der Segmentzeit
-      (= Instrumental-Ausklang/Solo/Intro) gleitet der Scroll sanft von der
-      Lese-End-Position zum nächsten Anker. Dadurch wird Instrumental-Zeit
-      AUSGESESSEN statt über die Gesangszeilen geschmiert (= die Ursache des
-      Mitte-Driftens aus 5.47). `naturalPace` (ms/Gewicht) wird EINMAL beim
-      Loop-Start aus den dichtesten Segmenten gelernt (~20. Perzentil der
-      time-per-weight über "volle" Segmente ≥40% des größten) — ein eher
-      schnelles Tempo lässt Zeilen minimal zu FRÜH oben ankommen (gut zum
-      Vorlesen). **Folge fürs Tappen:** nur noch ein Tap pro ABSCHNITTS-Anfang
-      nötig; Intro/Solo werden von Phase 2 automatisch abgefangen (kein Tap).
-      **Messung:** jetzt werden ALLE Zeilen inkl. Leerzeilen vermessen
-      (`onGloballyPositioned` auch auf den Blank-Spacern) plus ein Sentinel bei
-      Index `lines.size` (Oberkante des End-Platzhalters) — damit hat auch die
-      letzte Zeile eine gemessene Unterkante für `readingPixel`. `handleTap()`
-      verankert nur noch echte Gesangszeilen (`lineIsLyric`-Filter). Oben-Anker
-      (5.46) und Monoton-Klemmung bleiben unverändert.
-    - **Strukturelle Instrumental-Erkennung — löst falsche Wartezeiten (Sprint
-      5.51):** Nach dem ersten vollständig auswertbaren Log (Bed of Roses) zeigte
-      sich: ein GLOBALES `naturalPace` ist zu grob — 3 von 6 Segmenten hatten
-      12–19s rechnerische "Wartezeit" (Phase 2), obwohl dort vermutlich kein
-      echtes Instrumental liegt, nur langsamerer Gesang als im Referenz-Segment.
-      Fix, bewusst OHNE Keyword-Abgleich ("Solo"/"Intro"/…, fehleranfällig/
-      sprachabhängig): `isInstrumentalLabel[i]` markiert ein Label strukturell
-      als instrumental, wenn bis zum nächsten Label (oder Songende) keine
-      einzige Gesangszeile folgt — nutzt nur die bestehende Text-Konvention aus.
-      `segmentHasInstrumental(from, to)` prüft ein Segment darauf. **Neue Regel:**
-      nur Segmente MIT erkanntem Instrumental-Label bekommen weiterhin das
-      Phase-1(Lesen)/Phase-2(Warten)-Modell mit dem globalen `naturalPace`;
-      Segmente OHNE Instrumental-Label verteilen ihre volle Segmentzeit mit dem
-      SEGMENT-EIGENEN lokalen Tempo (`segT/segW`) gleichmäßig auf die eigenen
-      Zeilen — keine künstliche Wartezeit mehr. Die `naturalPace`-Lernschleife
-      schließt Segmente mit Instrumental-Anteil ebenfalls aus (sonst würde deren
-      Warte-Zeit-Anteil das gelernte Tempo verzerren). Diagnose-Log zeigt jetzt
-      zusätzlich `instrumental=true/false/null` pro Segment.
-    - **Recalibration-Isolation (Sprint 5.47):** Während `calibrating == true`
-      treibt die ALTE gespeicherte Kalibrierung den Auto-Scroll NICHT
-      (`useBreakpoints = !calibrating` → keine Anker-Weiterschaltung, kein
-      nextBreak, nur langsamer Drift ab dem letzten Tap). Sonst kämpfen altes
-      Auto-Scrolling und frische Taps gegeneinander und `handleTap()` zeichnet
-      Zeilen relativ zur alten, falschen Scroll-Position auf. Beim Nicht-
-      Kalibrieren identisches Verhalten wie zuvor.
-    - **Kalibrierung übersteht Songwechsel während der Aufnahme (Sprint 5.49,
-      DATENVERLUST-BUG):** `calibrating`/`calibrationPoints` sind
-      `remember(song.id, openSession)`-gebunden — läuft der Song während einer
-      laufenden Kalibrierung zu Ende und die App armt lautlos den nächsten Song
-      (CUE-Modus, siehe Sprint 5.22/5.43), wechselt `song.id`, und der
-      komplette Kalibrierungs-Zustand wird verworfen, BEVOR ein manueller
-      Stop-Tap etwas speichern konnte — alle Taps sind ersatzlos weg, die App
-      fällt still auf die alte gespeicherte Kalibrierung zurück (vom User live
-      reproduziert: "ich habe neu kalibriert, aber es hat nicht funktioniert").
-      Fix: `DisposableEffect(song.id) { onDispose { ... } }` — `onDispose`
-      feuert exakt in dem Moment, in dem der ALTE `song.id`-Kontext (samt der
-      darin gefangenen `calibrationPoints`-Closure) durch den neuen ersetzt
-      wird; dort wird, falls `calibrating` noch aktiv war, sofort mit den noch
-      vorhandenen alten Werten gespeichert — kein Datenverlust mehr, unabhängig
-      davon, ob der User rechtzeitig Stop drückt.
-    - **Struktur-Labels ohne Akkorde:** Zeilen im Format `[Chorus]`/`[Verse 1]`
-      im Lyrics-Text werden per `sectionTagRegex` erkannt und als eigene,
-      Volt-farbene Überschrift gerendert (nicht als normale weiße Lyric-Zeile)
-      — bewusst NICHT aus dem Text entfernt wie Akkord-Zeilen, weil es reine
-      Songstruktur ist, kein Akkord.
-    - **Abschnitts-Modell / Oben-Anker (Sprint 5.46, ERSETZT den festen 30%-
-      Lesepunkt aus 5.39):** Der Content-Placeable wird im `layout{}`-Block ab
-      `-scrollOffsetPx` platziert — d.h. bei `scrollOffsetPx == Pixel eines
-      Abschnitts-Anfangs` steht dieser exakt am OBEREN Bildschirmrand. Genau das
-      peilt die Kalibrierung an: jeder Abschnitts-Anfang erreicht zu seinem
-      kalibrierten Zeitpunkt den oberen Rand, dazwischen gleitet der Text mit der
-      pro Segment berechneten Rate (jeder Abschnitt hat so seine eigene
-      Geschwindigkeit). **Warum der 30%-Lesepunkt (5.39) WEG ist:** er rückte über
-      die gerade gesungene Zeile permanent ~15 Zeilen (0.3 × Viewport / Zeilenhöhe)
-      BEREITS GESUNGENEN Text — genau dorthin, wo man beim Singen instinktiv
-      hinschaut. Das war die strukturelle Ursache des "hinkt hinterher"-Gefühls,
-      unabhängig von Rate/Interpolation. Oben-Anker beseitigt das: oben steht das
-      Aktuelle, darunter nur Kommendes. Reine Platzierungsänderung —
-      `scrollOffsetPx` (Rate pro Segment, Monoton-Klemmung, `handleTap()`) bleibt
-      unverändert. `ANCHOR_FRACTION` und die nicht-scrollende Indikator-Linie aus
-      5.39 wieder entfernt; das `Layout` bleibt in der `Box(fillMaxSize())`
-      gewrappt (harmlos, bekannt gut vermessend).
-    - **Diagnose-Log lebt im ViewModel, nicht in `LyricsOverlay.kt` (Sprint 5.43):**
-      `PlayerViewModel.lyricsDebugLog` (`MutableList<String>`) statt
-      `remember(song.id, openSession)` in `LyricsContent` — Grund: CUE-Modus
-      (`endAction=0`) arm't beim Auto-Advance den NÄCHSTEN Song bereits in
-      `currentSong`/die Audio-Engine, OHNE ihn abzuspielen (`isPlaying=false`,
-      siehe Sprint 5.22/5.43). Bleibt der Lyrics-Screen nach Songende offen,
-      folgt er `currentSong` auf diesen ungehörten, nur georarmten Song — ein
-      song-gebundener Log wäre in genau diesem Moment verloren gegangen, bevor
-      der User ihn teilen konnte. Der ViewModel-Log überlebt jeden Songwechsel;
-      jede Zeile trägt weiterhin den Songtitel, dadurch bleibt bei mehreren
-      Songs im selben Log nachvollziehbar, welche Zeile zu welchem Song gehört.
-    - **Positions-Hochrechnung zwischen 200ms-Polls (Sprint 5.44):** `positionMs`
-      kommt aus `PlayerViewModel` und wird dort nur alle 200ms aktualisiert
-      (Poll-Loop, `delay(200L)`), der Scroll-Frame-Loop läuft aber mit 60fps.
-      Ohne Hochrechnung friert `pos` für ~12 von 12 Frames ein und springt dann
-      sprunghaft nach — sichtbar als "Treppenstufen" statt smooth, wirkte für
-      den User wie "läuft konstant und hinkt hinterher" (bestätigt per Live-
-      Test: Text kam beim Mitsingen nicht hinterher, obwohl die Segment-Raten
-      im Diagnose-Log nachweislich korrekt unterschiedlich waren). Fix:
-      `estimatedPositionMs()` verankert den letzten ECHTEN 200ms-Messwert
-      (`lastRawPositionMs`/`lastRawPositionAtNs`) und rechnet dazwischen per
-      realer Systemzeit linear hoch (`System.nanoTime()`, gekappt auf max.
-      400ms Overshoot) — der nächste echte 200ms-Wert korrigiert die
-      Hochrechnung automatisch, kein Drift. Läuft nur während `isPlaying`;
-      beim Pause→Play-Übergang wird der Anker sofort neu verankert (kein
-      Overshoot durch einen alten, vor der Pause liegenden Zeitstempel). Auf
-      Composable-Ebene gehalten (nicht lokal im `LaunchedEffect`), damit
-      sowohl die Frame-Loop als auch `handleTap()` (Kalibrierungs-Aufnahme)
-      dieselbe Schätzung verwenden — sonst wären Kalibrierungspunkte leicht
-      verrauscht relativ zur Playback-Darstellung.
-    - **Einstellbarer Vorlauf `song.lyricsLeadMs` (Sprint 5.45, Room v17) —
-      ZURÜCKGENOMMEN in 5.46:** War ein −/+ Knopf im Header, der eine konstante
-      Zeit-Verschiebung auf die Playback-Position addierte, um die beim
-      Kalibrieren eingebackene Reaktionszeit zu kompensieren. Der User wollte
-      keinen Regler-Kram, sondern das Abschnitts-Modell (Oben-Anker, siehe oben).
-      UI + Anwendung wieder entfernt; die DB-Spalte `lyricsLeadMs` (v17) bleibt
-      reserviert/unbenutzt bestehen (ADD-only-Konvention, Gerät ist bereits auf
-      v17 — analog `lyricsStartMs`). Falls sich nach 5.46 doch noch ein winziger
-      konstanter Versatz zeigt, ist das die naheliegende, sauber wieder
-      aktivierbare Feinjustierung.
+12. **Lyrics-Teleprompter — TabSync, deklarativ (aktueller Stand seit
+    2026-07-21, Commits `4b18842`–`57a0e62`)** — `LyricsOverlay.kt` berechnet
+    den Scroll-Offset rein deklarativ aus `positionMs` + Kalibrierungspunkten
+    (`computeTargetOffsetPx()`), OHNE Frame-Loop. `animateFloatAsState(tween(200))`
+    glättet die 200ms-Position-Ticks zu sichtbar smoothem Scroll.
+    - **Kalibrierung:** ein Tap PRO ZEILE (nicht mehr pro Abschnitt) — Record-Button,
+      speichert `(Zeilen-Index, Position)` in `song.lyricsSyncPoints`
+      (`"lineIdx:ms,…"`, siehe `serializeSyncPoints`/`parseSyncPoints`).
+    - **Instrumental-Erkennung:** textbasiert (`segmentIsInstrumental()`) — ein
+      Segment zwischen zwei Kalibrierpunkten gilt als Instrumental, wenn dort
+      keine einzige echte Songzeile liegt. Instrumental → Scroll steht still bis
+      exakt zum nächsten Tap-Punkt. Vocal → linearer Scroll zwischen den Punkten.
+    - **Top-Anchor:** die aktuell zu singende Zeile landet am literalen oberen
+      Bildschirmrand (`readpointY = 0f`).
+    - **Nach wie vor gültig (aus der alten Architektur übernommen, NICHT ändern):**
+      - KEIN `ScrollState`/`verticalScroll` — eigenes `Layout`, das die
+        Content-Column explizit mit `constraints.copy(maxHeight =
+        Constraints.Infinity)` misst (Grund: eine normale `Box` reicht ihre
+        eigene Höhen-Begrenzung an Kinder weiter, Content kann dann nie höher
+        gemessen werden als der Viewport → Scroll bleibt bei 0 stecken).
+      - `rememberUpdatedState` für Tap-Handler-Closures (`pointerInput(Unit)`
+        startet nie neu — sonst Stale-Capture wie Gotcha 6).
+      - `DisposableEffect(song.id) { onDispose { ... } }` rettet eine laufende
+        Kalibrierung, falls der Song mitten in der Aufnahme wechselt (CUE-Modus
+        armt lautlos den nächsten Song, siehe Gotcha 2/Sprint 5.22).
+      - Leerer `detectTapGestures {}` auf der äußersten Box gegen Touch-Durchfall
+        zur MainScreen-TopBar.
+    - **Archiviert (nicht mehr im Code, nur Historie):** Der Abschnitt "Sprint
+      5.30–5.52" weiter unten beschreibt eine frühere Frame-Loop-Architektur
+      (`withFrameNanos`, `naturalPace`/"Lese-Uhr"-Zwei-Phasen-Modell, Anker-
+      Monoton-Klemmung, 200ms→60fps-Positions-Hochrechnung) — komplett durch
+      die obige deklarative Lösung ersetzt. Bleibt als Lessons-Learned stehen
+      (u.a. WARUM `ScrollState`/`Box{Column{}}` nicht funktionieren — das gilt
+      weiterhin), beschreibt aber keinen existierenden Code mehr. Bei Bugs im
+      aktuellen Teleprompter NICHT als IST-Zustand nehmen.
 
 ## Letzter Stand
 
@@ -447,7 +250,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 **Status:** ✅ TABTRACKS LYRICS-TELEPROMPTER FERTIG + LIVE GETESTET  
 **Branch:** `main`  
 **Letzter Commit:** `57a0e62` — "Fix: Kalibrierung stoppte nach erstem Tap (Stale-Capture-Bug)"  
-**CI Build:** Grün (letzter Check erforderlich)
+**CI Build:** Grün, verifiziert (Commit `1338e70`, aktueller `main`-HEAD)
 
 ### TabSync Lyrics-Teleprompter — FINAL RELEASE (2026-07-23)
 
@@ -482,6 +285,12 @@ a2d0771  LyricsOverlay: Instrumental-Erkennung textbasiert statt Zeit-Schwelle
 4. Bei Bedarf: Vorlauf-Regler (`lyricsLeadMs`, Feld existiert schon)
 
 ---
+
+**⚠️ AB HIER ARCHIVIERTE HISTORIE (Sprints 5.30–5.52):** Beschreibt die alte
+Frame-Loop/"Lese-Uhr"-Architektur des Teleprompters — komplett durch die
+deklarative Lösung ersetzt (Commits 4b18842–57a0e62, 2026-07-21). Bleibt als
+Lessons-Learned stehen (siehe Gotcha 12), beschreibt aber KEINEN existierenden
+Code mehr. Bei Bugs im aktuellen Teleprompter NICHT als IST-Zustand nehmen.
 
 ### Sprint 5.52 DONE (ungetestet): Fix stale durationMs bei Songwechsel + weicher Lese-/Warte-Übergang
 

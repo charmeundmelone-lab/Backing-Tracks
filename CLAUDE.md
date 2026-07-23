@@ -1494,6 +1494,22 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
+#### 🆕 Geplante Features (noch nicht begonnen, Priorität mit User klären)
+- **Bluetooth-Fußschalter (Page-Turner-Pedal):** Gab es schon vor dem
+  Neustart (`5063e46`, 19.06.) als `de/minitraxx/app/audio/PedalManager.kt` —
+  Pedale melden sich als HID-Tastatur, normale `KeyEvent`s + Anlern-Modus pro
+  Aktion (PLAY_PAUSE, NEXT). Kein BLE-Pairing-Code nötig. Alter Code als
+  Referenz per `git show 5063e46~1:app/src/main/java/de/minitraxx/app/audio/PedalManager.kt`
+  abrufbar, muss aber an die neue Architektur (PlayerViewModel/AudioEngine
+  statt altem Repository-Pattern) angepasst werden, nicht 1:1 übernehmbar.
+- **Echtes Multitrack-Audio über USB-C→USB-B zum Allen & Heath CQ20B:**
+  Aktuell mischt `AudioEngine` alle Spuren intern zu 2 Bussen (MAIN links,
+  CUE rechts, siehe README-Routing-Konzept) — für den CQ20B sollen stattdessen
+  einzelne Spuren als eigene, diskrete Kanäle über USB Audio (UAC2)
+  rausgehen. Größerer Umbau: braucht Android-USB-Audio-Multichannel-Output
+  (AudioTrack-Channel-Mask statt Stereo-Summierung), Geräte-/Treiber-Verhalten
+  vorher am echten CQ20B testen. Noch nicht geplant/spezifiziert.
+
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen
 2. ✅ **CI-Status prüfen:** Letzter Build auf `main` noch grün?

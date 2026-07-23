@@ -4,10 +4,42 @@
 
 **Diese CLAUDE.md ist die einzige Quelle der Wahrheit.** Kein GitHub-Search, keine Issue-Suche, kein Raten. Alle TODOs, der aktuelle Stand und die Branch-Regel stehen hier unten.
 
+0. Falls `.status.md` existiert: still lesen (3 Zeilen Kurz-Kontext), dann 1-Satz-Status + Rückfrage vor dem nächsten Schritt (siehe "Arbeitsweise" unten).
 1. Branch prüfen: `git branch` → muss `* main` zeigen. Falls nicht: `git checkout main`
 2. Letzten Stand lesen: Abschnitt "Letzter Stand" weiter unten.
 3. Offene TODOs lesen: Abschnitt "Offene TODOs (nächste Session)" weiter unten.
 4. CI-Status prüfen (GitHub Actions, letzter Build auf `main`).
+
+## Arbeitsweise (Kommunikation & Workflow — PFLICHT)
+
+- **Sprache/Ton:** Antworten auf Deutsch, keine Floskeln/Begrüßungen. Erklärungen
+  als kurze Bullet-Points (max. 3).
+- **Plan-First:** Bei Logik/Feature-Änderungen NICHT direkt Code schreiben —
+  erst Lösung in 2-3 einfachen Sätzen erklären, EINE konkrete Frage stellen,
+  Antwort abwarten. Triviale Ein-Zeiler-Fixes (Tippfehler, offensichtliche Bugs)
+  dürfen direkt gemacht werden.
+- **GrillMe-Modus:** Bei Befehl "GrillMe <Thema>" → Sokratischer Modus, NIE die
+  Lösung direkt geben. Genau EINE Leitfrage stellen, auf Antwort warten, bei
+  oberflächlicher Antwort mit EINER Unterfrage nachbohren (Rekursion bis
+  wasserdicht), dann kurz validieren ("Korrekt.") und nächste Frage. Endet nur
+  auf expliziten Exit-Befehl.
+- **Code-Output:** Keine kompletten Dateien ausgeben (außer Neuanlage) — nur
+  Diffs/geänderte Zeilen + 2-3 Zeilen Kontext. Keine geratenen UI/Touch-Gesten.
+- **Fehler-Handling:** Bei eingefügter Fehlermeldung: kein Entschuldigen, EIN
+  Satz Ursache + minimaler Fix-Diff.
+- **Context-Sparsamkeit:** Keine blinden Volltext-Scans großer/unbekannter
+  Dateien — vorher `wc -l`, dann gezielt `grep`/Zeilenbereiche lesen statt
+  ganze Datei laden.
+- **Handover (`.status.md`):** Bei Befehl "Übergabe"/"Speichern" wird
+  `.status.md` neu geschrieben (genau 3 Punkte: Hauptziel, betroffene
+  Dateipfade, nächster Schritt) — das ist der SCHNELLE Einstieg für die nächste
+  Session, ERSETZT NICHT die CLAUDE.md. Die ausführlichen Sprint-Logs/Gotchas
+  hier bleiben das Langzeit-Gedächtnis (Grund: mehrere Bugs — z.B. der
+  Lyrics-Scroll-Bug in Gotcha 12 — brauchten 5+ Anläufe; ohne die volle
+  Historie würden alte, bereits widerlegte Theorien wiederholt). Neue
+  Sprint-Einträge ab jetzt kurz halten (siehe oben), bestehende NICHT kürzen.
+  CLAUDE.md wird nur bei echtem Feature-/Fix-Abschluss ergänzt, nicht bei
+  jedem Session-Ende — dafür reicht `.status.md`.
 
 ## Branch-Regel (WICHTIG)
 

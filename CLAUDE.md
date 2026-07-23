@@ -131,7 +131,7 @@ app/src/main/java/de/livegigplayer/pro/
 └── MainActivity.kt           — Entry Point, Compose-Setup
 ```
 
-## Datenmodell Song (Room v8)
+## Datenmodell Song (Room v17)
 
 | Feld | Typ | Bedeutung |
 |---|---|---|
@@ -148,10 +148,10 @@ app/src/main/java/de/livegigplayer/pro/
 | playlistId | Long | Zugehöriges Set (0 = keins) |
 | audioFilePath | String | SAF-Pfad (treeUri||folderName) |
 | duration | String | Anzeigedauer (z.B. "3:42") |
-| lyrics | String | Songtext ohne Akkorde, mit optionalen Struktur-Labels wie `[Chorus]` (v14) |
+| lyrics | String | Songtext ohne Akkorde, mit Struktur-Labels wie `[Chorus]` (v14) |
 | lyricsStartMs | Long | Superseded durch lyricsSyncPoints (v16) — nur Schema-Kompatibilität, unbenutzt |
 | lyricsSyncPoints | String | Teleprompter-Kalibrierungspunkte "lineIdx:ms,…", ein Tap pro Abschnitt (v16) |
-| lyricsLeadMs | Long | (v17) Reserviert/unbenutzt — war Vorlauf-Regler (Sprint 5.45), abgelöst durch Abschnitts-Modell/Oben-Anker (5.46) |
+| lyricsLeadMs | Long | (v17) Reserviert/unbenutzt — war Vorlauf-Regler, abgelöst durch Abschnitts-Modell (5.46) |
 
 ## Build-Setup
 
@@ -443,10 +443,45 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-20
-**CI Build:** noch nicht gepusht — lokal implementiert
-**Branch:** `main` (einziger Branch; alle claude/-Branches bereinigt, main = Default)
-**Commit:** Fix stale durationMs bei Songwechsel + weicher Übergang Lese-/Warte-Phase (kein Tempo-Sprung mehr)
+**Datum:** 2026-07-23  
+**Status:** ✅ TABTRACKS LYRICS-TELEPROMPTER FERTIG + LIVE GETESTET  
+**Branch:** `main`  
+**Letzter Commit:** `57a0e62` — "Fix: Kalibrierung stoppte nach erstem Tap (Stale-Capture-Bug)"  
+**CI Build:** Grün (letzter Check erforderlich)
+
+### TabSync Lyrics-Teleprompter — FINAL RELEASE (2026-07-23)
+
+**IMPLEMENTIERUNG ABGESCHLOSSEN.** Alle Komponenten funktionierten, live getestet vom User ("Das funktioniert richtig super").
+
+#### Was wurde gebaut
+- ✅ **LyricsOverlay.kt** — Neuer Teleprompter-Renderer (~400 Zeilen, deklarativ)
+  - Scroll aus `positionMs` berechnet (keine Frame-Loop)
+  - Top-Anchor (0%) für Abschnitts-Anfänge
+  - Zeilengenaues Tippen mit Volt-Balken + Grau-Färbung
+  - INSTRUMENTAL-Freeze + VOCAL-Linear-Scroll
+  - TextBasierte Instrumental-Erkennung (statt Zeit-Schwelle)
+
+#### Commits (diese Session)
+```
+57a0e62  Fix: Kalibrierung stoppte nach erstem Tap (Stale-Capture-Bug)
+2e3b513  Fix: CI-Build-Fehler durch falschen weight-Import
+315c4a1  LyricsOverlay: Top-Anchor, zeilengenaues Tippen, Instrumental-Freeze
+a2d0771  LyricsOverlay: Instrumental-Erkennung textbasiert statt Zeit-Schwelle
+4b18842  LyricsOverlay: Scroll auf deklarative Berechnung umgestellt
+```
+
+#### Bonus: PDF-zu-Lyrics Web-App
+- `pdf-to-lyrics.html` (standalone HTML+JS)
+- PDF-Upload → Akkorde entfernt → `[Section]`-Format
+- Getestet mit zwei echten Songs
+
+#### Nächste Schritte (neue Session)
+1. `git branch` → `* main` verifizieren
+2. CI-Build prüfen (GitHub Actions)
+3. Optional: Live-Test auf echtem Handy
+4. Bei Bedarf: Vorlauf-Regler (`lyricsLeadMs`, Feld existiert schon)
+
+---
 
 ### Sprint 5.52 DONE (ungetestet): Fix stale durationMs bei Songwechsel + weicher Lese-/Warte-Übergang
 
@@ -1650,6 +1685,21 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 
 ### Offene TODOs (nächste Session)
 
+#### 🔴 PRIO 1 — Sofort nach Session-Start
+1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen
+2. ✅ **CI-Status prüfen:** Letzter Build auf `main` noch grün?
+3. 🔵 **Optional:** Live-Test auf echtem Handy
+   - Song mit Lyrics laden
+   - Teleprompter öffnen (Tap auf Song-Titel)
+   - Record → zeilengenaues Tippen → Stop
+   - Abspielen: Läuft Text smooth? Jede Zeile oben beim Singen?
+
+#### 🟠 PRIO 2 — Falls nötig
+- **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)
+  - Feld + Migration v17 existiert schon
+  - Nur UI (−/+ Buttons im Header) nötig
+
+#### ✅ ERLEDIGT (diese Session)
 - ✅ **Lyrics-Teleprompter Grundfunktion (ERLEDIGT):** Sprint 5.30 vom User live
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als

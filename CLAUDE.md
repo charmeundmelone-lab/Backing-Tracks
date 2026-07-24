@@ -1532,11 +1532,24 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
     der Kernel-Treiber `snd-usb-audio` vom Interface **gelöst** werden (USBDEVFS_DISCONNECT
     + claimInterface + SET_INTERFACE alt 1). Bewährter Weg (so macht es „USB Audio Player
     PRO"), aber Wochen-Größenordnung.
-  - **NÄCHSTER SCHRITT (neue Session):** Diesen nativen UAC2-Umbau mit der **GrillMe-Methode**
-    durchplanen (`/grillme` oder „grill me" — Skill liegt in `.claude/skills/grillme.md` +
-    als Plugin installiert). Themen: libusb vs. rohes usbfs, NDK-Anbindung, Kernel-Treiber-
-    Detach, Clock/Feedback-Sync, Stems→Kanal-Mapping (Modell hat 6 Spuren, Endpoint 24),
-    Phasenplan, Aufwand/Risiko, ob sich der Aufwand lohnt. Alle harten Fakten stehen oben.
+  - **✅ UMSETZUNG BEGONNEN (2026-07-24, GrillMe-geplant): NDK-Pfad steht, KK1+KK2 bestanden.**
+    Native usbfs-Lösung gebaut & am echten CQ20B (Nothing Phone 3a) getestet:
+    - `cpp/usb_detach.c` + `UsbDetachTester.kt`: **Kill-Kriterium 1 BESTANDEN** — Detach
+      von `snd-usb-audio` OHNE Root geht (Detach/Claim/SetAlt alle OK). Stock-nahes
+      Nothing OS begünstigt das.
+    - `cpp/usb_tone.c` + `UsbIsoToneTester.kt`: **Kill-Kriterium 2 BESTANDEN** — 440-Hz-Ton
+      isochron (SUBMITURB/REAPURB, ISO_ASAP, eigener pthread, 48kHz/24ch/24-bit-in-32
+      MSB-bündig) kam sauber & **NUR auf Kanal 9** an (diskret, kein Übersprechen),
+      Paketfehler 45/500955 = **0,009%**.
+    - NDK in `app/build.gradle.kts` (26.1.10909125, nur arm64-v8a), `cpp/CMakeLists.txt`;
+      Buttons im USB-Diagnose-Dialog (`MainScreen.kt`). CI baut das NDK grün (Build #296).
+      `AudioEngine` unberührt. Test-Loop: Code → CI/apk-dist → User testet am Pult.
+  - **NÄCHSTER SCHRITT:** **Feedback-Sync** — EP 0x81 (IN, feedback) auslesen und
+    Samples/Intervall nachführen. Behebt die Rest-Glitches (User: „Töne kamen nach und
+    nach dazu", alle auf Kanal 9 = Sample-Über-/Unterläufe durch frei laufenden Takt) +
+    Anlauf-Knacken. Danach: echte Stems statt Sinus, variables Stem→Kanal-Mapping pro Song
+    (Kanalzahl variiert, ~8 ideal), App-Mixer (Mute/Gain/Low-Cut — z.B. Drums-Stem muten
+    bei echtem Schlagzeuger). Scope Phase 1 bewusst nur Nothing 3a (kein „beliebige Geräte").
 
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen

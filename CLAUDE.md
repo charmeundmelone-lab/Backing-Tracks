@@ -1509,9 +1509,34 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   rausgehen. Größerer Umbau: braucht Android-USB-Audio-Multichannel-Output
   (AudioTrack-Channel-Mask statt Stereo-Summierung).
   
-  ✅ **Gerät-Test bestätigt (2026-07-24):** USB-Diagnose-Dialog zeigt 8 verfügbare
-  Kanäle → Audio-Engine-Umbau technisch machbar. Nächste Schritte: (1) Treiber-
-  Verhalten am echten CQ20B verifizieren, (2) AudioTrack-Umbau planen.
+  ✅ **FEASIBILITY BEWIESEN (2026-07-24, per Gerätetest am echten CQ20B):**
+  Diagnose-Tools in die App gebaut (liegen auf Branch
+  `claude/read-current-md-file-7fy90m`, NICHT auf main gemerged):
+  `audio/UsbToneTester.kt` (8-Kanal-Dauerton via AudioTrack), `audio/UsbDescriptorScanner.kt`
+  (rohe UAC-Descriptor-Auswertung), Buttons im USB-Diagnose-Dialog in `MainScreen.kt`.
+  Ergebnisse der Live-Tests:
+  - **AudioTrack-Weg scheitert:** 8-Kanal-`AudioTrack` (setChannelIndexMask) wird zwar
+    INITIALIZED und schreibt/routet zum CQ20B, aber Android **mischt die USB-Ausgabe
+    auf Stereo herunter** (AudioFlinger). Ergebnis am Pult: nur CQ-**Stream**-Modus (2ch)
+    bekommt Ton, **Multitrack**-Modus (diskrete Returns) bleibt still. → Standard-Audio-API
+    ist eine Sackgasse für echtes Multitrack (iOS/StageTraxx kann es, weil Core Audio
+    Mehrkanal-USB nativ ausgibt).
+  - **USB-Descriptor-Scan beweist den Pfad:** CQ20B = **VID 0x22F0 / PID 0x0022**, UAC2.
+    **IF 1 / alt 1**: AudioStreaming, `bNrChannels=24`, 24-bit (bSubslotSize=4),
+    **Endpoint 0x01 = OUT (Wiedergabe), isochron, maxPkt=1024** + Feedback-EP 0x81 IN.
+    (IF 2/alt1 = 24ch Aufnahme, EP 0x82 IN.) → Das Pult bietet **24 diskrete
+    Wiedergabe-Kanäle** über USB an.
+  - **Nötiger Umbau (großes Projekt):** Endpoint isochron bespielen. Androids
+    **Java-`UsbDeviceConnection` kann KEINE isochronen Transfers** → nur über **nativen
+    C/C++-Code (NDK, libusb bzw. usbfs-URBs)** via `getFileDescriptor()`. Zusätzlich muss
+    der Kernel-Treiber `snd-usb-audio` vom Interface **gelöst** werden (USBDEVFS_DISCONNECT
+    + claimInterface + SET_INTERFACE alt 1). Bewährter Weg (so macht es „USB Audio Player
+    PRO"), aber Wochen-Größenordnung.
+  - **NÄCHSTER SCHRITT (neue Session):** Diesen nativen UAC2-Umbau mit der **GrillMe-Methode**
+    durchplanen (`/grillme` oder „grill me" — Skill liegt in `.claude/skills/grillme.md` +
+    als Plugin installiert). Themen: libusb vs. rohes usbfs, NDK-Anbindung, Kernel-Treiber-
+    Detach, Clock/Feedback-Sync, Stems→Kanal-Mapping (Modell hat 6 Spuren, Endpoint 24),
+    Phasenplan, Aufwand/Risiko, ob sich der Aufwand lohnt. Alle harten Fakten stehen oben.
 
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen

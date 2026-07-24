@@ -55,9 +55,19 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
+    // Songs, die im aktuell in Tab B geöffneten Gig schon (in irgendeinem Set) verplant
+    // sind → im Archiv ausgrauen. Kein Gig offen (selectedGigId == null) → leere Menge.
+    val songIdsInSelectedGig: StateFlow<Set<Long>> = _selectedGigId
+        .flatMapLatest { gigId ->
+            if (gigId != null) setDao.getSongIdsInGig(gigId).map { it.toSet() } else flowOf(emptySet())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     fun selectGig(id: Long?) { _selectedGigId.value = id }
 
     fun getSetsForGig(gigId: Long): Flow<List<SetEntity>> = setDao.getSetsForGig(gigId)
+
+    fun getSongIdsInGig(gigId: Long): Flow<List<Long>> = setDao.getSongIdsInGig(gigId)
 
     fun getSongsInSet(setId: Long): Flow<List<SongInSet>> = setDao.getSongsInSet(setId)
 

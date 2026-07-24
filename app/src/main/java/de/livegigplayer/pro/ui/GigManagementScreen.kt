@@ -694,9 +694,11 @@ private fun SetCard(
 
     if (showAddSongs) {
         val allSongs by playerVm.songs.collectAsState()
+        val songIdsInGig by gigVm.getSongIdsInGig(set.gigOwnerId).collectAsState(emptyList())
         AddSongsToSetDialog(
             allSongs     = allSongs,
             alreadyInSet = songs.map { it.song.id }.toSet(),
+            plannedInGig = songIdsInGig.toSet(),
             onConfirm    = { ids -> gigVm.addSongsToSet(set.setId, ids, playerVm); showAddSongs = false },
             onDismiss    = { showAddSongs = false }
         )
@@ -917,11 +919,13 @@ private fun SetSongRow(
 private fun AddSongsToSetDialog(
     allSongs: List<Song>,
     alreadyInSet: Set<Long>,
+    plannedInGig: Set<Long> = emptySet(),
     onConfirm: (List<Long>) -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var selectedIds by remember { mutableStateOf(emptySet<Long>()) }
+    var pendingConfirm by remember { mutableStateOf(false) }
 
     val available = remember(allSongs, alreadyInSet) {
         allSongs.filter { it.id !in alreadyInSet }
@@ -961,9 +965,11 @@ private fun AddSongsToSetDialog(
                     )
                     else -> LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
                         items(filtered, key = { it.id }) { song ->
+                            val plannedElsewhere = song.id in plannedInGig
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .alpha(if (plannedElsewhere) 0.4f else 1f)
                                     .clickable {
                                         selectedIds = if (song.id in selectedIds)
                                             selectedIds - song.id else selectedIds + song.id
@@ -991,7 +997,10 @@ private fun AddSongsToSetDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = selectedIds.isNotEmpty(), onClick = { onConfirm(selectedIds.toList()) }) {
+            TextButton(enabled = selectedIds.isNotEmpty(), onClick = {
+                if (selectedIds.any { it in plannedInGig }) pendingConfirm = true
+                else onConfirm(selectedIds.toList())
+            }) {
                 Text("Hinzufügen (${selectedIds.size})", color = GigVolt, fontWeight = FontWeight.Bold)
             }
         },
@@ -999,6 +1008,24 @@ private fun AddSongsToSetDialog(
             TextButton(onClick = onDismiss) { Text("Abbrechen", color = GigGray) }
         }
     )
+
+    if (pendingConfirm) {
+        AlertDialog(
+            onDismissRequest = { pendingConfirm = false },
+            containerColor   = GigBgCard,
+            title = { Text("Schon im Gig verplant", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text  = { Text("Mindestens ein gewählter Song ist in diesem Gig bereits einem anderen Set zugeordnet. Trotzdem alle hinzufügen?",
+                color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { pendingConfirm = false; onConfirm(selectedIds.toList()) }) {
+                    Text("Trotzdem hinzufügen", color = GigVolt, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirm = false }) { Text("Abbrechen", color = GigGray) }
+            }
+        )
+    }
 }
 
 @Composable

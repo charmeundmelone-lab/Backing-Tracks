@@ -764,6 +764,7 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
     val selectionMode = selectedIds.isNotEmpty()
     val activeSetId              by gigVm.activeSetId.collectAsState()
     val completedSongIdsInSet    by gigVm.completedSongIdsInActiveSet.collectAsState()
+    val plannedSongIdsInGig      by gigVm.songIdsInSelectedGig.collectAsState()
 
     var searchActive     by remember { mutableStateOf(false) }
     var editSheet        by remember { mutableStateOf<Song?>(null) }
@@ -809,6 +810,7 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             ) {
                 itemsIndexed(songs) { index, song ->
                     val isCompletedInActiveSet = song.id in completedSongIdsInSet
+                    val isPlannedInGig         = song.id in plannedSongIdsInGig
                     ArchivSongRow(
                         index                  = index + 1,
                         song                   = song,
@@ -817,6 +819,7 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                         isLocked               = isLocked,
                         selectionMode          = selectionMode,
                         isCompletedInActiveSet = isCompletedInActiveSet,
+                        isPlannedInGig         = isPlannedInGig,
                         onPlay          = { if (!isLocked) vm.selectSong(song, context) },
                         onToggleSelect  = { vm.toggleSelect(song.id) },
                         onActivateBatch = { vm.toggleSelect(song.id) },
@@ -900,6 +903,7 @@ private fun ArchivSongRow(
     selected: Boolean, isBatchSelected: Boolean,
     isLocked: Boolean, selectionMode: Boolean,
     isCompletedInActiveSet: Boolean = false,
+    isPlannedInGig: Boolean = false,
     onPlay: () -> Unit, onToggleSelect: () -> Unit, onActivateBatch: () -> Unit,
     onOpenSheet: () -> Unit, onDelete: () -> Unit,
     onQueueNext: () -> Unit, onQueueEnd: () -> Unit
@@ -945,7 +949,7 @@ private fun ArchivSongRow(
         selected        -> BgTrack
         else            -> BgCard
     }
-    val rowAlpha = if (isCompletedInActiveSet) 0.4f else 1f
+    val rowAlpha = if (isCompletedInActiveSet || isPlannedInGig) 0.4f else 1f
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -1784,6 +1788,18 @@ private fun AddToSetDialog(
         else kotlinx.coroutines.flow.flowOf(emptyList())
     }.collectAsState(emptyList())
 
+    // Songs, die im GEWÄHLTEN Ziel-Gig schon verplant sind → weiche Nachfrage vor dem Add
+    val plannedInGig by remember(pickedGigId) {
+        if (pickedGigId != null) gigVm.getSongIdsInGig(pickedGigId!!)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(emptyList())
+    var pendingSetId by remember { mutableStateOf<Long?>(null) }
+
+    fun chooseSet(setId: Long) {
+        if (songIds.any { it in plannedInGig }) pendingSetId = setId
+        else onConfirm(setId)
+    }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1862,7 +1878,7 @@ private fun AddToSetDialog(
                                 .fillMaxWidth()
                                 .height(52.dp)
                                 .background(BgTrack, shape = MaterialTheme.shapes.small)
-                                .clickable { onConfirm(set.setId) }
+                                .clickable { chooseSet(set.setId) }
                                 .padding(horizontal = 16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1881,5 +1897,23 @@ private fun AddToSetDialog(
                 }
             }
         }
+    }
+
+    if (pendingSetId != null) {
+        AlertDialog(
+            onDismissRequest = { pendingSetId = null },
+            containerColor   = BgCard,
+            title = { Text("Schon im Gig verplant", color = White, fontWeight = FontWeight.Bold) },
+            text  = { Text("Mindestens ein Song ist in diesem Gig bereits einem Set zugeordnet. Trotzdem alle hinzufügen?",
+                color = Gray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { val s = pendingSetId!!; pendingSetId = null; onConfirm(s) }) {
+                    Text("Trotzdem hinzufügen", color = Volt, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingSetId = null }) { Text("Abbrechen", color = Gray) }
+            }
+        )
     }
 }

@@ -73,6 +73,14 @@ abstract class SetDao {
     @Query("SELECT MAX(positionInSet) FROM set_song_cross_ref WHERE setId = :setId")
     abstract suspend fun getMaxPositionInSet(setId: Long): Int?
 
+    // Alle SongIds, die in IRGENDEINEM Set dieses Gigs liegen (für Ausgrau-Logik im Archiv)
+    @Query("""
+        SELECT DISTINCT ref.songId FROM set_song_cross_ref ref
+        INNER JOIN sets ON sets.setId = ref.setId
+        WHERE sets.gigOwnerId = :gigId
+    """)
+    abstract fun getSongIdsInGig(gigId: Long): Flow<List<Long>>
+
     @Query("DELETE FROM set_song_cross_ref WHERE setId = :setId AND songId = :songId")
     abstract suspend fun deleteCrossRef(setId: Long, songId: Long)
 

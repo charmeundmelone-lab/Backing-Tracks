@@ -120,6 +120,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
 import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbDetachTester
+import de.livegigplayer.pro.audio.UsbIsoToneTester
 import de.livegigplayer.pro.audio.UsbToneTester
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.launch
@@ -439,6 +440,12 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
 
     // Nativer Detach-/Claim-Test (Kill-Kriterium 1: snd-usb-audio ohne Root lösen).
     var detachResult by remember { mutableStateOf<String?>(null) }
+
+    // Nativer isochroner Sinuston-Test (Kill-Kriterium 2: diskreter Ton, kein Knacken).
+    val isoTone = remember { UsbIsoToneTester() }
+    var isoRunning by remember { mutableStateOf(false) }
+    var isoResult by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(Unit) { onDispose { if (isoTone.running) isoTone.stop() } }
     val usbPermAction = remember { context.packageName + ".USB_PERMISSION" }
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
@@ -659,11 +666,86 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                                 .verticalScroll(rememberScrollState())
                         )
                     }
+
+                    Spacer(Modifier.padding(vertical = 6.dp))
+                    Text("Sinuston-Test (nativ, isochron) — Kanal 9",
+                        color = Gray, fontSize = 12.sp)
+                    Text(
+                        "Schreibt einen 440-Hz-Ton isochron auf GENAU Kanal 9 (alle anderen still). Am CQ20B prüfen: zeigt nur ein Return Pegel? Beim Stoppen kommt die Fehlerstatistik (Knacken?).",
+                        color = Gray, fontSize = 11.sp
+                    )
+                    Button(
+                        onClick = {
+                            if (isoRunning) {
+                                isoResult = isoTone.stop()
+                                isoRunning = false
+                            } else {
+                                val dev = scanner.findDevice(usbManager)
+                                when {
+                                    dev == null -> isoResult = "Kein USB-Gerät gefunden."
+                                    usbManager?.hasPermission(dev) == true -> {
+                                        // Kanal 9 = 0-basierter Index 8
+                                        isoResult = isoTone.start(usbManager, dev, 8)
+                                        isoRunning = isoTone.running
+                                    }
+                                    else -> {
+                                        val pi = PendingIntent.getBroadcast(
+                                            context, 0,
+                                            Intent(usbPermAction).setPackage(context.packageName),
+                                            PendingIntent.FLAG_IMMUTABLE
+                                        )
+                                        usbManager?.requestPermission(dev, pi)
+                                        isoResult = "USB-Berechtigung angefragt — bitte bestätigen und dann erneut auf \"Ton starten\" tippen."
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isoRunning) RedStop else Volt
+                        ),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Text(
+                            if (isoRunning) "Ton stoppen" else "Ton starten (Kanal 9)",
+                            color = if (isoRunning) White else BgDeep, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    isoResult?.let { r ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Ton-Ergebnis", color = Volt, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "USB-Sinuston-Test CQ20B")
+                                    putExtra(Intent.EXTRA_TEXT, r)
+                                }
+                                context.startActivity(Intent.createChooser(share, "Ergebnis teilen"))
+                            }) {
+                                Text("Teilen", color = Volt, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            r,
+                            color = White, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .heightIn(max = 260.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { tester.stop(); onDismiss() }) { Text("Schließen", color = Volt) }
+            TextButton(onClick = { tester.stop(); if (isoTone.running) isoTone.stop(); onDismiss() }) {
+                Text("Schließen", color = Volt)
+            }
         }
     )
 }

@@ -662,10 +662,10 @@ private fun SetCard(
                 }
             }
         } else {
-            // Song-Zeilen in LazyColumn: nur sichtbare Zeilen sind in Composition Tree.
-            // key() bindet UI-State (dragX, Dialog) an die Song-Identität, nicht Position.
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(songs, key = { it.song.id }) { songInSet ->
+            // Song-Zeilen — key() bindet UI-State (dragX, Dialog) an die Song-Identität,
+            // nicht an die Listenposition. Verhindert Verwechslung beim Umsortieren.
+            songs.forEach { songInSet ->
+                key(songInSet.song.id) {
                     SetSongRow(
                         songInSet     = songInSet,
                         isCurrentSong = songInSet.song.id == currentSong?.id,

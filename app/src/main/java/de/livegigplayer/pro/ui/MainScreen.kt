@@ -119,6 +119,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
 import de.livegigplayer.pro.audio.UsbDescriptorScanner
+import de.livegigplayer.pro.audio.UsbDetachTester
 import de.livegigplayer.pro.audio.UsbToneTester
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.launch
@@ -435,6 +436,9 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
     val usbManager = remember { context.getSystemService(Context.USB_SERVICE) as? UsbManager }
     val scanner = remember { UsbDescriptorScanner() }
     var scanResult by remember { mutableStateOf<String?>(null) }
+
+    // Nativer Detach-/Claim-Test (Kill-Kriterium 1: snd-usb-audio ohne Root lösen).
+    var detachResult by remember { mutableStateOf<String?>(null) }
     val usbPermAction = remember { context.packageName + ".USB_PERMISSION" }
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
@@ -588,6 +592,66 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                         }
                         Text(
                             s,
+                            color = White, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .heightIn(max = 260.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
+
+                    Spacer(Modifier.padding(vertical = 6.dp))
+                    Text("Detach-Test (nativ, für echtes Multitrack)",
+                        color = Gray, fontSize = 12.sp)
+                    Text(
+                        "Prüft, ob sich der Kernel-Treiber (snd-usb-audio) ohne Root vom Pult-Interface lösen lässt — die Voraussetzung fürs isochrone Multitrack. Kein Audio, gibt das Interface danach wieder frei.",
+                        color = Gray, fontSize = 11.sp
+                    )
+                    Button(
+                        onClick = {
+                            val dev = scanner.findDevice(usbManager)
+                            when {
+                                dev == null -> detachResult = "Kein USB-Gerät gefunden."
+                                usbManager?.hasPermission(dev) == true ->
+                                    detachResult = runCatching {
+                                        UsbDetachTester().run(usbManager, dev)
+                                    }.getOrElse { "Native Bibliothek nicht ladbar: ${it.message}" }
+                                else -> {
+                                    val pi = PendingIntent.getBroadcast(
+                                        context, 0,
+                                        Intent(usbPermAction).setPackage(context.packageName),
+                                        PendingIntent.FLAG_IMMUTABLE
+                                    )
+                                    usbManager?.requestPermission(dev, pi)
+                                    detachResult = "USB-Berechtigung angefragt — bitte bestätigen und dann erneut auf \"Detach testen\" tippen."
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BgTrack),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) { Text("Detach testen", color = White, fontSize = 13.sp) }
+                    detachResult?.let { r ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Detach-Ergebnis", color = Volt, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "USB-Detach-Test CQ20B")
+                                    putExtra(Intent.EXTRA_TEXT, r)
+                                }
+                                context.startActivity(Intent.createChooser(share, "Ergebnis teilen"))
+                            }) {
+                                Text("Teilen", color = Volt, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            r,
                             color = White, fontSize = 11.sp,
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             modifier = Modifier

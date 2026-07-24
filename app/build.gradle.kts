@@ -9,12 +9,25 @@ android {
     namespace = "de.livegigplayer.pro"
     compileSdk = 35
 
+    // NDK für den nativen USB-Detach-/Multitrack-Pfad (CQ20B). AGP-8.7-Standard-NDK.
+    ndkVersion = "26.1.10909125"
+
     defaultConfig {
         applicationId = "de.livegigplayer.pro"
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = "1.0"
+
+        // Nur 64-bit ARM (Ziel-Gerät Nothing Phone 3a) — hält den Build schlank.
+        ndk { abiFilters += "arm64-v8a" }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {

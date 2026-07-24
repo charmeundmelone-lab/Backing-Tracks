@@ -20,7 +20,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -977,7 +978,12 @@ private fun ArchivSongRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .alpha(rowAlpha)
+            // Dimmen ohne Offscreen-Puffer (ModulateAlpha) — sonst legt Compose bei
+            // alpha < 1 pro Zeile einen Layer an → Ruckeln, wenn viele Zeilen grau sind.
+            .graphicsLayer {
+                alpha = rowAlpha
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
             .background(bgColor, shape = MaterialTheme.shapes.small)
             .pointerInput(selectionMode, isLocked) {
                 detectHorizontalDragGestures(

@@ -67,6 +67,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -969,7 +971,10 @@ private fun AddSongsToSetDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .alpha(if (plannedElsewhere) 0.4f else 1f)
+                                    .graphicsLayer {
+                                        alpha = if (plannedElsewhere) 0.4f else 1f
+                                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                                    }
                                     .clickable {
                                         selectedIds = if (song.id in selectedIds)
                                             selectedIds - song.id else selectedIds + song.id

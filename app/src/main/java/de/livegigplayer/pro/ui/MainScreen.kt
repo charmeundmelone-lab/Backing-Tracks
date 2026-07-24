@@ -2,6 +2,12 @@ package de.livegigplayer.pro.ui
 
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +39,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -87,6 +95,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +117,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.ContextCompat
+import de.livegigplayer.pro.audio.UsbDescriptorScanner
+import de.livegigplayer.pro.audio.UsbToneTester
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -399,8 +411,8 @@ private fun TopBar(
 @Composable
 private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val audioManager = remember { context.getSystemService(AudioManager::class.java) }
     val usbDevices = remember {
-        val audioManager = context.getSystemService(AudioManager::class.java)
         audioManager
             ?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             ?.filter {
@@ -411,18 +423,46 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
             ?: emptyList()
     }
 
+    // Dauerton-Test: beweist diskretes Mehrkanal-Output übers USB-Gerät.
+    val tester = remember { UsbToneTester() }
+    var toneRunning by remember { mutableStateOf(false) }
+    var toneInfo by remember { mutableStateOf<String?>(null) }
+    var diag by remember { mutableStateOf<String?>(null) }
+    // Bei Dialog-Schließen (oder Recompose-Ende) Ton sicher stoppen.
+    DisposableEffect(Unit) { onDispose { tester.stop() } }
+
+    // USB-Descriptor-Scan (direkte USB-Host-API) + Berechtigungs-Handling.
+    val usbManager = remember { context.getSystemService(Context.USB_SERVICE) as? UsbManager }
+    val scanner = remember { UsbDescriptorScanner() }
+    var scanResult by remember { mutableStateOf<String?>(null) }
+    val usbPermAction = remember { context.packageName + ".USB_PERMISSION" }
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                if (intent?.action == usbPermAction) {
+                    scanResult = scanner.scan(usbManager) // Berechtigung ggf. jetzt erteilt
+                }
+            }
+        }
+        val filter = IntentFilter(usbPermAction)
+        ContextCompat.registerReceiver(
+            context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { tester.stop(); onDismiss() },
         containerColor   = BgCard,
         title = { Text("USB-Audio-Diagnose", color = White, fontWeight = FontWeight.Bold) },
         text = {
-            if (usbDevices.isEmpty()) {
-                Text(
-                    "Kein USB-Audiogerät verbunden. CQ20B per USB-C→USB-B anschließen und Dialog erneut öffnen.",
-                    color = Gray, fontSize = 13.sp
-                )
-            } else {
-                Column {
+            Column {
+                if (usbDevices.isEmpty()) {
+                    Text(
+                        "Kein USB-Audiogerät verbunden. CQ20B per USB-C→USB-B anschließen und Dialog erneut öffnen.",
+                        color = Gray, fontSize = 13.sp
+                    )
+                } else {
                     usbDevices.forEach { device ->
                         val channels = device.channelCounts
                         val channelText = if (channels.isEmpty()) "unbekannt" else channels.joinToString(", ")
@@ -432,11 +472,134 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
+                    Spacer(Modifier.padding(vertical = 6.dp))
+                    Text(
+                        "Dauerton-Test: spielt gleichzeitig auf ALLEN Kanälen je einen eigenen Ton. Am CQ20B prüfen, ob mehrere Eingangskanäle getrennt Pegel zeigen.",
+                        color = Gray, fontSize = 12.sp
+                    )
+                    Button(
+                        onClick = {
+                            if (toneRunning) {
+                                tester.stop()
+                                toneRunning = false
+                                toneInfo = "Ton gestoppt."
+                            } else {
+                                val ch = tester.start(audioManager)
+                                if (ch != null) {
+                                    toneRunning = true
+                                    toneInfo = "Läuft auf $ch Kanälen (jeder Kanal eigener Ton)."
+                                } else {
+                                    toneInfo = "Start fehlgeschlagen — siehe Diagnose unten."
+                                }
+                            }
+                            diag = tester.diagnostics()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (toneRunning) RedStop else Volt
+                        ),
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Text(
+                            if (toneRunning) "Dauerton stoppen" else "Dauerton starten",
+                            color = if (toneRunning) White else BgDeep, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    toneInfo?.let {
+                        Text(it, color = White, fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 6.dp))
+                    }
+                    diag?.let { d ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Diagnose", color = Volt, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { diag = tester.diagnostics() }) {
+                                Text("Aktualisieren", color = Gray, fontSize = 12.sp)
+                            }
+                            TextButton(onClick = {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "USB-Multitrack-Diagnose")
+                                    putExtra(Intent.EXTRA_TEXT, tester.diagnostics())
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(share, "Diagnose teilen"))
+                            }) {
+                                Text("Teilen", color = Volt, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            d,
+                            color = White, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .heightIn(max = 260.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
+
+                    Spacer(Modifier.padding(vertical = 6.dp))
+                    Text("USB-Struktur-Scan (für echtes Multitrack)",
+                        color = Gray, fontSize = 12.sp)
+                    Button(
+                        onClick = {
+                            val dev = scanner.findDevice(usbManager)
+                            when {
+                                dev == null -> scanResult = "Kein USB-Gerät gefunden."
+                                usbManager?.hasPermission(dev) == true ->
+                                    scanResult = scanner.scan(usbManager)
+                                else -> {
+                                    val pi = PendingIntent.getBroadcast(
+                                        context, 0,
+                                        Intent(usbPermAction).setPackage(context.packageName),
+                                        PendingIntent.FLAG_IMMUTABLE
+                                    )
+                                    usbManager?.requestPermission(dev, pi)
+                                    scanResult = "USB-Berechtigung angefragt — bitte bestätigen, dann erscheint das Ergebnis automatisch."
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BgTrack),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) { Text("USB-Struktur scannen", color = White, fontSize = 13.sp) }
+                    scanResult?.let { s ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Scan-Ergebnis", color = Volt, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "USB-Descriptor-Scan CQ20B")
+                                    putExtra(Intent.EXTRA_TEXT, s)
+                                }
+                                context.startActivity(Intent.createChooser(share, "Scan teilen"))
+                            }) {
+                                Text("Teilen", color = Volt, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            s,
+                            color = White, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .heightIn(max = 260.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Schließen", color = Volt) }
+            TextButton(onClick = { tester.stop(); onDismiss() }) { Text("Schließen", color = Volt) }
         }
     )
 }

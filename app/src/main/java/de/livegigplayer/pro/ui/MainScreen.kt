@@ -87,6 +87,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +109,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import de.livegigplayer.pro.audio.UsbToneTester
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -399,8 +401,8 @@ private fun TopBar(
 @Composable
 private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val audioManager = remember { context.getSystemService(AudioManager::class.java) }
     val usbDevices = remember {
-        val audioManager = context.getSystemService(AudioManager::class.java)
         audioManager
             ?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             ?.filter {
@@ -411,18 +413,25 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
             ?: emptyList()
     }
 
+    // Dauerton-Test: beweist diskretes Mehrkanal-Output übers USB-Gerät.
+    val tester = remember { UsbToneTester() }
+    var toneRunning by remember { mutableStateOf(false) }
+    var toneInfo by remember { mutableStateOf<String?>(null) }
+    // Bei Dialog-Schließen (oder Recompose-Ende) Ton sicher stoppen.
+    DisposableEffect(Unit) { onDispose { tester.stop() } }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { tester.stop(); onDismiss() },
         containerColor   = BgCard,
         title = { Text("USB-Audio-Diagnose", color = White, fontWeight = FontWeight.Bold) },
         text = {
-            if (usbDevices.isEmpty()) {
-                Text(
-                    "Kein USB-Audiogerät verbunden. CQ20B per USB-C→USB-B anschließen und Dialog erneut öffnen.",
-                    color = Gray, fontSize = 13.sp
-                )
-            } else {
-                Column {
+            Column {
+                if (usbDevices.isEmpty()) {
+                    Text(
+                        "Kein USB-Audiogerät verbunden. CQ20B per USB-C→USB-B anschließen und Dialog erneut öffnen.",
+                        color = Gray, fontSize = 13.sp
+                    )
+                } else {
                     usbDevices.forEach { device ->
                         val channels = device.channelCounts
                         val channelText = if (channels.isEmpty()) "unbekannt" else channels.joinToString(", ")
@@ -432,11 +441,46 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
+                    Spacer(Modifier.padding(vertical = 6.dp))
+                    Text(
+                        "Dauerton-Test: spielt gleichzeitig auf ALLEN Kanälen je einen eigenen Ton. Am CQ20B prüfen, ob mehrere Eingangskanäle getrennt Pegel zeigen.",
+                        color = Gray, fontSize = 12.sp
+                    )
+                    Button(
+                        onClick = {
+                            if (toneRunning) {
+                                tester.stop()
+                                toneRunning = false
+                                toneInfo = "Ton gestoppt."
+                            } else {
+                                val ch = tester.start(audioManager)
+                                if (ch != null) {
+                                    toneRunning = true
+                                    toneInfo = "Läuft auf $ch Kanälen (jeder Kanal eigener Ton)."
+                                } else {
+                                    toneInfo = "Start fehlgeschlagen — kein USB-Gerät oder Format nicht unterstützt."
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (toneRunning) RedStop else Volt
+                        ),
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Text(
+                            if (toneRunning) "Dauerton stoppen" else "Dauerton starten",
+                            color = if (toneRunning) White else BgDeep, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    toneInfo?.let {
+                        Text(it, color = White, fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 6.dp))
+                    }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Schließen", color = Volt) }
+            TextButton(onClick = { tester.stop(); onDismiss() }) { Text("Schließen", color = Volt) }
         }
     )
 }

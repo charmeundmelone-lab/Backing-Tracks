@@ -2,6 +2,7 @@ package de.livegigplayer.pro.ui
 
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -417,6 +420,7 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
     val tester = remember { UsbToneTester() }
     var toneRunning by remember { mutableStateOf(false) }
     var toneInfo by remember { mutableStateOf<String?>(null) }
+    var diag by remember { mutableStateOf<String?>(null) }
     // Bei Dialog-Schließen (oder Recompose-Ende) Ton sicher stoppen.
     DisposableEffect(Unit) { onDispose { tester.stop() } }
 
@@ -458,9 +462,10 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                                     toneRunning = true
                                     toneInfo = "Läuft auf $ch Kanälen (jeder Kanal eigener Ton)."
                                 } else {
-                                    toneInfo = "Start fehlgeschlagen — kein USB-Gerät oder Format nicht unterstützt."
+                                    toneInfo = "Start fehlgeschlagen — siehe Diagnose unten."
                                 }
                             }
+                            diag = tester.diagnostics()
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (toneRunning) RedStop else Volt
@@ -475,6 +480,39 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                     toneInfo?.let {
                         Text(it, color = White, fontSize = 12.sp,
                             modifier = Modifier.padding(top = 6.dp))
+                    }
+                    diag?.let { d ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Diagnose", color = Volt, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { diag = tester.diagnostics() }) {
+                                Text("Aktualisieren", color = Gray, fontSize = 12.sp)
+                            }
+                            TextButton(onClick = {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "USB-Multitrack-Diagnose")
+                                    putExtra(Intent.EXTRA_TEXT, tester.diagnostics())
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(share, "Diagnose teilen"))
+                            }) {
+                                Text("Teilen", color = Volt, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            d,
+                            color = White, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .heightIn(max = 260.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
                     }
                 }
             }

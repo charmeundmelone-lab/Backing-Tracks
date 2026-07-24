@@ -662,10 +662,10 @@ private fun SetCard(
                 }
             }
         } else {
-            // Song-Zeilen — key() bindet UI-State (dragX, Dialog) an die Song-Identität,
-            // nicht an die Listenposition. Verhindert Verwechslung beim Umsortieren.
-            songs.forEach { songInSet ->
-                key(songInSet.song.id) {
+            // Song-Zeilen in LazyColumn: nur sichtbare Zeilen sind in Composition Tree.
+            // key() bindet UI-State (dragX, Dialog) an die Song-Identität, nicht Position.
+            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                items(songs, key = { it.song.id }) { songInSet ->
                     SetSongRow(
                         songInSet     = songInSet,
                         isCurrentSong = songInSet.song.id == currentSong?.id,
@@ -856,7 +856,10 @@ private fun SetSongRow(
             .fillMaxWidth()
             .height(72.dp)
             .background(if (isCurrentSong) GigVolt.copy(alpha = 0.18f) else Color.Transparent)
-            .alpha(alpha)
+            .graphicsLayer {
+                this.alpha = alpha
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
             .pointerInput(isEditing, isLocked) {
                 if (interactive) {
                     detectHorizontalDragGestures(

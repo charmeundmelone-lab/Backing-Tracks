@@ -5,6 +5,7 @@
 **Diese CLAUDE.md ist die einzige Quelle der Wahrheit.** Kein GitHub-Search, keine Issue-Suche, kein Raten. Alle TODOs, der aktuelle Stand und die Branch-Regel stehen hier unten.
 
 0. Falls `.status.md` existiert: still lesen (3 Zeilen Kurz-Kontext), dann 1-Satz-Status + Rückfrage vor dem nächsten Schritt (siehe "Arbeitsweise" unten).
+0b. **GrillMe-Skill ist immer verfügbar** — liegt fest in `.claude/skills/grillme.md` (auf `main`) und wird beim Session-Start automatisch als `/grillme` geladen. Bei Planungs-/Konzept-Themen aktiv nutzen (sokratisches Interview, siehe "Arbeitsweise").
 1. Branch prüfen: `git branch` → muss `* main` zeigen. Falls nicht: `git checkout main`
 2. Letzten Stand lesen: Abschnitt "Letzter Stand" weiter unten.
 3. Offene TODOs lesen: Abschnitt "Offene TODOs (nächste Session)" weiter unten.

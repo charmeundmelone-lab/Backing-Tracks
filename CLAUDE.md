@@ -1507,8 +1507,11 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   CUE rechts, siehe README-Routing-Konzept) — für den CQ20B sollen stattdessen
   einzelne Spuren als eigene, diskrete Kanäle über USB Audio (UAC2)
   rausgehen. Größerer Umbau: braucht Android-USB-Audio-Multichannel-Output
-  (AudioTrack-Channel-Mask statt Stereo-Summierung), Geräte-/Treiber-Verhalten
-  vorher am echten CQ20B testen. Noch nicht geplant/spezifiziert.
+  (AudioTrack-Channel-Mask statt Stereo-Summierung).
+  
+  ✅ **Gerät-Test bestätigt (2026-07-24):** USB-Diagnose-Dialog zeigt 8 verfügbare
+  Kanäle → Audio-Engine-Umbau technisch machbar. Nächste Schritte: (1) Treiber-
+  Verhalten am echten CQ20B verifizieren, (2) AudioTrack-Umbau planen.
 
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen

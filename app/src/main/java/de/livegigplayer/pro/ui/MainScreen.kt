@@ -2,7 +2,12 @@ package de.livegigplayer.pro.ui
 
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -112,6 +117,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.ContextCompat
+import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbToneTester
 import de.livegigplayer.pro.data.Song
 import kotlinx.coroutines.launch
@@ -424,6 +431,26 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
     // Bei Dialog-Schließen (oder Recompose-Ende) Ton sicher stoppen.
     DisposableEffect(Unit) { onDispose { tester.stop() } }
 
+    // USB-Descriptor-Scan (direkte USB-Host-API) + Berechtigungs-Handling.
+    val usbManager = remember { context.getSystemService(Context.USB_SERVICE) as? UsbManager }
+    val scanner = remember { UsbDescriptorScanner() }
+    var scanResult by remember { mutableStateOf<String?>(null) }
+    val usbPermAction = remember { context.packageName + ".USB_PERMISSION" }
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                if (intent?.action == usbPermAction) {
+                    scanResult = scanner.scan(usbManager) // Berechtigung ggf. jetzt erteilt
+                }
+            }
+        }
+        val filter = IntentFilter(usbPermAction)
+        ContextCompat.registerReceiver(
+            context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
     AlertDialog(
         onDismissRequest = { tester.stop(); onDismiss() },
         containerColor   = BgCard,
@@ -507,6 +534,60 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
                         }
                         Text(
                             d,
+                            color = White, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .heightIn(max = 260.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
+
+                    Spacer(Modifier.padding(vertical = 6.dp))
+                    Text("USB-Struktur-Scan (für echtes Multitrack)",
+                        color = Gray, fontSize = 12.sp)
+                    Button(
+                        onClick = {
+                            val dev = scanner.findDevice(usbManager)
+                            when {
+                                dev == null -> scanResult = "Kein USB-Gerät gefunden."
+                                usbManager?.hasPermission(dev) == true ->
+                                    scanResult = scanner.scan(usbManager)
+                                else -> {
+                                    val pi = PendingIntent.getBroadcast(
+                                        context, 0,
+                                        Intent(usbPermAction).setPackage(context.packageName),
+                                        PendingIntent.FLAG_IMMUTABLE
+                                    )
+                                    usbManager?.requestPermission(dev, pi)
+                                    scanResult = "USB-Berechtigung angefragt — bitte bestätigen, dann erscheint das Ergebnis automatisch."
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BgTrack),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) { Text("USB-Struktur scannen", color = White, fontSize = 13.sp) }
+                    scanResult?.let { s ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Scan-Ergebnis", color = Volt, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "USB-Descriptor-Scan CQ20B")
+                                    putExtra(Intent.EXTRA_TEXT, s)
+                                }
+                                context.startActivity(Intent.createChooser(share, "Scan teilen"))
+                            }) {
+                                Text("Teilen", color = Volt, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            s,
                             color = White, fontSize = 11.sp,
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             modifier = Modifier

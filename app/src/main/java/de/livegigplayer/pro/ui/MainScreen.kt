@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
@@ -110,6 +111,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitFirstDown
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -985,17 +989,48 @@ private fun ArchivSongRow(
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
             .background(bgColor, shape = MaterialTheme.shapes.small)
+            // Orientierungs-sensitive Geste statt detectHorizontalDragGestures: das
+            // Original akkumulierte dx unabhängig von dy — schnelle, leicht diagonale
+            // Vertikal-Flicks überschritten dabei versehentlich die 80f-Schwelle
+            // (Popup "★ Song → nächster" ohne Tap) UND kämpfte um Touch-Events mit dem
+            // vertikalen Scroll der LazyColumn (Ruckeln). Fix: erst nach Touch-Slop
+            // per Achsen-Dominanz entscheiden — Vertikal-dominant → Event NICHT
+            // konsumieren (LazyColumn scrollt ungestört), erst bei klar horizontaler
+            // Bewegung (>1.5x dy) wird der Swipe überhaupt aktiviert.
             .pointerInput(selectionMode, isLocked) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        if (!isLocked && !selectionMode) {
-                            if (dragX > 80f) guarded(latestNext)
-                            else if (dragX < -80f) guarded(latestEnd)
+                val touchSlop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var locked = false
+                    var totalX = 0f
+                    var totalY = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (change.changedToUpIgnoreConsumed()) break
+                        val delta = change.positionChange()
+                        totalX += delta.x
+                        totalY += delta.y
+                        if (!locked) {
+                            if (abs(totalX) > touchSlop || abs(totalY) > touchSlop) {
+                                if (abs(totalX) > abs(totalY) * 1.5f) {
+                                    locked = true
+                                } else {
+                                    break
+                                }
+                            }
                         }
-                        dragX = 0f
-                    },
-                    onDragCancel = { dragX = 0f }
-                ) { _, delta -> dragX += delta }
+                        if (locked) {
+                            change.consume()
+                            dragX += delta.x
+                        }
+                    }
+                    if (locked && !isLocked && !selectionMode) {
+                        if (dragX > 80f) guarded(latestNext)
+                        else if (dragX < -80f) guarded(latestEnd)
+                    }
+                    dragX = 0f
+                }
             }
             .combinedClickable(
                 onClick = { if (selectionMode) onToggleSelect() else if (!isLocked) guarded(onPlay) },

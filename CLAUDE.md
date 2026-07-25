@@ -247,11 +247,76 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-23  
-**Status:** ✅ TABTRACKS LYRICS-TELEPROMPTER FERTIG + LIVE GETESTET  
+**Datum:** 2026-07-25  
+**Status:** ✅ SCROLL-PERFORMANCE ARCHIV & GIG-VERWALTUNG DEUTLICH VERBESSERT + LIVE GETESTET (User: "wesentlich besser", weitere Politur optional zurückgestellt)  
 **Branch:** `main`  
-**Letzter Commit:** `57a0e62` — "Fix: Kalibrierung stoppte nach erstem Tap (Stale-Capture-Bug)"  
-**CI Build:** Grün, verifiziert (Commit `1338e70`, aktueller `main`-HEAD)
+**Letzter Commit:** `356f903` — "Fix: CI-Build-Fehler durch falschen Import (awaitFirstDown)"  
+**CI Build:** Grün, verifiziert (Commit `356f903`, aktueller `main`-HEAD, APK auf `apk-dist`)
+
+### Scroll-Performance Archiv & Gig-Verwaltung (2026-07-25)
+
+User-Report: Scroll-Verhalten war in der App "noch nie sehr gut", explizit als eigenständiges
+(nicht durch die Ausgrau-Feature-Session verursachtes) Problem gemeldet. Chirurgische Diagnose
+vor jeder Änderung durchgeführt und dem User als Befund-Liste präsentiert, erst nach explizitem
+"go" umgesetzt.
+
+**Gefundene & behobene Probleme (in dieser Reihenfolge aufgetreten):**
+
+1. **SetSongRow: `.alpha()` statt `graphicsLayer`+`ModulateAlpha`** (GigManagementScreen.kt) —
+   erzeugte pro gedimmter Zeile (completed songs) einen Offscreen-Buffer. Fix: gleiches Pattern
+   wie ArchivSongRow (siehe unten) — `graphicsLayer { alpha = ...; compositingStrategy =
+   CompositingStrategy.ModulateAlpha }`. **Ist geblieben, funktioniert.**
+
+2. **SetCard: `songs.forEach{}` statt `LazyColumn`** — komponierte ALLE Songs in ALLEN Sets
+   gleichzeitig, nicht nur sichtbare. Erster Fix-Versuch: Umbau auf `LazyColumn(items(songs,
+   key={it.song.id}))`. **CRASHTE beim Öffnen eines Sets** (verschachtelte LazyColumn in Column
+   ohne Höhenbegrenzung — klassischer Compose-Infinite-Height-Konflikt). Sofort per
+   `git reset`/manuellem Revert zurück auf `forEach{}` — **bewusst NICHT erneut versucht in
+   dieser Session**, da Risiko/Nutzen-Verhältnis nach dem Crash-Vorfall neu bewertet werden
+   muss (siehe TODO unten). `forEach{}` ist aktuell wieder aktiv, funktioniert (kein Crash),
+   ist aber weiterhin nicht lazy.
+
+3. **ROOT CAUSE des eigentlichen User-Reports — Swipe-Geste kollidierte mit Vertikal-Scroll**
+   (MainScreen.kt, `ArchivSongRow`): `detectHorizontalDragGestures` akkumulierte `dx`
+   UNABHÄNGIG von `dy` — ein schnelles, leicht diagonales Vertikal-Wischen (wie es bei echtem
+   Scrollen mit dem Finger immer vorkommt) überschritt dabei versehentlich die 80f-Schwelle für
+   Rechts-/Links-Swipe. Erklärte BEIDE User-Symptome auf einen Schlag: (a) das rätselhafte
+   Popup "★ Songname → nächster", obwohl kein Song berührt wurde, UND (b) das ruckelige/hakelige
+   Scrollen (die Geste kämpfte pro Zeile um dieselben Touch-Events wie die LazyColumn).
+   **Fix:** eigener Gesture-Handler (`awaitEachGesture` + `awaitFirstDown` +
+   `positionChange()`/`changedToUpIgnoreConsumed()`, alle aus
+   `androidx.compose.foundation.gestures`/`androidx.compose.ui.input.pointer`) statt
+   `detectHorizontalDragGestures` — entscheidet erst NACH Touch-Slop per Achsen-Dominanz
+   (`abs(totalX) > abs(totalY) * 1.5f`): bei Vertikal-Dominanz wird der Touch NICHT konsumiert
+   (LazyColumn scrollt ungestört), erst bei klar horizontaler Bewegung wird der Swipe überhaupt
+   aktiviert. **Live getestet, User-Feedback: "schon wesentlich besser".**
+
+4. **CI-Build-Fehler beim ersten Push des Gesture-Fixes:** `awaitFirstDown` fälschlich aus
+   `androidx.compose.ui.input.pointer` importiert — liegt tatsächlich in
+   `androidx.compose.foundation.gestures`. Da lokaler Gradle-Build in dieser Sandbox
+   grundsätzlich nicht möglich ist (Google-Maven/Android-Gradle-Plugin 403, siehe
+   `/root/.ccr/README.md`), fiel der Fehler erst durch CI auf. **Wichtige Lektion für künftige
+   Sessions:** nach jedem Push aktiv den CI-Status prüfen (`mcp__github__actions_list` /
+   `get_job_logs`), NICHT einfach `apk-dist` fetchen und annehmen, der neueste Build sei
+   erfolgreich — das führte in dieser Session dazu, dass dem User zweimal versehentlich der
+   ALTE, noch fehlerhafte APK-Build geschickt wurde, bevor der CI-Fehler bemerkt wurde.
+
+**Commits (diese Session, chronologisch):**
+```
+dbaa12e  Fix: SetCard & SetSongRow scroll performance (forEach → LazyColumn, alpha → graphicsLayer)  [CRASH, reverted]
+477040b  Hotfix: Revert LazyColumn in SetCard (crash on Set open)
+08506f2  Fix: Archiv-Swipe löste bei schnellem Vertikal-Scroll fälschlich aus  [CI-Fehler]
+356f903  Fix: CI-Build-Fehler durch falschen Import (awaitFirstDown)  [aktueller main-HEAD, CI grün]
+```
+
+**Aktueller Code-Stand:**
+- `SetSongRow` (GigManagementScreen.kt): graphicsLayer+ModulateAlpha ✅
+- `SetCard` Song-Liste (GigManagementScreen.kt): weiterhin `forEach{}`, NICHT lazy (Revert nach Crash) ⚠️
+- `ArchivSongRow` (MainScreen.kt): orientierungssensitive Custom-Geste ✅, bereits graphicsLayer+ModulateAlpha aus Vorsession ✅
+
+**Vom User explizit zurückgestellt:** "Kann noch weiter verbessert werden, allerdings möchte
+ich das jetzt nicht machen." — kein Crash, kein Bug mehr offen, nur noch Politur-Potential
+(siehe TODOs unten).
 
 ### TabSync Lyrics-Teleprompter — FINAL RELEASE (2026-07-23)
 
@@ -1555,7 +1620,26 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen
 2. ✅ **CI-Status prüfen:** Letzter Build auf `main` noch grün?
-3. 🔵 **Optional:** Live-Test auf echtem Handy
+3. 🟡 **Scroll-Performance weiter polieren (User hat das bewusst zurückgestellt, kein Bug,
+   nur Wunsch nach mehr Feinschliff):**
+   - **SetCard-Songliste ist noch nicht lazy** (`forEach{}` statt `LazyColumn`, siehe Sprint
+     2026-07-25). Ein direkter `LazyColumn`-Umbau CRASHTE beim Set-Öffnen (vermutlich
+     verschachtelte LazyColumn ohne begrenzte Höhe in einer nicht scrollenden `Column`
+     innerhalb der äußeren Sets-LazyColumn). Vor einem erneuten Versuch: Höhen-Constraint
+     sauber lösen (z.B. `Modifier.heightIn(max = ...)` auf der inneren LazyColumn, oder ganz
+     auf eine flache Struktur ohne verschachtelte Scroll-Container umbauen — evtl. die
+     gesamte Song-Liste EINER LazyColumn auf oberster Ebene (Sets + Songs zusammen als ein
+     Item-Stream) statt Sets als LazyColumn mit SetCard-Items, die selbst wieder Listen
+     enthalten). ERST mit kleinem, isoliertem Testfall (z.B. Emulator/Screenshot-Test oder
+     Constraint-Logging) verifizieren, dass KEIN Crash mehr auftritt, bevor an den User
+     ausgeliefert wird — die App crashte beim letzten Versuch sofort und vollständig.
+   - Danach ggf. auch bei `SetCard` selbst state-turbulence reduzieren (Flow-Subscriptions
+     deduzieren, siehe alte Diagnose-Befunde 3+4 aus der Session vom 2026-07-25 — Details im
+     Abschnitt "Scroll-Performance Archiv & Gig-Verwaltung" oben).
+   - **WICHTIG:** vor jeder Auslieferung an den User: CI-Status aktiv per
+     `mcp__github__actions_list`/`get_job_logs` prüfen, NICHT nur `apk-dist` fetchen — sonst
+     Risiko, einen alten/kaputten Build zu verschicken (siehe Lektion aus 2026-07-25).
+4. 🔵 **Optional:** Lyrics-Teleprompter Live-Test auf echtem Handy
    - Song mit Lyrics laden
    - Teleprompter öffnen (Tap auf Song-Titel)
    - Record → zeilengenaues Tippen → Stop
@@ -1567,6 +1651,12 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   - Nur UI (−/+ Buttons im Header) nötig
 
 #### ✅ ERLEDIGT (diese Session)
+- ✅ **Scroll-Performance Archiv & Gig-Verwaltung (ERLEDIGT, Session 2026-07-25):** Swipe-
+  Gesture-Bug im Archiv behoben (Fehl-Popup + Ruckeln bei schnellem Vertikal-Wischen), dimm-
+  Performance (graphicsLayer+ModulateAlpha) auch in SetSongRow nachgezogen. Vom User live
+  getestet, "schon wesentlich besser". Details siehe Abschnitt "Scroll-Performance Archiv &
+  Gig-Verwaltung" oben. Weitere Politur (SetCard-Lazy-Loading) bewusst vom User zurückgestellt,
+  siehe PRIO 1 oben — nicht mehr akut, aber offen.
 - ✅ **Lyrics-Teleprompter Grundfunktion (ERLEDIGT):** Sprint 5.30 vom User live
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als

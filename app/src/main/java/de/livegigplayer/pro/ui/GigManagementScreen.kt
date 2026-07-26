@@ -257,7 +257,7 @@ private fun GigDetailView(
     val activeSetId = if (gig.lastActiveSetId > 0L) gig.lastActiveSetId else sets.firstOrNull()?.setId
     val activeSet = activeSetId?.let { id -> sets.find { it.setId == id } }
 
-    LaunchedEffect(sets) {
+    LaunchedEffect(activeSetId) {
         if (activeSetId != null) {
             setProgressMap = gigVm.setProgress(listOf(activeSetId))
         }
@@ -1043,7 +1043,7 @@ private fun SetSwitcherSheet(
             ) {
                 items(sets, key = { it.setId }) { set ->
                     val isActive = set.setId == activeSetId
-                    var menuExpanded by remember { mutableStateOf(false) }
+                    var menuExpanded by remember(set.setId) { mutableStateOf(false) }
 
                     Row(
                         modifier = Modifier

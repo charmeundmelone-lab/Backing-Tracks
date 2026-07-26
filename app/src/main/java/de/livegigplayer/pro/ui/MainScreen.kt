@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -123,12 +124,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
+import de.livegigplayer.pro.audio.PdfLyricsImporter
 import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbDetachTester
 import de.livegigplayer.pro.audio.UsbIsoToneTester
 import de.livegigplayer.pro.audio.UsbToneTester
 import de.livegigplayer.pro.data.Song
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -1108,6 +1112,32 @@ private fun SongEditorSheet(
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
     var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
 
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var importing by remember { mutableStateOf(false) }
+    var pendingPdfText by remember { mutableStateOf<String?>(null) }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            importing = true
+            scope.launch {
+                val extracted = withContext(Dispatchers.IO) {
+                    runCatching { PdfLyricsImporter.importLyricsFromPdf(context, uri) }
+                        .getOrDefault("")
+                }
+                importing = false
+                when {
+                    extracted.isBlank() ->
+                        Toast.makeText(context, "Kein Text im PDF gefunden", Toast.LENGTH_LONG).show()
+                    lyrics.isBlank() -> lyrics = extracted          // Feld leer → direkt einsetzen
+                    else -> pendingPdfText = extracted              // Feld belegt → nachfragen
+                }
+            }
+        }
+    }
+
     val idx     = songs.indexOfFirst { it.id == song.id }
     val hasPrev = idx > 0
     val hasNext = idx in 0 until songs.size - 1
@@ -1170,6 +1200,21 @@ private fun SongEditorSheet(
                 cursorColor = Volt
             )
         )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { pdfPicker.launch(arrayOf("application/pdf")) },
+            enabled = !importing,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = BgTrack)
+        ) {
+            if (importing) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Volt, strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Filled.Article, contentDescription = null, tint = Volt, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Aus PDF importieren (Akkorde entfernt)", color = Volt, fontSize = 13.sp)
+            }
+        }
         Spacer(modifier = Modifier.height(16.dp))
         // Auto-Stop toggle
         Row(
@@ -1201,6 +1246,30 @@ private fun SongEditorSheet(
                 colors = ButtonDefaults.buttonColors(containerColor = Volt)) {
                 Text("Speichern", color = Color.Black, fontWeight = FontWeight.Bold)
             }
+        }
+
+        if (pendingPdfText != null) {
+            AlertDialog(
+                onDismissRequest = { pendingPdfText = null },
+                containerColor = BgTrack,
+                title = { Text("Lyrics-Feld ist nicht leer", color = White, fontSize = 16.sp) },
+                text = { Text("Wie soll der importierte Text eingefügt werden?", color = Gray, fontSize = 14.sp) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        lyrics = pendingPdfText!!
+                        pendingPdfText = null
+                    }) { Text("Ersetzen", color = Volt) }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(onClick = {
+                            lyrics = lyrics.trimEnd() + "\n\n" + pendingPdfText!!
+                            pendingPdfText = null
+                        }) { Text("Anhängen", color = Volt) }
+                        TextButton(onClick = { pendingPdfText = null }) { Text("Abbrechen", color = Gray) }
+                    }
+                }
+            )
         }
     }
 }

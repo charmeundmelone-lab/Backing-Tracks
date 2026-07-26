@@ -86,5 +86,8 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.documentfile)
 
+    // PDF-Textlayer-Extraktion für den Lyrics-Import (Phase 1). Reiner Text, kein OCR.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

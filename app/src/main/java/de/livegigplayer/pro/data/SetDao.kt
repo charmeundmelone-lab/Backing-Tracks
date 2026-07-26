@@ -9,6 +9,8 @@ import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+data class SetProgress(val setId: Long, val total: Int, val completed: Int)
+
 @Dao
 abstract class SetDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -101,6 +103,12 @@ abstract class SetDao {
 
     @Query("UPDATE set_song_cross_ref SET isSpontaneous = :spontaneous WHERE setId = :setId AND songId = :songId")
     abstract suspend fun updateSpontaneous(setId: Long, songId: Long, spontaneous: Boolean)
+
+    @Query("""
+        SELECT setId AS setId, COUNT(*) AS total, SUM(isCompleted) AS completed
+        FROM set_song_cross_ref WHERE setId IN (:setIds) GROUP BY setId
+    """)
+    abstract suspend fun getSetProgress(setIds: List<Long>): List<SetProgress>
 
     // ── Rechts-Swipe: Song direkt nach dem aktuellen Song einfügen ────────────
 

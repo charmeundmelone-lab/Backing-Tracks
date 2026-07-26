@@ -71,6 +71,9 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
 
     fun getSongsInSet(setId: Long): Flow<List<SongInSet>> = setDao.getSongsInSet(setId)
 
+    suspend fun setProgress(setIds: List<Long>): Map<Long, de.livegigplayer.pro.data.SetProgress> =
+        withContext(Dispatchers.IO) { setDao.getSetProgress(setIds).associateBy { it.setId } }
+
     // ── Gig / Set / Song CRUD ────────────────────────────────────────────────
 
     fun createGig(name: String) {

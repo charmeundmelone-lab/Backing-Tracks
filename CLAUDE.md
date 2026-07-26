@@ -258,11 +258,53 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-26  
-**Status:** ✅ Scroll-Performance Archiv + Set-Songliste-Scroll-Bug + CI auf Release umgestellt — vom User live bestätigt ("es läuft fantastisch!"). Details siehe Sprint-Eintrag unten.  
+**Status:** ✅ Setlist-Redesign (Variante B, PLAN-setlist-lesbarkeit.md) + Set-Restzeit im Griff-Button — vom User live bestätigt ("läuft super, danke!"). Details siehe Sprint-Einträge unten.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `8cdcb57` — "CI: Release-APK statt Debug bauen (echte Scroll-Performance, kein JIT-Warmup)"  
-**CI Build:** Grün, verifiziert (Commit `8cdcb57`, Build #330, `LiveGigPlayer-release.apk` auf `apk-dist`)  
-**⚠️ Wichtig für nächste Session:** CI baut jetzt **Release** (nicht mehr Debug). Fetch-Pfad ist `origin/apk-dist:LiveGigPlayer-release.apk` (siehe Build-Setup oben). Release ist mit Debug-Key signiert → installierbar, Update ohne Deinstallieren.
+**Letzter Code-Commit:** `f9c5a6d` — "Griff-Button: Restzeit des Sets anzeigen (aufgerundet auf Minuten)"  
+**CI Build:** Grün, verifiziert (Commit `f9c5a6d`, Build #333, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+
+### Set-Restzeit im Griff-Button DONE (2026-07-26, GrillMe-geplant, live bestätigt)
+
+Sahnehäubchen-Wunsch nach dem Setlist-Redesign, per GrillMe-Interview geklärt:
+Griff-Button-Zeile zeigt jetzt zusätzlich zur "X/Y gespielt"-Anzeige die
+verbleibende Set-Zeit, z.B. "3/8 gespielt · ~42 Min" (Commit `f9c5a6d`).
+Geklärte Entscheidungen aus dem Interview: (a) nur beim aktuell geöffneten Set
+(nicht in der Set-Wechsler-Liste), (b) verbleibende Zeit = Summe der Dauer
+aller noch nicht abgeschlossenen Songs, laufender Song zählt **voll** mit
+(keine Live-Reduktion um die verstrichene Spielzeit), (c) Anzeige grob auf
+ganze Minuten **aufgerundet** (nie eine kürzere Zeit suggerieren als
+tatsächlich übrig ist), (d) gleiche Zeile wie "X/Y gespielt", keine eigene
+Zeile. Neuer privater Helper `parseDurationSeconds()` in
+`GigManagementScreen.kt` parst `song.duration` ("mm:ss") zu Sekunden.
+
+### Setlist-Redesign Variante B DONE (2026-07-26, Commit `798940e`, live bestätigt)
+
+Umsetzung von `PLAN-setlist-lesbarkeit.md` (GrillMe-Interview, final
+abgestimmt) — vier Änderungen, alle live bestätigt:
+- **Song-Zeile** (`SetSongRow`/`SetSongRowSortable` in `GigManagementScreen.kt`):
+  Nummer dezent grau (14sp, kein Volt mehr), Songname dominant (20sp), neue
+  Meta-Zeile Tonart (`GigCool`-Farbe) · Kapo (nur wenn >0) · Dauer statt
+  BPM-Subtitle. Aktiver Song bekommt zusätzlich eine 3dp `GigVolt`-Leiste am
+  linken Zeilenrand + gelben Titel.
+- **Gig-Kopf als leise Brotkrume:** `GigDetailView`-Header zeigt jetzt
+  `gig.name › currentSet.name` (13sp, grau/weiß) statt großem fettem
+  Gig-Titel; das gelbe Header-"+" (Set anlegen) wurde entfernt.
+- **Set-Anlegen umgezogen:** lebt jetzt als beschriftete "+ Neues Set"-Zeile
+  im `SetSwitcherSheet`-Header, plus ein eigener sichtbarer "+ Neues
+  Set"-Button im Empty-State des leeren Gigs (Regressions-Falle vermieden —
+  ohne das gäbe es sonst keinen Weg mehr, im leeren Gig ein Set anzulegen).
+- **Import-Button** (`MainScreen.kt`-Toolbar) hat jetzt ein Text-Label
+  "Import" statt nacktem Icon.
+- **Gelb-Disziplin:** "Wechseln"-Griff-Text/-Icon von `GigVolt` auf neutral
+  (`GigWhite`/`GigGray`) umgestellt — Gelb bedeutet jetzt konsequent nur noch
+  "läuft/aktiv". Terminologie "Playlist"→"Set" war schon aus Sprint 5.29
+  erledigt, keine Reste gefunden.
+- Bewusst nicht angefasst (laut Plan Phase 2/Scope-Grenze): `ArchivSongRow`
+  bekommt das gleiche laute Nummern-/Titel-Muster wie vorher — App-weite
+  Konsistenz ist ein separates Folge-Feature.
+- Kein Gradle-Build in der Sandbox möglich (Google-Maven 403, wie immer) —
+  nur manuell gegengelesen, dann CI aktiv geprüft (grün) statt blind
+  `apk-dist` zu fetchen.
 
 ### Scroll-Performance Archiv + Set-Scroll-Fix + Release-Build DONE (2026-07-26, live bestätigt: "es läuft fantastisch!")
 

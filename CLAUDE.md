@@ -170,10 +170,12 @@ app/src/main/java/de/livegigplayer/pro/
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-CI baut automatisch bei jedem Push auf `main` und legt APK auf `apk-dist`:
+CI baut automatisch bei jedem Push auf `main` einen **Release-APK** (mit Debug-Key
+signiert, `isMinifyEnabled=false`, `debuggable=false` → ART optimiert vorab, kein
+JIT-Warmup-Ruckeln wie im Debug-Build) und legt ihn auf `apk-dist`:
 ```bash
 git fetch origin apk-dist
-git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
+git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ```
 
 ## Wichtige Gotchas

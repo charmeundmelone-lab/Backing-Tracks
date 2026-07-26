@@ -24,25 +24,25 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew --no-daemon assembleDebug -PversionCode=${{ github.run_number }}
+      - name: Build release APK
+        run: ./gradlew --no-daemon assembleRelease -PversionCode=${{ github.run_number }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: livegigplayer-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: livegigplayer-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
 
       - name: Publish APK to apk-dist branch
         if: github.ref != 'refs/heads/apk-dist'
         run: |
           mkdir /tmp/apkpub && cd /tmp/apkpub
           git init -b apk-dist
-          cp "$GITHUB_WORKSPACE/app/build/outputs/apk/debug/app-debug.apk" LiveGigPlayer-debug.apk
-          git add LiveGigPlayer-debug.apk
+          cp "$GITHUB_WORKSPACE/app/build/outputs/apk/release/app-release.apk" LiveGigPlayer-release.apk
+          git add LiveGigPlayer-release.apk
           git -c user.name="github-actions[bot]" \
               -c user.email="github-actions[bot]@users.noreply.github.com" \
-              commit -m "LiveGigPlayer debug APK (build $GITHUB_SHA)"
+              commit -m "LiveGigPlayer release APK (build $GITHUB_SHA)"
           git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk-dist
         env:
           GITHUB_TOKEN: ${{ github.token }}

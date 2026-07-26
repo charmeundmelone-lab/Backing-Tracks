@@ -45,6 +45,10 @@ android {
         }
         release {
             isMinifyEnabled = false
+            // Mit dem Debug-Key signiert → installierbar (gleiche Signatur/appId wie
+            // Debug, daher Update ohne Deinstallieren). debuggable=false bleibt → ART
+            // optimiert vorab, kein JIT-Warmup-Ruckeln wie im Debug-Build.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

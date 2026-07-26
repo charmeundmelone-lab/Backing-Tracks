@@ -247,11 +247,11 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-25  
-**Status:** ✅ SCROLL-PERFORMANCE ARCHIV & GIG-VERWALTUNG DEUTLICH VERBESSERT + LIVE GETESTET (User: "wesentlich besser", weitere Politur optional zurückgestellt)  
+**Datum:** 2026-07-26  
+**Status:** 📋 PLANUNGS-SESSION (kein Code): PDF-Import direkt in der App per GrillMe durchgeplant → **Weg A entschieden**. Umsetzung bewusst in frischem Chatfenster. Details siehe Abschnitt "🆕 Geplante Features → PDF-zu-Lyrics" (dort die Entscheidungen festgehalten). Davor: Scroll-Performance-Session abgeschlossen + live getestet (User: "wesentlich besser").  
 **Branch:** `main`  
-**Letzter Commit:** `356f903` — "Fix: CI-Build-Fehler durch falschen Import (awaitFirstDown)"  
-**CI Build:** Grün, verifiziert (Commit `356f903`, aktueller `main`-HEAD, APK auf `apk-dist`)
+**Letzter Code-Commit:** `356f903` — "Fix: CI-Build-Fehler durch falschen Import (awaitFirstDown)" (unverändert, diese Session hat nur Doku geändert)  
+**CI Build:** Grün, verifiziert (Commit `356f903`, letzter Code-Stand, APK auf `apk-dist`)
 
 ### Scroll-Performance Archiv & Gig-Verwaltung (2026-07-25)
 
@@ -1569,6 +1569,26 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   Filter-Vorfalls beim direkten Ausgeben von Songtext-Auszügen im Chat —
   Songtext lief stattdessen NUR durchs Skript, nie durch die Chat-Antwort,
   Ergebnis als Datei-Download an den User).
+  - **✅ ENTSCHEIDUNG (2026-07-26, per GrillMe geplant) — Weg A / Phase 1:**
+    Umsetzung als Minimalversion. Erst die PDF-**Umbrüche 1:1 aus dem PDF-Textlayer
+    übernehmen** (KEINE eigene Umbruch-Regel in Phase 1), damit der User am echten
+    Song sieht, ob es reicht — falls nicht, wird eine konkrete Umbruch-Regel erst
+    DANN aus einem realen Input→Wunsch-Beispiel abgeleitet (Weg B, zurückgestellt).
+    Geklärter Kontext aus dem Interview: (a) Kernschmerz = Medienbruch (raus aus der
+    App → externes Skript → zurückkopieren), soll komplett wegfallen; (b) Nutzung zu
+    Hause in Ruhe bei der Vorbereitung, kein Bühnen-Speed; (c) Quelle = Ultimate
+    Guitar / Web-Export → **echter Textlayer, KEIN OCR nötig**; (d) Offline-Machbarkeit
+    war die Hauptsorge des Users — mit PdfBox-Android lokal auf dem Gerät voll
+    machbar, kein Server; (e) Ziel-Ablauf im Editor: PDF wählen → gefilterter Text
+    **direkt ins Lyrics-Feld**, User prüft & speichert selbst (KEIN Auto-Save); (f)
+    9:16-Umbruch-Optimierung ist Wunsch, NICHT Bedingung — bewusst als separates
+    Folge-Feature zurückgestellt. Offener Edge-Case fürs Design: falls das Lyrics-Feld
+    schon Text enthält, nicht still überschreiben (nachfragen oder anhängen).
+    **Konkreter erster Schritt der Umsetzungs-Session:** `PdfBox-Android`-Dependency
+    hinzufügen, Akkord-Filter-Regex nach Kotlin portieren, SAF-PDF-Picker + Import-
+    Button im `SongEditorSheet` (MainScreen.kt), extrahierten+gefilterten Text ins
+    Lyrics-Feld schreiben. Danach an einem echten UG-Song gegen das frühere
+    Skript-Ergebnis prüfen.
   - **Machbarkeit (mit User besprochen):** grundsätzlich einfach — die
     Akkord-Filter-Logik ist nur Regex, 1:1 nach Kotlin portierbar (siehe
     Skript-Logik: Zeile gilt als Akkord-Zeile, wenn ≥80% ihrer Tokens auf

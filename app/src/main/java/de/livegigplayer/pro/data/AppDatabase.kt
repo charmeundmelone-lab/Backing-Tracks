@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SetEntity::class,
         SetSongCrossRef::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -203,6 +203,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE gigs ADD COLUMN lastActiveSetId INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE gigs ADD COLUMN autoAdvanceSets INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -224,7 +231,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_13_14,
                     MIGRATION_14_15,
                     MIGRATION_15_16,
-                    MIGRATION_16_17
+                    MIGRATION_16_17,
+                    MIGRATION_17_18
                 )
                 // fallbackToDestructiveMigration() entfernt — Phase 1 abgeschlossen
                 .build()

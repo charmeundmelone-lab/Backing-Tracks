@@ -20,4 +20,10 @@ interface GigDao {
 
     @Query("SELECT * FROM gigs WHERE gigId = :gigId")
     suspend fun getGigById(gigId: Long): GigEntity?
+
+    @Query("UPDATE gigs SET lastActiveSetId = :setId WHERE gigId = :gigId")
+    suspend fun setLastActiveSetId(gigId: Long, setId: Long)
+
+    @Query("UPDATE gigs SET autoAdvanceSets = :enabled WHERE gigId = :gigId")
+    suspend fun setAutoAdvanceSets(gigId: Long, enabled: Boolean)
 }

@@ -46,8 +46,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import android.widget.Toast
@@ -240,6 +242,8 @@ private fun GigDetailView(
 ) {
     var showDialog   by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<SetEntity?>(null) }
+    var showSwitcher by remember { mutableStateOf(false) }
+    var setProgressMap by remember { mutableStateOf<Map<Long, de.livegigplayer.pro.data.SetProgress>>(emptyMap()) }
 
     val density        = LocalDensity.current
     val setSlotHeight  = 70.dp
@@ -249,6 +253,15 @@ private fun GigDetailView(
     var localSetOrder  by remember(gig.gigId) { mutableStateOf(emptyList<Long>()) }
     var draggingSetId  by remember(gig.gigId) { mutableStateOf<Long?>(null) }
     var setDragOffset  by remember(gig.gigId) { mutableStateOf(0f) }
+
+    val activeSetId = if (gig.lastActiveSetId > 0L) gig.lastActiveSetId else sets.firstOrNull()?.setId
+    val activeSet = activeSetId?.let { id -> sets.find { it.setId == id } }
+
+    LaunchedEffect(sets) {
+        if (activeSetId != null) {
+            setProgressMap = gigVm.setProgress(listOf(activeSetId))
+        }
+    }
 
     LaunchedEffect(sets, draggingSetId) {
         if (draggingSetId == null) localSetOrder = sets.map { it.setId }
@@ -368,20 +381,45 @@ private fun GigDetailView(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                items(sets, key = { it.setId }) { set ->
+            // Aktives Set mit Griff-Header
+            if (activeSet != null) {
+                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+                    // Griff-Header: aktives Set + Übersicht-Button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .background(GigBgCard, shape = MaterialTheme.shapes.small)
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(activeSet.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val setProgress = setProgressMap[activeSet.setId]
+                            if (setProgress != null) {
+                                Text("${setProgress.completed}/${setProgress.total} gespielt",
+                                    color = GigGray, fontSize = 11.sp)
+                            }
+                        }
+                        IconButton(onClick = { showSwitcher = true }) {
+                            Icon(Icons.Filled.SwapVert, contentDescription = "Sets übersicht",
+                                tint = GigGray, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Aktives Set anzeigen
                     SetCard(
-                        set               = set,
+                        set               = activeSet,
                         gigVm             = gigVm,
                         playerVm          = playerVm,
                         isLocked          = isLocked,
-                        onDeleteSet       = { onDeleteSet(set) },
-                        onRenameSet       = { renameTarget = set },
-                        onResetCompleted  = { gigVm.resetCompletedForSet(set.setId) }
+                        isActive          = true,
+                        onDeleteSet       = { onDeleteSet(activeSet) },
+                        onRenameSet       = { renameTarget = activeSet },
+                        onResetCompleted  = { gigVm.resetCompletedForSet(activeSet.setId) },
+                        onSwitchSet       = { showSwitcher = true }
                     )
                 }
             }
@@ -402,6 +440,19 @@ private fun GigDetailView(
             confirmLabel = "Speichern",
             onConfirm    = { gigVm.renameSet(target.setId, it); renameTarget = null },
             onDismiss    = { renameTarget = null }
+        )
+    }
+
+    if (showSwitcher) {
+        SetSwitcherSheet(
+            gig           = gig,
+            sets          = sets,
+            activeSetId   = activeSetId,
+            gigVm         = gigVm,
+            onSetSelect   = { newSetId ->
+                gigVm.switchToSet(gig.gigId, newSetId, playerVm)
+            },
+            onDismiss     = { showSwitcher = false }
         )
     }
 }
@@ -466,9 +517,11 @@ private fun SetCard(
     gigVm: GigViewModel,
     playerVm: PlayerViewModel,
     isLocked: Boolean,
+    isActive: Boolean = false,
     onDeleteSet: () -> Unit,
     onRenameSet: () -> Unit,
-    onResetCompleted: () -> Unit
+    onResetCompleted: () -> Unit,
+    onSwitchSet: (() -> Unit)? = null
 ) {
     val context     = LocalContext.current
     val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
@@ -914,6 +967,157 @@ private fun SetSongRow(
         } else if (interactive) {
             Icon(Icons.Filled.ChevronRight, contentDescription = null,
                 tint = GigGray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
+        }
+    }
+}
+
+// ── Set-Switcher Sheet ───────────────────────────────────────────────────────
+
+@Composable
+private fun SetSwitcherSheet(
+    gig: GigEntity,
+    sets: List<SetEntity>,
+    activeSetId: Long?,
+    gigVm: GigViewModel,
+    onSetSelect: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var renameTarget by remember { mutableStateOf<SetEntity?>(null) }
+    var deleteTarget by remember { mutableStateOf<SetEntity?>(null) }
+
+    if (renameTarget != null) {
+        CreateNameDialog(
+            title        = "Set umbenennen",
+            placeholder  = "Name des Sets …",
+            initialValue = renameTarget!!.name,
+            confirmLabel = "Speichern",
+            onConfirm    = { gigVm.renameSet(renameTarget!!.setId, it); renameTarget = null },
+            onDismiss    = { renameTarget = null }
+        )
+    }
+
+    if (deleteTarget != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            containerColor   = GigBgCard,
+            title = { Text("Set löschen?", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text  = { Text("\"${deleteTarget!!.name}\" mit allen Songs wirklich löschen? " +
+                "Die Songs bleiben im Archiv, deren Reihenfolge in diesem Set geht verloren.",
+                color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { gigVm.deleteSet(deleteTarget!!); deleteTarget = null; onDismiss() }) {
+                    Text("Löschen", color = GigRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Abbrechen", color = GigGray) }
+            }
+        )
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = GigBgDeep
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Sets", color = GigWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp))
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Schließen",
+                        tint = GigWhite, modifier = Modifier.size(26.dp))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Sets-Liste
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(bottom = 16.dp)
+            ) {
+                items(sets, key = { it.setId }) { set ->
+                    val isActive = set.setId == activeSetId
+                    var menuExpanded by remember { mutableStateOf(false) }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .background(
+                                if (isActive) GigVolt.copy(alpha = 0.22f) else GigBgCard,
+                                shape = MaterialTheme.shapes.small
+                            )
+                            .clickable(enabled = !isActive) { onSetSelect(set.setId); onDismiss() }
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.MusicNote, contentDescription = null,
+                            tint = if (isActive) GigVolt else GigGray, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(set.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (isActive) {
+                                Text("Aktiv", color = GigVolt, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "Weitere Optionen",
+                                    tint = GigGray, modifier = Modifier.size(18.dp))
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                containerColor = GigBgCard
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Umbenennen", color = GigWhite) },
+                                    onClick = { menuExpanded = false; renameTarget = set }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Completed zurücksetzen", color = GigWhite) },
+                                    onClick = { menuExpanded = false; gigVm.resetCompletedForSet(set.setId) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Löschen", color = GigRed) },
+                                    onClick = { menuExpanded = false; deleteTarget = set }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Auto-Advance Toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(GigBgCard, shape = MaterialTheme.shapes.small)
+                    .clickable { gigVm.setAutoAdvance(gig.gigId, !gig.autoAdvanceSets) }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Automatischer Setübergang", color = GigWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Wechselt automatisch zum nächsten Set", color = GigGray, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = gig.autoAdvanceSets,
+                    onCheckedChange = { gigVm.setAutoAdvance(gig.gigId, it) },
+                    modifier = Modifier.padding(start = 16.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

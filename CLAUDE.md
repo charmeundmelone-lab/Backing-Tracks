@@ -172,7 +172,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v17** — nächste Migration wäre 17→18. Migrationen NIE doppelt anlegen.
+1. **Room v18** — nächste Migration wäre 18→19. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.

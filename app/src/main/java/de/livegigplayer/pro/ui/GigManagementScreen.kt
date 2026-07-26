@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -333,7 +335,8 @@ private fun GigDetailView(
                 gigVm            = gigVm,
                 playerVm         = playerVm,
                 isLocked         = isLocked,
-                onResetCompleted = { gigVm.resetCompletedForSet(currentSet.setId) }
+                onResetCompleted = { gigVm.resetCompletedForSet(currentSet.setId) },
+                modifier         = Modifier.weight(1f)
             )
         }
     }
@@ -664,7 +667,8 @@ private fun SetCard(
     gigVm: GigViewModel,
     playerVm: PlayerViewModel,
     isLocked: Boolean,
-    onResetCompleted: () -> Unit
+    onResetCompleted: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context     = LocalContext.current
     val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
@@ -703,7 +707,7 @@ private fun SetCard(
 
     val songMap = remember(songs) { songs.associateBy { it.song.id } }
 
-    Column(modifier = Modifier
+    Column(modifier = modifier
         .fillMaxWidth()
         .background(GigBgCard, shape = MaterialTheme.shapes.small)
     ) {
@@ -777,6 +781,15 @@ private fun SetCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
         }
 
+        // Song-Liste scrollbar: SetCard bekommt vom Eltern-Column weight(1f) (begrenzte
+        // Höhe) → diese innere Column füllt den Rest und scrollt, wenn mehr Songs da sind
+        // als aufs Display passen (Bug: bei 8 Songs waren die unteren nicht erreichbar).
+        // Header + Status-Zeile oben bleiben fix.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
         if (sortMode) {
             // Song-Zeilen frei positioniert per Drag-Offset — kein LazyColumn nötig,
             // Zeilenhöhe ist fix (72dp), Reihenfolge wird über localOrder gesteuert.
@@ -856,6 +869,7 @@ private fun SetCard(
         }
 
         if (songs.isNotEmpty()) Spacer(modifier = Modifier.height(6.dp))
+        }
     }
 
     if (showAddSongs) {

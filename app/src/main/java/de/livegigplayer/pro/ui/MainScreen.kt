@@ -117,6 +117,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1154,8 +1155,9 @@ private fun SongEditorSheet(
     val hasPrev = idx > 0
     val hasNext = idx in 0 until songs.size - 1
 
-    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
-        // Navigation header
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    Column(modifier = Modifier.fillMaxWidth().heightIn(max = screenHeight * 0.92f).navigationBarsPadding().padding(horizontal = 20.dp)) {
+        // Navigation header (fixiert)
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1174,8 +1176,29 @@ private fun SongEditorSheet(
                     tint = if (hasNext) Volt else Gray, modifier = Modifier.size(28.dp))
             }
         }
-        Text("Song bearbeiten", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 12.dp))
+        // Titel + Speichern-Häkchen (fixiert, immer sichtbar)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Song bearbeiten", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f))
+            Button(
+                onClick = { onSave(title, artist, bpm, lyrics) },
+                colors = ButtonDefaults.buttonColors(containerColor = Volt),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Icon(Icons.Filled.Check, contentDescription = "Speichern", tint = Color.Black,
+                    modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Speichern", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        }
+        // Scrollbarer Inhalt
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()).padding(bottom = 24.dp)
+        ) {
         SheetField("Titel", title) { title = it }
         Spacer(modifier = Modifier.height(12.dp))
         SheetField("Künstler", artist) { artist = it }
@@ -1248,16 +1271,6 @@ private fun SongEditorSheet(
                 )
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onDismiss, modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = BgTrack)) {
-                Text("Abbrechen", color = Gray)
-            }
-            Button(onClick = { onSave(title, artist, bpm, lyrics) }, modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Volt)) {
-                Text("Speichern", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
         }
 
         if (pendingPdfText != null) {

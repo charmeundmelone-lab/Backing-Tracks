@@ -82,6 +82,8 @@ app/src/main/java/de/livegigplayer/pro/
 ├── audio/
 │   ├── AudioEngine.kt        — ExoPlayer-Wrapper: load, play, pause, seekTo, loop, preload
 │   ├── FolderImporter.kt     — SAF-Import: Modus A (WAV-Stems), Modus B (Legacy)
+│   ├── PdfLyricsImporter.kt  — PDF-Textlayer → Akkord-Filter → Lyrics (PdfBox-Android),
+│   │                            merkt zuletzt genutzten PDF-Ordner (SharedPreferences)
 │   └── SongScanner.kt        — erkennt TrackMode aus DocumentFile-Struktur
 ├── data/
 │   ├── Song.kt               — Room-Entity (id, title, artist, bpm, bpmExact, keySignature,
@@ -248,10 +250,45 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-26  
-**Status:** 📋 PLANUNGS-SESSION (kein Code): PDF-Import direkt in der App per GrillMe durchgeplant → **Weg A entschieden**. Umsetzung bewusst in frischem Chatfenster. Details siehe Abschnitt "🆕 Geplante Features → PDF-zu-Lyrics" (dort die Entscheidungen festgehalten). Davor: Scroll-Performance-Session abgeschlossen + live getestet (User: "wesentlich besser").  
+**Status:** ✅ PDF-zu-Lyrics-Import Phase 1 UMGESETZT & live bestätigt (User: "funktioniert!"). PDF im Song-Editor wählen → Akkorde raus → Text ins Lyrics-Feld. Dazu drei UX-Fixes am Song-Editor (Speichern-Erreichbarkeit + fixiertes Speichern-Häkchen + Ordner-Gedächtnis). Details siehe Sprint-Eintrag unten.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `356f903` — "Fix: CI-Build-Fehler durch falschen Import (awaitFirstDown)" (unverändert, diese Session hat nur Doku geändert)  
-**CI Build:** Grün, verifiziert (Commit `356f903`, letzter Code-Stand, APK auf `apk-dist`)
+**Letzter Code-Commit:** `71de3a3` — "Song-Editor: fixierte Kopfzeile mit Speichern-Haekchen, Felder scrollen darunter"  
+**CI Build:** Grün, verifiziert (Commit `71de3a3`, APK auf `apk-dist`)
+
+### PDF-zu-Lyrics-Import Phase 1 DONE (2026-07-26, live bestätigt)
+
+Umsetzung des geplanten Features (Weg A / Phase 1). Alle 4 Commits CI grün, vom User
+live getestet ("PDF Import geht super", "funktioniert!").
+
+- **Dependency:** `com.tom-roush:pdfbox-android:2.0.27.0` (String-Notation, nicht im
+  Versionskatalog). `PDFBoxResourceLoader.init(applicationContext)` in
+  `LiveGigPlayerApp.onCreate()` (sonst Font-Crash bei manchen PDFs).
+- **`audio/PdfLyricsImporter.kt` (neu):** `importLyricsFromPdf` (Textlayer via
+  `PDFTextStripper`) + `filterChordLines`. Akkordzeile = ≥80 % der Tokens matchen
+  das Akkord-Regex (aus CLAUDE.md) oder sind Takt-Tokens; `[Section]`-Labels, Leer-
+  und Textzeilen bleiben, **Umbrüche 1:1** (keine eigene Umbruch-Regel — Phase 1).
+  Zusätzlich `loadLastFolder`/`rememberFolderOf` (zuletzt genutzten PDF-Ordner in
+  SharedPreferences merken, Parent-Ordner via `DocumentsContract` ableiten).
+- **`ui/MainScreen.kt` → `SongEditorSheet`:** Import-Button (SAF-Picker
+  `OpenDocument`, MIME `application/pdf`), Ergebnis ins Lyrics-Feld; belegtes Feld →
+  Dialog (Ersetzen/Anhängen/Abbrechen), **kein Auto-Save**. Picker-Contract setzt
+  `EXTRA_INITIAL_URI` → startet im zuletzt genutzten Ordner (best effort, geräteabh.).
+- **UX-Fixes am Editor (3 Commits danach):** (1) `SongEditorSheet` war nicht
+  scrollbar → Speichern bei langem Text unerreichbar; (2) `navigationBarsPadding` →
+  Button nicht mehr von der Android-Steuerungsleiste verdeckt; (3) **Kopfzeile
+  fixiert** (Navigation + Titel + **✓-Speichern-Häkchen**), nur der Felder-Bereich
+  scrollt — Speichern immer sichtbar, alte untere Button-Leiste entfernt, Abbrechen
+  via Wegwischen. Layout: äußere Column `heightIn(max = screenHeight*0.92)` +
+  innerer Scrollbereich `weight(1f, fill=false).verticalScroll(...)`.
+
+**Commits:** `3a071f6` (Import) → `4f9e5e6` (scrollbar) → `d2e9c25` (Nav-Padding +
+Ordner-Gedächtnis) → `71de3a3` (fixiertes Speichern-Häkchen).
+
+**Offen / Phase 2 (bewusst zurückgestellt):** Ob die 1:1-Umbrüche am echten Song
+gut aussehen, ist noch nicht final beurteilt — falls nicht, eigene Umbruch-Regel
+(Weg B) erst aus einem realen Input→Wunsch-Beispiel ableiten, nicht raten. OCR für
+Bild-/Scan-PDFs ist NICHT Teil von Phase 1 (nur PDFs mit Textlayer, z.B. Ultimate
+Guitar). `PLAN-pdf-import.md` im Repo-Root beschreibt die Phase-1-Umsetzung im Detail.
 
 ### Scroll-Performance Archiv & Gig-Verwaltung (2026-07-25)
 

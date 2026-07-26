@@ -22,8 +22,6 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -993,17 +991,14 @@ private fun ArchivSongRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            // Dimmen ohne Offscreen-Puffer (ModulateAlpha) — sonst legt Compose bei
-            // alpha < 1 pro Zeile einen Layer an → Ruckeln, wenn viele Zeilen grau sind.
-            // Layer NUR bei tatsächlich gedimmter Zeile anlegen (rowAlpha < 1f) — nicht
-            // gedimmte Zeilen (der Normalfall) bekommen gar keine Compositing-Layer.
-            .let {
-                if (rowAlpha < 1f) it.graphicsLayer {
-                    alpha = rowAlpha
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
-                } else it
-            }
-            .background(bgColor, shape = MaterialTheme.shapes.small)
+            // Dimmen OHNE Compositing-Layer: Alpha direkt in die Farben rechnen (siehe
+            // unten, rowAlpha wird in jede Farbe multipliziert). Ein graphicsLayer pro
+            // gedimmter Zeile erzeugt beim Scrollen spürbaren Ruck (A/B bestätigt: ohne
+            // Gig — also ohne gedimmte Zeilen — scrollt es perfekt). So rendert eine
+            // gedimmte Zeile exakt so günstig wie eine normale; bei rowAlpha==1f sind
+            // alle Farben unverändert.
+            .background(bgColor.copy(alpha = bgColor.alpha * rowAlpha),
+                shape = MaterialTheme.shapes.small)
             // Orientierungs-sensitive Geste statt detectHorizontalDragGestures: das
             // Original akkumulierte dx unabhängig von dy — schnelle, leicht diagonale
             // Vertikal-Flicks überschritten dabei versehentlich die 80f-Schwelle
@@ -1056,11 +1051,11 @@ private fun ArchivSongRow(
     ) {
         if (interactive) {
             Icon(Icons.Filled.ChevronLeft, contentDescription = null,
-                tint = Gray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
+                tint = Gray.copy(alpha = 0.4f * rowAlpha), modifier = Modifier.size(12.dp))
         }
         Text(
             text = index.toString().padStart(2, '0'),
-            color = if (isBatchSelected || selected) Volt else VoltDim,
+            color = (if (isBatchSelected || selected) Volt else VoltDim).copy(alpha = rowAlpha),
             fontSize = 24.sp, fontWeight = FontWeight.Black, lineHeight = 26.sp,
             modifier = Modifier.width(44.dp)
         )
@@ -1068,20 +1063,20 @@ private fun ArchivSongRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = song.title, color = White, fontSize = 15.sp,
+                text = song.title, color = White.copy(alpha = rowAlpha), fontSize = 15.sp,
                 fontWeight = FontWeight.Bold, lineHeight = 18.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             val bpmTxt = if (song.bpmExact > 0f) "%.1f BPM".format(song.bpmExact) else "${song.bpm} BPM"
             val pre    = if (song.artist.isNotEmpty()) "${song.artist}  ·  " else ""
             val suf    = if (song.genre.isNotEmpty()) "  ·  ${song.genre}" else ""
-            Text("$pre$bpmTxt  |  ${song.duration}$suf", color = Gray, fontSize = 11.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("$pre$bpmTxt  |  ${song.duration}$suf", color = Gray.copy(alpha = rowAlpha),
+                fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
         if (interactive) {
             Icon(Icons.Filled.ChevronRight, contentDescription = null,
-                tint = Gray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
+                tint = Gray.copy(alpha = 0.4f * rowAlpha), modifier = Modifier.size(12.dp))
         }
 
         // Bearbeiten + Löschen (ausgeblendet im Batch-/Auswahl-Modus)
@@ -1094,11 +1089,11 @@ private fun ArchivSongRow(
             ) {
                 IconButton(onClick = onOpenSheet, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Filled.Edit, contentDescription = "Bearbeiten",
-                        tint = Gray, modifier = Modifier.size(18.dp))
+                        tint = Gray.copy(alpha = rowAlpha), modifier = Modifier.size(18.dp))
                 }
                 IconButton(onClick = { showDeleteDialog = true }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Filled.Delete, contentDescription = "Löschen",
-                        tint = RedStop, modifier = Modifier.size(18.dp))
+                        tint = RedStop.copy(alpha = rowAlpha), modifier = Modifier.size(18.dp))
                 }
             }
         }

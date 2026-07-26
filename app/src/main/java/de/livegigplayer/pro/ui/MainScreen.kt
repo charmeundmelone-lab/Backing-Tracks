@@ -1142,7 +1142,7 @@ private fun SongEditorSheet(
     val hasPrev = idx > 0
     val hasNext = idx in 0 until songs.size - 1
 
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         // Navigation header
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),

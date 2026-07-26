@@ -92,14 +92,15 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── SongDao.kt            — CRUD + resetAllMixerSettings
 │   ├── Playlist.kt           — Room-Entity (id, name, isLiveLocked)
 │   ├── PlaylistDao.kt        — getAllPlaylists
-│   ├── GigEntity.kt          — Room-Entity (gigId, name)
-│   ├── GigDao.kt             — getAllGigs, insert, delete
+│   ├── GigEntity.kt          — Room-Entity (gigId, name, lastActiveSetId, autoAdvanceSets)
+│   ├── GigDao.kt             — getAllGigs, insert, delete, setLastActiveSetId, setAutoAdvanceSets
 │   ├── SetEntity.kt          — Room-Entity (setId, gigOwnerId, name, position)
 │   ├── SetSongCrossRef.kt    — (setId, songId, positionInSet, isCompleted, isSpontaneous, endAction)
 │   ├── SetDao.kt             — abstract class: CRUD + moveSpontaneousNext/Later + reorderSongs
-│   │                            (@Transaction, Cut&Paste / Batch-Write-Pattern)
+│   │                            (@Transaction, Cut&Paste / Batch-Write-Pattern) + getSetProgress
+│   ├── SetProgress.kt        — Datenklasse (setId, total, completed) für "gespielt X/Y"
 │   ├── SongInSet.kt          — @Embedded Song + positionInSet + completedInSet + spontaneousInSet + endAction
-│   ├── AppDatabase.kt        — RoomDatabase v14, Migrationen bis v14
+│   ├── AppDatabase.kt        — RoomDatabase v18, Migrationen bis v18
 │   └── TrackMode.kt          — sealed class: Legacy(filePath) | Multitrack(drums,bass,keys,vocals,click,cue)
 ├── ui/
 │   ├── MainScreen.kt         — Compose-UI: zwei Tabs (Archiv / Gig-Sets), Mini-Player, Mixer,
@@ -107,20 +108,25 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── PlayerViewModel.kt    — AndroidViewModel: StateFlow, Queue, Loop, AutoStop, isGigSetMode,
 │   │                            loopHint (einmaliger Toast-Hinweis fürs LOOP-Verhalten),
 │   │                            showLyrics/openLyrics/closeLyrics (Teleprompter-Trigger)
-│   ├── GigViewModel.kt       — Gig/Set/Song CRUD, armSetIfIdle, loadSetAsQueue,
-│   │                            insertSpontaneousNext/Later (Mutex-serialisiert),
-│   │                            reorderSongsInSet/reorderSets, renameSet
-│   ├── GigManagementScreen.kt — GigListView/GigRow, GigDetailView/SetCard/SetSongRow
-│   │                             (Swipe-Handler), SetSongRowSortable + SetRowSortable
+│   ├── GigViewModel.kt       — Gig/Set/Song CRUD, armSetIfIdle, loadSetAsQueue, switchToSet
+│   │                            (Set-Umschalten ohne Unterbrechung, siehe Sprint "Set-Umschalten"),
+│   │                            installSetCompletedCallback (gemeinsamer Song-Ende-Callback +
+│   │                            Auto-Übergang), insertSpontaneousNext/Later (Mutex-serialisiert),
+│   │                            reorderSongsInSet/reorderSets, renameSet, setAutoAdvance, setProgress
+│   ├── GigManagementScreen.kt — GigListView/GigRow, GigDetailView (Griff-Button zeigt aktives
+│   │                             Set + Fortschritt, öffnet SetSwitcherSheet)/SetCard/SetSongRow
+│   │                             (Swipe-Handler), SetSwitcherSheet/SetSwitcherRow (Set-Übersicht:
+│   │                             Umschalten/Umbenennen/Löschen/Sortieren/Auto-Übergang-Schalter,
+│   │                             siehe Sprint "Set-Umschalten"), SetSongRowSortable + SetRowSortable
 │   │                             (Drag-Handle-Sortiermodi), isLocked bis SetSongRow
 │   │                             durchgereicht. KEIN Gig-weiter Edit-Sammel-Modus mehr
-│   │                             (siehe Sprint 5.29) — Rename/Löschen/Reset laufen über
-│   │                             ein "⋮"-DropdownMenu pro Set bzw. Icon pro Gig; der
-│   │                             verbleibende per-Set "Bearbeiten"-Toggle steuert nur
-│   │                             noch die Song-Zeilen-Controls (End-Aktion/Entfernen).
-│   │                             "Songs hinzufügen" im "⋮"-Menü öffnet AddSongsToSetDialog
-│   │                             (Suche + Checkbox-Liste aller Archiv-Songs, die noch
-│   │                             nicht im Set sind)
+│   │                             (siehe Sprint 5.29) — Umbenennen/Löschen eines Sets laufen
+│   │                             seit "Set-Umschalten" nur noch über SetSwitcherRow im
+│   │                             SetSwitcherSheet (nicht mehr in SetCard). SetCards eigenes
+│   │                             "⋮"-DropdownMenu enthält nur noch song-bezogene Aktionen
+│   │                             ("Songs hinzufügen" → AddSongsToSetDialog, "Completed
+│   │                             zurücksetzen"); der per-Set "Bearbeiten"-Toggle steuert
+│   │                             weiterhin nur die Song-Zeilen-Controls (End-Aktion/Entfernen).
 │   └── LyricsOverlay.kt      — Vollbild-Teleprompter (nur Lyrics, keine Akkorde), Hochkant
 │                                erzwungen solange sichtbar, Auto-Scroll an echte
 │                                Wiedergabeposition gekoppelt, abschnittsweise konstante
@@ -172,7 +178,7 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 
 ## Wichtige Gotchas
 
-1. **Room v17** — nächste Migration wäre 17→18. Migrationen NIE doppelt anlegen.
+1. **Room v18** — nächste Migration wäre 18→19. Migrationen NIE doppelt anlegen.
 2. **ExoPlayer REPEAT_MODE_ONE** — Song loopt endlos, STATE_ENDED wird nie gefeuert. Auto-Stop via Rückwärtssprung-Erkennung im 200ms-Polling.
 3. **Loop-Sync** — `tickLoop()` ruft `seekTo()` auf, das alle ExoPlayer in `tracks` iteriert → inhärent synchron.
 4. **SAF-Pfadformat** — `"{treeUri}||{folderName}"`, aufgelöst via `DocumentFile.fromTreeUri`.
@@ -250,10 +256,39 @@ git show origin/apk-dist:LiveGigPlayer-debug.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-26  
-**Status:** ✅ PDF-zu-Lyrics-Import Phase 1 UMGESETZT & live bestätigt (User: "funktioniert!"). PDF im Song-Editor wählen → Akkorde raus → Text ins Lyrics-Feld. Dazu drei UX-Fixes am Song-Editor (Speichern-Erreichbarkeit + fixiertes Speichern-Häkchen + Ordner-Gedächtnis). Details siehe Sprint-Eintrag unten.  
+**Status:** ✅ Set-Umschalten (PLAN-set-umschalten.md) VOLLSTÄNDIG UMGESETZT & live bestätigt (User: "funktioniert fantastisch"). Griff-Button unter dem Gig-Header zeigt aktives Set + Fortschritt, öffnet Übersicht/Verwaltung (Umschalten/Umbenennen/Löschen/Sortieren/Auto-Übergang-Schalter). Set-Wechsel unterbricht einen laufenden Song nicht. Danach zwei Politur-Fixes aus User-Feedback (auffälliger Griff-Button, doppelte Set-Anzeige entfernt). Details siehe Sprint-Eintrag unten.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `71de3a3` — "Song-Editor: fixierte Kopfzeile mit Speichern-Haekchen, Felder scrollen darunter"  
-**CI Build:** Grün, verifiziert (Commit `71de3a3`, APK auf `apk-dist`)
+**Letzter Code-Commit:** `90115b6` — "SetCard-Header: doppelte Set-Name/Nummer/Songzahl-Anzeige entfernt"  
+**CI Build:** Grün, verifiziert (Commit `90115b6`, Build #325, APK auf `apk-dist`)
+
+### Set-Umschalten DONE (2026-07-26, live bestätigt: "funktioniert fantastisch")
+
+Umsetzung von `PLAN-set-umschalten.md` (Schritte 1–4). Ein erster Anlauf mit einem
+kleineren Modell (Haiku) blieb auf halbem Weg stehen — DB-Migration + Datenklassen
+waren da, aber `switchToSet`/Auto-Übergang/Übersicht fehlten komplett und die UI
+zeigte nur noch ein einzelnes Set ohne jede Wechsel-Möglichkeit. Mit Sonnet
+vollständig nachgezogen, CI grün, vom User live bestätigt.
+
+- **DB (v17→18):** `GigEntity.lastActiveSetId`/`autoAdvanceSets`, `SetDao.getSetProgress`
+  (Fortschritt pro Set), `SetDao.getSetsForGigOnce`.
+- **`GigViewModel.switchToSet`:** setzt `_activeSetId` + persistiert `lastActiveSetId`;
+  läuft gerade ein Song (`playerVm.isPlaying`), wird NICHT unterbrochen — nur die Queue
+  wird auf das neue Set umgebogen (`reloadQueueFromSet`); sonst wird sofort gearmt.
+- **`installSetCompletedCallback`:** gemeinsamer Song-Ende-Callback für Auto-Arm/
+  Set-Wiedergabe/Umschalten (vorher dreifach dupliziert); prüft nach jedem
+  abgeschlossenen Song, ob das Set fertig ist und `autoAdvanceSets` an ist →
+  springt automatisch ins nächste Set.
+- **UI:** Griff-Button (Rahmen + "Wechseln"-Beschriftung, nach User-Feedback
+  auffälliger gestaltet) unter dem Gig-Header öffnet `SetSwitcherSheet`
+  (`ModalBottomSheet`) — Liste aller Sets mit Fortschritt, Tap zum Umschalten,
+  Umbenennen/Löschen/Sortieren (Drag) pro Set, Auto-Übergang-Schalter, "+ Neues
+  Set". `SetCard` zeigt nur noch das aktive Set; Set-Name/Nummer/Songzahl wurden
+  aus dem `SetCard`-Header entfernt (stehen bereits im Griff, User-Feedback:
+  Doppelanzeige) — die Zeile behält nur noch die song-bezogenen Icons
+  (Sortieren/Bearbeiten/⋮ mit "Songs hinzufügen"/"Completed zurücksetzen").
+- **Live getestet und bestätigt** (nicht nur CI-grün wie sonst üblich bei
+  Sandbox-Builds) — kompletter Funktionsumfang inkl. Umschalten während laufender
+  Song lief bereits vom User selbst am Gerät geprüft.
 
 ### PDF-zu-Lyrics-Import Phase 1 DONE (2026-07-26, live bestätigt)
 

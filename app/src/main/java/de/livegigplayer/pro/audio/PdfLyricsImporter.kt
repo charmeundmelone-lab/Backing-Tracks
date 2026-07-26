@@ -2,6 +2,7 @@ package de.livegigplayer.pro.audio
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 
@@ -37,6 +38,44 @@ object PdfLyricsImporter {
             .filterNot { isChordLine(it) }
             .joinToString("\n")
             .trim()
+
+    // ---- „Zuletzt genutzter Ordner" merken --------------------------------
+
+    private const val PREFS = "pdf_import"
+    private const val KEY_LAST_FOLDER = "last_folder_uri"
+
+    /** Zuletzt gemerkten Ordner laden (als Start-Hinweis für den Datei-Picker). */
+    fun loadLastFolder(context: Context): Uri? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_FOLDER, null)
+            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+
+    /**
+     * Merkt sich den Ordner der gerade gewählten PDF-Datei und gibt ihn zurück.
+     * Leitet die Parent-Ordner-URI ab (funktioniert für den System-Dateispeicher);
+     * gelingt das nicht, wird die Datei-URI selbst gemerkt — der Picker öffnet
+     * dann ebenfalls den enthaltenden Ordner.
+     */
+    fun rememberFolderOf(context: Context, fileUri: Uri): Uri {
+        val folder = parentFolderOf(fileUri) ?: fileUri
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_LAST_FOLDER, folder.toString()).apply()
+        return folder
+    }
+
+    private fun parentFolderOf(fileUri: Uri): Uri? = runCatching {
+        val docId = DocumentsContract.getDocumentId(fileUri)   // z.B. "primary:Documents/BT/song.pdf"
+        val colon = docId.indexOf(':')
+        if (colon < 0) return null
+        val scheme = docId.substring(0, colon)
+        val path = docId.substring(colon + 1)
+        val slash = path.lastIndexOf('/')
+        if (slash < 0) return null
+        val parentDocId = "$scheme:${path.substring(0, slash)}"
+        DocumentsContract.buildDocumentUri(fileUri.authority, parentDocId)
+    }.getOrNull()
+
+    // -----------------------------------------------------------------------
 
     private fun isChordLine(line: String): Boolean {
         val trimmed = line.trim()

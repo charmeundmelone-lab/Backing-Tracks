@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbManager
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
@@ -1117,10 +1119,20 @@ private fun SongEditorSheet(
     var importing by remember { mutableStateOf(false) }
     var pendingPdfText by remember { mutableStateOf<String?>(null) }
 
-    val pdfPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
+    // Zuletzt genutzten Ordner merken → Picker startet beim nächsten Mal wieder dort.
+    val lastFolderUri = remember { mutableStateOf(PdfLyricsImporter.loadLastFolder(context)) }
+    val pdfContract = remember {
+        object : ActivityResultContracts.OpenDocument() {
+            override fun createIntent(ctx: Context, input: Array<String>): Intent =
+                super.createIntent(ctx, input).apply {
+                    lastFolderUri.value?.let { putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
+                }
+        }
+    }
+
+    val pdfPicker = rememberLauncherForActivityResult(pdfContract) { uri: Uri? ->
         if (uri != null) {
+            lastFolderUri.value = PdfLyricsImporter.rememberFolderOf(context, uri)
             importing = true
             scope.launch {
                 val extracted = withContext(Dispatchers.IO) {
@@ -1142,7 +1154,7 @@ private fun SongEditorSheet(
     val hasPrev = idx > 0
     val hasNext = idx in 0 until songs.size - 1
 
-    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         // Navigation header
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),

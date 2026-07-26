@@ -32,6 +32,15 @@ abstract class SetDao {
     @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
     protected abstract suspend fun getRawSets(gigId: Long): List<SetEntity>
 
+    @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
+    abstract suspend fun getSetsForGigOnce(gigId: Long): List<SetEntity>
+
+    @Query("""
+        SELECT setId AS setId, COUNT(*) AS total, SUM(isCompleted) AS completed
+        FROM set_song_cross_ref WHERE setId IN (:setIds) GROUP BY setId
+    """)
+    abstract suspend fun getSetProgress(setIds: List<Long>): List<SetProgress>
+
     @Update(onConflict = OnConflictStrategy.REPLACE)
     protected abstract suspend fun updateRawSets(sets: List<SetEntity>)
 

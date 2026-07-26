@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
@@ -43,13 +44,18 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +84,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
+import de.livegigplayer.pro.data.SetProgress
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
 import kotlin.math.roundToInt
@@ -239,36 +246,29 @@ private fun GigDetailView(
     onDeleteSet: (SetEntity) -> Unit
 ) {
     var showDialog   by remember { mutableStateOf(false) }
-    var renameTarget by remember { mutableStateOf<SetEntity?>(null) }
+    var showOverview by remember { mutableStateOf(false) }
 
-    val density        = LocalDensity.current
-    val setSlotHeight  = 70.dp
-    val setRowHeightPx = with(density) { setSlotHeight.toPx() }
-
-    var sortSetsMode   by remember(gig.gigId) { mutableStateOf(false) }
-    var localSetOrder  by remember(gig.gigId) { mutableStateOf(emptyList<Long>()) }
-    var draggingSetId  by remember(gig.gigId) { mutableStateOf<Long?>(null) }
-    var setDragOffset  by remember(gig.gigId) { mutableStateOf(0f) }
-
-    val activeSetId = if (gig.lastActiveSetId > 0L) gig.lastActiveSetId else sets.firstOrNull()?.setId
-    val activeSet = activeSetId?.let { id -> sets.find { it.setId == id } }
-
-    LaunchedEffect(sets, draggingSetId) {
-        if (draggingSetId == null) localSetOrder = sets.map { it.setId }
+    val activeSetId by gigVm.activeSetId.collectAsState()
+    val currentSet = remember(sets, activeSetId, gig.lastActiveSetId) {
+        sets.firstOrNull { it.setId == activeSetId }
+            ?: sets.firstOrNull { it.setId == gig.lastActiveSetId }
+            ?: sets.firstOrNull()
     }
 
-    fun exitSortSetsMode() {
-        gigVm.reorderSets(gig.gigId, localSetOrder)
-        sortSetsMode = false
-        draggingSetId = null
-        setDragOffset = 0f
+    // Beim Öffnen des Gigs (oder falls das zuvor aktive Set inzwischen gelöscht
+    // wurde) das zuletzt aktive Set armen — ohne Unterbrechung, kein Auto-Play.
+    LaunchedEffect(gig.gigId, sets) {
+        val target = sets.firstOrNull { it.setId == gig.lastActiveSetId } ?: sets.firstOrNull()
+        if (target != null && target.setId != activeSetId) {
+            gigVm.switchToSet(gig.gigId, target.setId, playerVm)
+        }
     }
 
-    if (sortSetsMode) {
-        BackHandler { exitSortSetsMode() }
-    }
-
-    val setMap = remember(sets) { sets.associateBy { it.setId } }
+    val currentSetSongs by remember(currentSet?.setId) {
+        currentSet?.let { gigVm.getSongsInSet(it.setId) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(emptyList())
+    val currentCompleted = currentSetSongs.count { it.completedInSet }
+    val currentTotal = currentSetSongs.size
 
     Column(modifier = Modifier.fillMaxSize().background(GigBgDeep)) {
         Row(
@@ -285,29 +285,25 @@ private fun GigDetailView(
                 Icon(Icons.Filled.Add, contentDescription = "Neues Set",
                     tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt, modifier = Modifier.size(26.dp))
             }
-            if (sets.size > 1) {
-                IconButton(
-                    onClick  = { if (sortSetsMode) exitSortSetsMode() else sortSetsMode = true },
-                    enabled  = !isLocked || sortSetsMode
-                ) {
-                    Icon(
-                        if (sortSetsMode) Icons.Filled.Check else Icons.Filled.SwapVert,
-                        contentDescription = if (sortSetsMode) "Fertig" else "Sets sortieren",
-                        tint = when {
-                            sortSetsMode -> GigVolt
-                            isLocked     -> GigGray.copy(alpha = 0.4f)
-                            else         -> GigGray
-                        },
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
         }
 
-        if (sortSetsMode) {
-            Text("Sets werden sortiert — ziehe am Handle, dann Häkchen zum Speichern",
-                color = GigVolt, fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+        // Griff — zeigt das aktive Set + Fortschritt, Tipp öffnet die Set-Übersicht.
+        if (sets.isNotEmpty() && currentSet != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showOverview = true }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(currentSet.name, color = GigWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("$currentCompleted/$currentTotal gespielt", color = GigGray, fontSize = 12.sp)
+                }
+                Icon(Icons.Filled.ExpandMore, contentDescription = "Sets-Übersicht",
+                    tint = GigGray, modifier = Modifier.size(24.dp))
+            }
         }
 
         if (sets.isEmpty()) {
@@ -321,69 +317,14 @@ private fun GigDetailView(
                     Text("Tippe + um ein Set anzulegen", color = GigGray, fontSize = 12.sp)
                 }
             }
-        } else if (sortSetsMode) {
-            // Set-Zeilen frei positioniert per Drag-Offset — gleiches Muster wie
-            // SetSongRowSortable, nur eine Ebene höher (Sets statt Songs im Set).
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-                    .height(setSlotHeight * localSetOrder.size)
-            ) {
-                localSetOrder.forEachIndexed { index, setId ->
-                    val set = setMap[setId] ?: return@forEachIndexed
-                    key(setId) {
-                        val isDragging = draggingSetId == setId
-                        val targetOffset = index * setRowHeightPx
-                        val animatedOffset by animateFloatAsState(
-                            targetValue = targetOffset, label = "setReorderOffset"
-                        )
-                        val offsetPx = if (isDragging) targetOffset + setDragOffset else animatedOffset
-
-                        SetRowSortable(
-                            set             = set,
-                            displayPosition = index,
-                            isDragging      = isDragging,
-                            modifier        = Modifier
-                                .offset { IntOffset(0, offsetPx.roundToInt()) }
-                                .zIndex(if (isDragging) 1f else 0f),
-                            onDragStart = { draggingSetId = setId; setDragOffset = 0f },
-                            onDrag = { delta ->
-                                setDragOffset += delta
-                                val currentIdx = localSetOrder.indexOf(setId)
-                                val newIdx = ((currentIdx * setRowHeightPx + setDragOffset) / setRowHeightPx)
-                                    .roundToInt().coerceIn(0, localSetOrder.size - 1)
-                                if (newIdx != currentIdx) {
-                                    val mutable = localSetOrder.toMutableList()
-                                    mutable.removeAt(currentIdx)
-                                    mutable.add(newIdx, setId)
-                                    localSetOrder = mutable
-                                    setDragOffset -= (newIdx - currentIdx) * setRowHeightPx
-                                }
-                            },
-                            onDragEnd = {
-                                draggingSetId = null
-                                setDragOffset = 0f
-                                gigVm.reorderSets(gig.gigId, localSetOrder)
-                            }
-                        )
-                    }
-                }
-            }
-        } else {
-            // Aktives Set anzeigen
-            if (activeSet != null) {
-                SetCard(
-                    set               = activeSet,
-                    gigVm             = gigVm,
-                    playerVm          = playerVm,
-                    isLocked          = isLocked,
-                    isActive          = true,
-                    onDeleteSet       = { onDeleteSet(activeSet) },
-                    onRenameSet       = { renameTarget = activeSet },
-                    onResetCompleted  = { gigVm.resetCompletedForSet(activeSet.setId) }
-                )
-            }
+        } else if (currentSet != null) {
+            SetCard(
+                set              = currentSet,
+                gigVm            = gigVm,
+                playerVm         = playerVm,
+                isLocked         = isLocked,
+                onResetCompleted = { gigVm.resetCompletedForSet(currentSet.setId) }
+            )
         }
     }
 
@@ -391,6 +332,179 @@ private fun GigDetailView(
         CreateNameDialog("Neues Set", "Name des Sets …",
             onConfirm = { onCreate(it); showDialog = false },
             onDismiss = { showDialog = false })
+    }
+
+    if (showOverview) {
+        SetSwitcherSheet(
+            gig         = gig,
+            sets        = sets,
+            activeSetId = activeSetId,
+            isLocked    = isLocked,
+            gigVm       = gigVm,
+            playerVm    = playerVm,
+            onDismiss   = { showOverview = false },
+            onCreateSet = { showDialog = true },
+            onDeleteSet = onDeleteSet
+        )
+    }
+}
+
+// ── Set-Übersicht & -Verwaltung (Umschalten, Umbenennen, Löschen, Sortieren) ──
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SetSwitcherSheet(
+    gig: GigEntity,
+    sets: List<SetEntity>,
+    activeSetId: Long?,
+    isLocked: Boolean,
+    gigVm: GigViewModel,
+    playerVm: PlayerViewModel,
+    onDismiss: () -> Unit,
+    onCreateSet: () -> Unit,
+    onDeleteSet: (SetEntity) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var renameTarget by remember { mutableStateOf<SetEntity?>(null) }
+    var progressMap by remember { mutableStateOf<Map<Long, SetProgress>>(emptyMap()) }
+
+    LaunchedEffect(sets) {
+        progressMap = gigVm.setProgress(sets.map { it.setId })
+    }
+
+    val density        = LocalDensity.current
+    val setSlotHeight  = 64.dp
+    val setRowHeightPx = with(density) { setSlotHeight.toPx() }
+
+    var sortMode       by remember { mutableStateOf(false) }
+    var localOrder     by remember(sets) { mutableStateOf(sets.map { it.setId }) }
+    var draggingSetId  by remember { mutableStateOf<Long?>(null) }
+    var dragOffset     by remember { mutableStateOf(0f) }
+    val setMap = remember(sets) { sets.associateBy { it.setId } }
+
+    LaunchedEffect(sets, draggingSetId) {
+        if (draggingSetId == null) localOrder = sets.map { it.setId }
+    }
+
+    fun exitSortMode() {
+        gigVm.reorderSets(gig.gigId, localOrder)
+        sortMode = false
+        draggingSetId = null
+        dragOffset = 0f
+    }
+
+    if (sortMode) {
+        BackHandler { exitSortMode() }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = GigBgCard
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("Sets", color = GigWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                IconButton(onClick = onCreateSet, enabled = !isLocked) {
+                    Icon(Icons.Filled.Add, contentDescription = "Neues Set",
+                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt)
+                }
+                if (sets.size > 1) {
+                    IconButton(
+                        onClick = { if (sortMode) exitSortMode() else sortMode = true },
+                        enabled = !isLocked || sortMode
+                    ) {
+                        Icon(
+                            if (sortMode) Icons.Filled.Check else Icons.Filled.SwapVert,
+                            contentDescription = if (sortMode) "Fertig" else "Sortieren",
+                            tint = when { sortMode -> GigVolt; isLocked -> GigGray.copy(alpha = 0.4f); else -> GigGray }
+                        )
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            ) {
+                Text("Automatisch ins nächste Set", color = GigWhite, fontSize = 14.sp,
+                    modifier = Modifier.weight(1f))
+                Switch(
+                    checked = gig.autoAdvanceSets,
+                    onCheckedChange = { gigVm.setAutoAdvance(gig.gigId, it) },
+                    enabled = !isLocked,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = GigVolt,
+                        checkedTrackColor = GigVolt.copy(alpha = 0.4f)
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            if (sortMode) {
+                Text("Sets werden sortiert — ziehe am Handle, dann Häkchen zum Speichern",
+                    color = GigVolt, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(setSlotHeight * localOrder.size)) {
+                    localOrder.forEachIndexed { index, setId ->
+                        val set = setMap[setId] ?: return@forEachIndexed
+                        key(setId) {
+                            val isDragging = draggingSetId == setId
+                            val targetOffset = index * setRowHeightPx
+                            val animatedOffset by animateFloatAsState(
+                                targetValue = targetOffset, label = "setReorderOffset"
+                            )
+                            val offsetPx = if (isDragging) targetOffset + dragOffset else animatedOffset
+
+                            SetRowSortable(
+                                set             = set,
+                                displayPosition = index,
+                                isDragging      = isDragging,
+                                modifier        = Modifier
+                                    .offset { IntOffset(0, offsetPx.roundToInt()) }
+                                    .zIndex(if (isDragging) 1f else 0f),
+                                onDragStart = { draggingSetId = setId; dragOffset = 0f },
+                                onDrag = { delta ->
+                                    dragOffset += delta
+                                    val currentIdx = localOrder.indexOf(setId)
+                                    val newIdx = ((currentIdx * setRowHeightPx + dragOffset) / setRowHeightPx)
+                                        .roundToInt().coerceIn(0, localOrder.size - 1)
+                                    if (newIdx != currentIdx) {
+                                        val mutable = localOrder.toMutableList()
+                                        mutable.removeAt(currentIdx)
+                                        mutable.add(newIdx, setId)
+                                        localOrder = mutable
+                                        dragOffset -= (newIdx - currentIdx) * setRowHeightPx
+                                    }
+                                },
+                                onDragEnd = {
+                                    draggingSetId = null
+                                    dragOffset = 0f
+                                    gigVm.reorderSets(gig.gigId, localOrder)
+                                }
+                            )
+                        }
+                    }
+                }
+            } else {
+                sets.forEach { set ->
+                    key(set.setId) {
+                        val progress = progressMap[set.setId]
+                        SetSwitcherRow(
+                            set       = set,
+                            isActive  = set.setId == activeSetId,
+                            completed = progress?.completed ?: 0,
+                            total     = progress?.total ?: 0,
+                            isLocked  = isLocked,
+                            onClick   = { gigVm.switchToSet(gig.gigId, set.setId, playerVm); onDismiss() },
+                            onRename  = { renameTarget = set },
+                            onDelete  = { onDeleteSet(set) }
+                        )
+                    }
+                }
+            }
+        }
     }
 
     renameTarget?.let { target ->
@@ -403,7 +517,81 @@ private fun GigDetailView(
             onDismiss    = { renameTarget = null }
         )
     }
+}
 
+@Composable
+private fun SetSwitcherRow(
+    set: SetEntity,
+    isActive: Boolean,
+    completed: Int,
+    total: Int,
+    isLocked: Boolean,
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showDeleteDialog by remember(set.setId) { mutableStateOf(false) }
+    var menuExpanded     by remember(set.setId) { mutableStateOf(false) }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            containerColor   = GigBgCard,
+            title = { Text("Set löschen?", color = GigWhite, fontWeight = FontWeight.Bold) },
+            text  = { Text("\"${set.name}\" mit allen $total zugeordneten Songs wirklich löschen? " +
+                "Die Songs bleiben im Archiv erhalten, ihre Reihenfolge und Markierungen in diesem Set gehen verloren.",
+                color = GigGray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteDialog = false; onDelete() }) {
+                    Text("Löschen", color = GigRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Abbrechen", color = GigGray) }
+            }
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .background(
+                if (isActive) GigVolt.copy(alpha = 0.12f) else Color.Transparent,
+                shape = MaterialTheme.shapes.small
+            )
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("%02d".format(set.position + 1), color = if (isActive) GigVolt else GigGray,
+            fontSize = 15.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(28.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(set.name, color = GigWhite, fontSize = 15.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("$completed/$total gespielt", color = GigGray, fontSize = 12.sp)
+        }
+        Box {
+            IconButton(onClick = { menuExpanded = true }, enabled = !isLocked) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Weitere Optionen",
+                    tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigGray, modifier = Modifier.size(20.dp))
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+                containerColor = GigBgCard
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Umbenennen", color = GigWhite) },
+                    onClick = { menuExpanded = false; onRename() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Löschen", color = GigRed) },
+                    onClick = { menuExpanded = false; showDeleteDialog = true }
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -466,11 +654,7 @@ private fun SetCard(
     gigVm: GigViewModel,
     playerVm: PlayerViewModel,
     isLocked: Boolean,
-    isActive: Boolean = false,
-    onDeleteSet: () -> Unit,
-    onRenameSet: () -> Unit,
-    onResetCompleted: () -> Unit,
-    onSwitchSet: (() -> Unit)? = null
+    onResetCompleted: () -> Unit
 ) {
     val context     = LocalContext.current
     val songs       by gigVm.getSongsInSet(set.setId).collectAsState(emptyList())
@@ -484,7 +668,6 @@ private fun SetCard(
     var draggingId       by remember(set.setId) { mutableStateOf<Long?>(null) }
     var dragOffset       by remember(set.setId) { mutableStateOf(0f) }
     var menuExpanded     by remember(set.setId) { mutableStateOf(false) }
-    var showDeleteDialog by remember(set.setId) { mutableStateOf(false) }
     var showAddSongs     by remember(set.setId) { mutableStateOf(false) }
 
     LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
@@ -509,25 +692,6 @@ private fun SetCard(
     }
 
     val songMap = remember(songs) { songs.associateBy { it.song.id } }
-
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            containerColor   = GigBgCard,
-            title = { Text("Set löschen?", color = GigWhite, fontWeight = FontWeight.Bold) },
-            text  = { Text("\"${set.name}\" mit allen ${songs.size} zugeordneten Songs wirklich löschen? " +
-                "Die Songs bleiben im Archiv erhalten, ihre Reihenfolge und Markierungen in diesem Set gehen verloren.",
-                color = GigGray, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = { showDeleteDialog = false; onDeleteSet() }) {
-                    Text("Löschen", color = GigRed, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Abbrechen", color = GigGray) }
-            }
-        )
-    }
 
     Column(modifier = Modifier
         .fillMaxWidth()
@@ -590,16 +754,8 @@ private fun SetCard(
                         onClick = { menuExpanded = false; showAddSongs = true }
                     )
                     DropdownMenuItem(
-                        text = { Text("Umbenennen", color = GigWhite) },
-                        onClick = { menuExpanded = false; onRenameSet() }
-                    )
-                    DropdownMenuItem(
                         text = { Text("Completed zurücksetzen", color = GigWhite) },
                         onClick = { menuExpanded = false; onResetCompleted() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Löschen", color = GigRed) },
-                        onClick = { menuExpanded = false; showDeleteDialog = true }
                     )
                 }
             }

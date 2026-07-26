@@ -1,6 +1,7 @@
 package de.livegigplayer.pro.data
 
 data class SetProgress(
-    val completed: Int = 0,
-    val total: Int = 0
+    val setId: Long,
+    val total: Int,
+    val completed: Int
 )

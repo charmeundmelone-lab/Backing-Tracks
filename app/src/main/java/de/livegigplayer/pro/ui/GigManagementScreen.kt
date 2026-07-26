@@ -3,6 +3,7 @@ package de.livegigplayer.pro.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
@@ -69,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -287,13 +290,18 @@ private fun GigDetailView(
             }
         }
 
-        // Griff — zeigt das aktive Set + Fortschritt, Tipp öffnet die Set-Übersicht.
+        // Griff — deutlich als Button erkennbar (Rahmen + Hintergrund), zeigt das
+        // aktive Set + Fortschritt, Tipp öffnet die Set-Übersicht.
         if (sets.isNotEmpty() && currentSet != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(GigBgCard)
+                    .border(1.dp, GigVolt.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                     .clickable { showOverview = true }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -301,8 +309,10 @@ private fun GigDetailView(
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("$currentCompleted/$currentTotal gespielt", color = GigGray, fontSize = 12.sp)
                 }
+                Text("Wechseln", color = GigVolt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(2.dp))
                 Icon(Icons.Filled.ExpandMore, contentDescription = "Sets-Übersicht",
-                    tint = GigGray, modifier = Modifier.size(24.dp))
+                    tint = GigVolt, modifier = Modifier.size(22.dp))
             }
         }
 

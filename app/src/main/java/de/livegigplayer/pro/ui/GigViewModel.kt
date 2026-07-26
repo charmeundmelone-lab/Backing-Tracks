@@ -153,6 +153,35 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Callback installieren: Completion-Tracking + Auto-Übergang ──────────
+
+    private fun installSetCompletedCallback(playerVm: PlayerViewModel) {
+        playerVm.onSongCompleted = { completedId ->
+            viewModelScope.launch(Dispatchers.IO) {
+                val activeSet = _activeSetId.value ?: return@launch
+                setDao.markSongCompleted(activeSet, completedId, true)
+
+                // Set fertig? → optional automatisch ins nächste Set
+                val remaining = setDao.getSongsInSetOncePlain(activeSet)
+                    .count { !it.completedInSet }
+                if (remaining == 0) {
+                    val gigId = _selectedGigId.value
+                    val gig = if (gigId != null) gigDao.getGigById(gigId) else null
+                    if (gig?.autoAdvanceSets == true) {
+                        val sets = setDao.getSetsForGigOnce(gig.gigId)
+                        val idx = sets.indexOfFirst { it.setId == activeSet }
+                        val next = sets.getOrNull(idx + 1)
+                        if (next != null) withContext(Dispatchers.Main) {
+                            switchToSet(gig.gigId, next.setId, playerVm)
+                        }
+                    }
+                }
+                val newId = playerVm.currentSong.value?.id ?: return@launch
+                playerVm.activeEndAction.value = setDao.getEndAction(activeSet, newId) ?: 0
+            }
+        }
+    }
+
     // ── Auto-Arm: lädt ersten ungespielten Song in Player (ohne Auto-Play) ──────
 
     fun armSetIfIdle(setId: Long, playerVm: PlayerViewModel) {
@@ -162,14 +191,7 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             // Aktives Set und Callback immer aktualisieren, auch wenn Player bereits
             // einen Song geladen hat — verhindert Set-Lag beim Wechsel zwischen Sets
             _activeSetId.value = setId
-            playerVm.onSongCompleted = { completedId ->
-                viewModelScope.launch(Dispatchers.IO) {
-                    val activeSet = _activeSetId.value ?: return@launch
-                    setDao.markSongCompleted(activeSet, completedId, true)
-                    val newId = playerVm.currentSong.value?.id ?: return@launch
-                    playerVm.activeEndAction.value = setDao.getEndAction(activeSet, newId) ?: 0
-                }
-            }
+            installSetCompletedCallback(playerVm)
             if (playerVm.currentSong.value != null) return@launch
             playerVm.clearQueue()
             playerVm.selectSong(first.song, getApplication(), isGigSet = true)
@@ -178,6 +200,33 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             }
             songs.filter { !it.completedInSet && it.song.id != first.song.id }
                 .forEach { playerVm.addToQueueEnd(it.song) }
+        }
+    }
+
+    // ── Umschalten zwischen Sets (ohne Unterbrechung, setzt auch Callback) ──────
+
+    fun switchToSet(gigId: Long, setId: Long, playerVm: PlayerViewModel) {
+        viewModelScope.launch {
+            _activeSetId.value = setId
+            withContext(Dispatchers.IO) { gigDao.updateLastActiveSet(gigId, setId) }
+            installSetCompletedCallback(playerVm)
+
+            if (playerVm.isPlaying.value) {
+                // Läuft gerade ein Song → NICHT unterbrechen. Nur die Queue auf das
+                // neue Set umbiegen; der laufende Song bleibt current, danach kommt
+                // das neue Set. reloadQueueFromSet filtert den current-Song raus.
+                withContext(Dispatchers.IO) { reloadQueueFromSet(setId, playerVm) }
+            } else {
+                // Idle/pausiert → neues Set sofort armen (erster ungespielter Song).
+                val songs = withContext(Dispatchers.IO) { setDao.getSongsInSetOnce(setId) }
+                val first = songs.firstOrNull { !it.completedInSet } ?: return@launch
+                playerVm.clearQueue()
+                playerVm.selectSong(first.song, getApplication(), isGigSet = true)
+                playerVm.activeEndAction.value =
+                    withContext(Dispatchers.IO) { setDao.getEndAction(setId, first.song.id) ?: 0 }
+                songs.filter { !it.completedInSet && it.song.id != first.song.id }
+                    .forEach { playerVm.addToQueueEnd(it.song) }
+            }
         }
     }
 
@@ -194,15 +243,14 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
             playerVm.selectSong(toPlay.first().song, getApplication(), isGigSet = true)
             playerVm.activeEndAction.value = toPlay.first().endAction
             toPlay.drop(1).forEach { playerVm.addToQueueEnd(it.song) }
-            playerVm.onSongCompleted = { completedId ->
-                viewModelScope.launch(Dispatchers.IO) {
-                    val activeSet = _activeSetId.value ?: return@launch
-                    setDao.markSongCompleted(activeSet, completedId, true)
-                    val newId = playerVm.currentSong.value?.id ?: return@launch
-                    playerVm.activeEndAction.value = setDao.getEndAction(activeSet, newId) ?: 0
-                }
-            }
+            installSetCompletedCallback(playerVm)
         }
+    }
+
+    // ── Auto-Übergang-Schalter ────────────────────────────────────────────────
+
+    fun setAutoAdvance(gigId: Long, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) { gigDao.updateAutoAdvance(gigId, enabled) }
     }
 
     // ── Spontane Einfügung — Mutex verhindert gleichzeitige Swipes ──────────

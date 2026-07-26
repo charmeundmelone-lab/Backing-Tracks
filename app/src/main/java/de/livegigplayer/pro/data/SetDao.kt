@@ -32,6 +32,9 @@ abstract class SetDao {
     abstract fun getSetsForGig(gigId: Long): Flow<List<SetEntity>>
 
     @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
+    abstract suspend fun getSetsForGigOnce(gigId: Long): List<SetEntity>
+
+    @Query("SELECT * FROM sets WHERE gigOwnerId = :gigId ORDER BY position ASC")
     protected abstract suspend fun getRawSets(gigId: Long): List<SetEntity>
 
     @Update(onConflict = OnConflictStrategy.REPLACE)

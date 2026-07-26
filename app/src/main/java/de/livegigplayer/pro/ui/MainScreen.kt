@@ -344,9 +344,16 @@ private fun TopBar(
         Spacer(modifier = Modifier.weight(1f))
 
         // Aktions-Icons rechts
-        IconButton(onClick = onImport) {
-            Icon(Icons.Filled.AddCircleOutline, contentDescription = "Import",
-                tint = Gray, modifier = Modifier.size(26.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clickable(onClick = onImport)
+                .padding(horizontal = 6.dp, vertical = 8.dp)
+        ) {
+            Icon(Icons.Filled.AddCircleOutline, contentDescription = null,
+                tint = Gray, modifier = Modifier.size(22.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Import", color = Gray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
         IconButton(onClick = onMixerToggle) {
             Icon(Icons.Filled.Tune, contentDescription = "Mixer",

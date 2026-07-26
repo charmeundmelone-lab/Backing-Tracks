@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -81,8 +82,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -101,6 +105,7 @@ private val GigVolt    = Color(0xFFE8FF00)
 private val GigWhite   = Color(0xFFFFFFFF)
 private val GigGray    = Color(0xFF777777)
 private val GigRed     = Color(0xFFDC2626)
+private val GigCool    = Color(0xFF9FB2C4)
 
 @Composable
 fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel, isLocked: Boolean = false) {
@@ -284,11 +289,17 @@ private fun GigDetailView(
                 Icon(Icons.Filled.ArrowBack, contentDescription = "Zurück",
                     tint = GigWhite, modifier = Modifier.size(26.dp))
             }
-            Text(gig.name, color = GigWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            IconButton(onClick = { showDialog = true }, enabled = !isLocked) {
-                Icon(Icons.Filled.Add, contentDescription = "Neues Set",
-                    tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt, modifier = Modifier.size(26.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(gig.name, color = GigGray, fontSize = 13.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (currentSet != null) {
+                    Text("  ›  ", color = GigGray.copy(alpha = 0.5f), fontSize = 13.sp)
+                    Text(currentSet.name, color = GigWhite, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
 
@@ -311,10 +322,10 @@ private fun GigDetailView(
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("$currentCompleted/$currentTotal gespielt", color = GigGray, fontSize = 12.sp)
                 }
-                Text("Wechseln", color = GigVolt, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Wechseln", color = GigWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.width(2.dp))
                 Icon(Icons.Filled.ExpandMore, contentDescription = "Sets-Übersicht",
-                    tint = GigVolt, modifier = Modifier.size(22.dp))
+                    tint = GigGray, modifier = Modifier.size(22.dp))
             }
         }
 
@@ -325,8 +336,22 @@ private fun GigDetailView(
                         tint = GigGray, modifier = Modifier.size(48.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("Noch keine Sets in diesem Gig", color = GigGray, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Tippe + um ein Set anzulegen", color = GigGray, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(GigBgCard)
+                            .border(1.dp, GigGray.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .clickable(enabled = !isLocked) { showDialog = true }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null,
+                            tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigWhite, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Neues Set", color = if (isLocked) GigGray.copy(alpha = 0.4f) else GigWhite,
+                            fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
             }
         } else if (currentSet != null) {
@@ -419,9 +444,18 @@ private fun SetSwitcherSheet(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text("Sets", color = GigWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
-                IconButton(onClick = onCreateSet, enabled = !isLocked) {
-                    Icon(Icons.Filled.Add, contentDescription = "Neues Set",
-                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = !isLocked, onClick = onCreateSet)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null,
+                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigWhite, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Neues Set", color = if (isLocked) GigGray.copy(alpha = 0.4f) else GigWhite,
+                        fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
                 if (sets.size > 1) {
                     IconButton(
@@ -916,15 +950,15 @@ private fun SetSongRowSortable(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.width(36.dp), contentAlignment = Alignment.CenterStart) {
+        Box(modifier = Modifier.width(26.dp), contentAlignment = Alignment.CenterStart) {
             Text(
-                "%02d".format(displayPosition + 1),
-                color = GigVolt, fontSize = 24.sp, fontWeight = FontWeight.Black
+                "%d".format(displayPosition + 1),
+                color = GigGray, fontSize = 14.sp, fontWeight = FontWeight.Medium
             )
         }
         Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(songInSet.song.title, color = GigWhite, fontSize = 15.sp,
+            Text(songInSet.song.title, color = GigWhite, fontSize = 20.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = GigGray, fontSize = 11.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -977,11 +1011,13 @@ private fun SetSongRow(
 
     val alpha    = if (songInSet.completedInSet && !isCurrentSong) 0.30f else 1f
     val endActionLabel = when (songInSet.endAction) { 1 -> "⏹" ; 2 -> "▶▶" ; else -> "⏸" }
-    val voltColor = if (songInSet.spontaneousInSet) Color(0xFFFFD700) else GigVolt
-    val bpmTxt   = if (songInSet.song.bpmExact > 0f)
-        "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
-    val pre      = if (songInSet.song.artist.isNotEmpty()) "${songInSet.song.artist}  ·  " else ""
-    val subtitle = "$pre$bpmTxt  |  ${songInSet.song.duration}"
+    val key  = songInSet.song.keySignature.trim()
+    val capo = songInSet.song.capoPosition
+    val metaParts = buildList {
+        if (key.isNotEmpty()) add(key)
+        if (capo > 0)         add("Kapo $capo")
+        add(songInSet.song.duration)
+    }
 
     fun guarded(action: () -> Unit) {
         if (latestCompleted) { pendingAction = action; showAlreadyPlayedDialog = true }
@@ -1056,14 +1092,18 @@ private fun SetSongRow(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isCurrentSong) {
+            Box(modifier = Modifier.width(3.dp).fillMaxHeight().background(GigVolt))
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         if (interactive) {
             Icon(Icons.Filled.ChevronLeft, contentDescription = null,
                 tint = GigGray.copy(alpha = 0.4f), modifier = Modifier.size(12.dp))
         }
-        Box(modifier = Modifier.width(44.dp), contentAlignment = Alignment.CenterStart) {
+        Box(modifier = Modifier.width(26.dp), contentAlignment = Alignment.CenterStart) {
             Text(
-                "%02d".format(songInSet.positionInSet + 1),
-                color = voltColor, fontSize = 24.sp, fontWeight = FontWeight.Black
+                "%d".format(songInSet.positionInSet + 1),
+                color = GigGray, fontSize = 14.sp, fontWeight = FontWeight.Medium
             )
             if (songInSet.spontaneousInSet) {
                 Icon(
@@ -1076,10 +1116,21 @@ private fun SetSongRow(
         }
         Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(songInSet.song.title, color = GigWhite, fontSize = 15.sp,
+            Text(songInSet.song.title, color = if (isCurrentSong) GigVolt else GigWhite, fontSize = 20.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = GigGray, fontSize = 11.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                buildAnnotatedString {
+                    metaParts.forEachIndexed { index, part ->
+                        if (index > 0) append("  ·  ")
+                        if (index == 0 && key.isNotEmpty()) {
+                            withStyle(SpanStyle(color = GigCool, fontWeight = FontWeight.Medium)) { append(part) }
+                        } else {
+                            withStyle(SpanStyle(color = GigGray)) { append(part) }
+                        }
+                    }
+                },
+                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
         }
         if (isEditing) {
             TextButton(onClick = onCycleEndAction, modifier = Modifier.defaultMinSize(minWidth = 40.dp)) {

@@ -258,10 +258,56 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-26  
-**Status:** ✅ Set-Umschalten (PLAN-set-umschalten.md) VOLLSTÄNDIG UMGESETZT & live bestätigt (User: "funktioniert fantastisch"). Griff-Button unter dem Gig-Header zeigt aktives Set + Fortschritt, öffnet Übersicht/Verwaltung (Umschalten/Umbenennen/Löschen/Sortieren/Auto-Übergang-Schalter). Set-Wechsel unterbricht einen laufenden Song nicht. Danach zwei Politur-Fixes aus User-Feedback (auffälliger Griff-Button, doppelte Set-Anzeige entfernt). Details siehe Sprint-Eintrag unten.  
+**Status:** ✅ Scroll-Performance Archiv + Set-Songliste-Scroll-Bug + CI auf Release umgestellt — vom User live bestätigt ("es läuft fantastisch!"). Details siehe Sprint-Eintrag unten.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `90115b6` — "SetCard-Header: doppelte Set-Name/Nummer/Songzahl-Anzeige entfernt"  
-**CI Build:** Grün, verifiziert (Commit `90115b6`, Build #325, APK auf `apk-dist`)
+**Letzter Code-Commit:** `8cdcb57` — "CI: Release-APK statt Debug bauen (echte Scroll-Performance, kein JIT-Warmup)"  
+**CI Build:** Grün, verifiziert (Commit `8cdcb57`, Build #330, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**⚠️ Wichtig für nächste Session:** CI baut jetzt **Release** (nicht mehr Debug). Fetch-Pfad ist `origin/apk-dist:LiveGigPlayer-release.apk` (siehe Build-Setup oben). Release ist mit Debug-Key signiert → installierbar, Update ohne Deinstallieren.
+
+### Scroll-Performance Archiv + Set-Scroll-Fix + Release-Build DONE (2026-07-26, live bestätigt: "es läuft fantastisch!")
+
+Vom User gemeldet: Archiv-Scroll "nicht snappy, klebt nicht am Finger, ruckelt, Fling
+falsch" (Gig-Sets besser, aber auch nicht weltklasse). Drei Ursachen nacheinander
+chirurgisch gefunden & behoben, jeweils per APK live gegengetestet:
+
+1. **LazyColumn ohne Keys** (`MainScreen.kt`, `ArchivSongRow`-Liste, Commit `db3914b`):
+   `itemsIndexed(songs)` hatte kein `key`/`contentType` → keine Slot-Wiederverwendung,
+   jede einströmende Zeile wurde beim Scrollen komplett neu komponiert (Frame-Budget).
+   Fix: `key = { _, song -> song.id }` + `contentType = { _, _ -> "song" }`. Bindet
+   nebenbei `dragX`-State an Song-Identität → robustere Swipes (wie SetCard, Gotcha 7).
+   Zusätzlich `graphicsLayer` zunächst nur noch bei gedimmter Zeile.
+2. **Gedimmte Zeilen = Compositing-Layer** (Commit `167ce5f`): User-A/B-Test zeigte —
+   OHNE Gig (keine gedimmten Zeilen) scrollt es perfekt, MIT Gig nur leicht besser.
+   Einzige Rendering-Differenz waren die gedimmten Zeilen (in Sets/Gig verplant oder
+   completed → `rowAlpha < 1f`), die pro Zeile einen `graphicsLayer` (ModulateAlpha)
+   anlegten. Fix: `graphicsLayer` komplett raus, Alpha direkt in jede Farbe multipliziert
+   (`.copy(alpha = ... * rowAlpha)`: Hintergrund, Nummer, Titel, Untertitel, Chevrons,
+   Edit/Delete-Icons). Gedimmte Zeile rendert jetzt exakt so günstig wie eine normale;
+   bei `rowAlpha == 1f` alles unverändert. `graphicsLayer`/`CompositingStrategy`-Imports
+   entfernt.
+3. **"Wird besser, je öfter man scrollt" = Debug-Build-Warmup** (Commit `8cdcb57`): Das
+   ist der Fingerabdruck von ART-JIT-Warmup + Erst-Komposition, im Debug-Build
+   (`debuggable=true`, kein AOT) dramatisch überzeichnet. Umstellung der CI auf einen
+   **Release-Build** (`assembleRelease`, `isMinifyEnabled=false`, mit Debug-Key signiert)
+   → `debuggable=false` → ART optimiert vorab. User: "es läuft fantastisch!". Falls je
+   noch Erst-Scroll-Kälte auffällt: **Baseline-Profile** wäre der saubere nächste Schritt
+   (kompiliert Hot-Paths schon bei Installation vor) — bewusst noch NICHT gebaut.
+
+**Nebenbei behoben — Set-Songliste nicht scrollbar** (`GigManagementScreen.kt`, Commit
+`cb2c362`): Regression aus dem Set-Umschalten-Umbau. `GigDetailView` rendert die
+`SetCard` direkt in einem nicht-scrollbaren `Column(fillMaxSize)`; die `SetCard` listet
+Songs per `forEach` ohne Scroll-Container → bei 8 Songs waren die unteren unerreichbar.
+Fix: `SetCard` bekommt vom Eltern-Column `Modifier.weight(1f)` (begrenzte Höhe), die
+Song-Liste (sortMode-Box bzw. `forEach`) wandert in eine innere
+`Column().weight(1f).verticalScroll(...)`. Header + Status-Zeile bleiben fix. **Offen als
+kleiner Edge-Case:** falls ein Set IM Sortier-Modus länger als der Bildschirm wird,
+können Drag-Handle und verticalScroll theoretisch konkurrieren (bei ~8 Songs unkritisch,
+passt fast ganz aufs Display) — bei Bedarf Gesten sauber trennen.
+
+**Damit ist das langjährige "SetCard nicht lazy"-TODO teilweise erledigt:** die Songs
+scrollen jetzt sauber; ein echter `LazyColumn`-Umbau (statt `forEach`) ist weiterhin
+offen, aber nach dem Release-Build-Wechsel deutlich weniger dringend (Performance war im
+Release-Build "fantastisch").
 
 ### Set-Umschalten DONE (2026-07-26, live bestätigt: "funktioniert fantastisch")
 

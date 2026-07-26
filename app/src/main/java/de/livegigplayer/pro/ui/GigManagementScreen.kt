@@ -371,47 +371,18 @@ private fun GigDetailView(
                 }
             }
         } else {
-            // Aktives Set mit Griff-Header
+            // Aktives Set anzeigen
             if (activeSet != null) {
-                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-                    // Griff-Header: aktives Set + Übersicht-Button
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .background(GigBgCard, shape = MaterialTheme.shapes.small)
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(activeSet.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            val setProgress = setProgressMap[activeSet.setId]
-                            if (setProgress != null) {
-                                Text("${setProgress.completed}/${setProgress.total} gespielt",
-                                    color = GigGray, fontSize = 11.sp)
-                            }
-                        }
-                        IconButton(onClick = { showSwitcher = true }) {
-                            Icon(Icons.Filled.SwapVert, contentDescription = "Sets übersicht",
-                                tint = GigGray, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Aktives Set anzeigen
-                    SetCard(
-                        set               = activeSet,
-                        gigVm             = gigVm,
-                        playerVm          = playerVm,
-                        isLocked          = isLocked,
-                        isActive          = true,
-                        onDeleteSet       = { onDeleteSet(activeSet) },
-                        onRenameSet       = { renameTarget = activeSet },
-                        onResetCompleted  = { gigVm.resetCompletedForSet(activeSet.setId) },
-                        onSwitchSet       = { showSwitcher = true }
-                    )
-                }
+                SetCard(
+                    set               = activeSet,
+                    gigVm             = gigVm,
+                    playerVm          = playerVm,
+                    isLocked          = isLocked,
+                    isActive          = true,
+                    onDeleteSet       = { onDeleteSet(activeSet) },
+                    onRenameSet       = { renameTarget = activeSet },
+                    onResetCompleted  = { gigVm.resetCompletedForSet(activeSet.setId) }
+                )
             }
         }
     }
@@ -948,10 +919,6 @@ private fun SetSongRow(
         }
     }
 }
-
-// ── Set-Switcher Sheet ───────────────────────────────────────────────────────
-
-@Composable
 
 // ── Dialog ────────────────────────────────────────────────────────────────────
 

@@ -107,6 +107,14 @@ private val GigGray    = Color(0xFF777777)
 private val GigRed     = Color(0xFFDC2626)
 private val GigCool    = Color(0xFF9FB2C4)
 
+// "mm:ss" (song.duration) → Sekunden, für die Restzeit-Anzeige im Griff-Button.
+private fun parseDurationSeconds(s: String): Int {
+    val parts = s.split(":")
+    val min = parts.getOrNull(0)?.toIntOrNull() ?: return 0
+    val sec = parts.getOrNull(1)?.toIntOrNull() ?: return 0
+    return min * 60 + sec
+}
+
 @Composable
 fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel, isLocked: Boolean = false) {
     val allGigs       by gigVm.allGigs.collectAsState()
@@ -279,6 +287,9 @@ private fun GigDetailView(
     }.collectAsState(emptyList())
     val currentCompleted = currentSetSongs.count { it.completedInSet }
     val currentTotal = currentSetSongs.size
+    val remainingSeconds = currentSetSongs.filter { !it.completedInSet }
+        .sumOf { parseDurationSeconds(it.song.duration) }
+    val remainingMinutes = (remainingSeconds + 59) / 60
 
     Column(modifier = Modifier.fillMaxSize().background(GigBgDeep)) {
         Row(
@@ -320,7 +331,7 @@ private fun GigDetailView(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(currentSet.name, color = GigWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("$currentCompleted/$currentTotal gespielt", color = GigGray, fontSize = 12.sp)
+                    Text("$currentCompleted/$currentTotal gespielt · ~$remainingMinutes Min", color = GigGray, fontSize = 12.sp)
                 }
                 Text("Wechseln", color = GigWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.width(2.dp))

@@ -21,7 +21,10 @@ if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
     fi
 else
     git add -A 2>/dev/null
-    git commit -q -m "auto-save: $(date '+%Y-%m-%d %H:%M:%S')" 2>/dev/null
+    # [skip ci]: verhindert, dass jeder Auto-Save einen kompletten APK-Build
+    # in GitHub Actions auslöst. Der Push (= Sicherung) passiert trotzdem;
+    # eine echte APK baut nur bei benannten Commits / bei /ende.
+    git commit -q -m "auto-save: $(date '+%Y-%m-%d %H:%M:%S') [skip ci]" 2>/dev/null
 fi
 
 # Push mit kurzem Timeout, ein Retry — blockiert die Session nicht lange.

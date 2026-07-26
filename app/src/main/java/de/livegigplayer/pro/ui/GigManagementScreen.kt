@@ -707,17 +707,13 @@ private fun SetCard(
         .fillMaxWidth()
         .background(GigBgCard, shape = MaterialTheme.shapes.small)
     ) {
-        // Set-Header
+        // Set-Header — Name/Nummer/Songzahl stehen schon im Griff oben, hier nur
+        // noch die song-bezogenen Aktionen (Sortieren/Bearbeiten/⋮).
         Row(
             modifier = Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("%02d".format(set.position + 1), color = GigVolt,
-                fontSize = 18.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(36.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(set.name, color = GigWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${songs.size}", color = GigGray, fontSize = 12.sp)
+            Spacer(modifier = Modifier.weight(1f))
 
             if (songs.size > 1) {
                 IconButton(

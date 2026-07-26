@@ -1561,6 +1561,34 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 ### Offene TODOs (nächste Session)
 
 #### 🆕 Geplante Features (noch nicht begonnen, Priorität mit User klären)
+- **PDF-zu-Lyrics direkt in der App (statt externem Skript):** User möchte
+  Akkord-PDFs künftig direkt in der App importieren können (Song-Editor →
+  "Lyrics aus PDF importieren" o.ä.), statt wie bisher über ein externes
+  Python-Skript (`/tmp/.../pdf_to_lyrics.py`, Session 2026-07-25, nutzt
+  `pypdf` + Regex-Akkord-Filter, lief außerhalb der App wegen eines Content-
+  Filter-Vorfalls beim direkten Ausgeben von Songtext-Auszügen im Chat —
+  Songtext lief stattdessen NUR durchs Skript, nie durch die Chat-Antwort,
+  Ergebnis als Datei-Download an den User).
+  - **Machbarkeit (mit User besprochen):** grundsätzlich einfach — die
+    Akkord-Filter-Logik ist nur Regex, 1:1 nach Kotlin portierbar (siehe
+    Skript-Logik: Zeile gilt als Akkord-Zeile, wenn ≥80% ihrer Tokens auf
+    ein Akkord-Pattern passen `^[A-G](#|b)?(m|maj|min|sus|dim|aug|add)?\d{0,2}
+    (/[A-G](#|b)?)?$` oder Taktstriche `|`/`:`/`/` sind; `[Section]`-Labels
+    bleiben erhalten wie bisher).
+  - **Einziger neuer Baustein:** PDF-Text-Extraktion auf Android — es gibt
+    KEINE eingebaute API dafür (`PdfRenderer` rendert nur Bilder, kein
+    Text-Layer-Zugriff). Empfehlung: `PdfBox-Android`
+    (`com.tom-roush:pdfbox-android`), etabliert, ein paar MB zusätzliche
+    APK-Größe.
+  - **Grenze:** funktioniert nur bei PDFs mit eingebettetem Textlayer (wie
+    bei "Here I Go Again" getestet). Eingescannte/reine Bild-PDFs bräuchten
+    zusätzlich OCR (z.B. ML Kit Text Recognition) — deutlich größerer
+    Aufwand, NICHT Teil dieser Einschätzung, nur falls es später relevant wird.
+  - **Vorschlag für die Umsetzung (grober Ablauf, noch nicht verfeinert):**
+    SAF-Datei-Picker für PDF im Song-Editor → PdfBox-Android extrahiert
+    Text pro Seite → derselbe Akkord-Filter-Regex (Kotlin-Port) → Ergebnis
+    direkt ins Lyrics-Textfeld einfügen (User kann vor dem Speichern noch
+    manuell nachbessern, kein automatisches Direkt-Speichern).
 - **Bluetooth-Fußschalter (Page-Turner-Pedal):** Gab es schon vor dem
   Neustart (`5063e46`, 19.06.) als `de/minitraxx/app/audio/PedalManager.kt` —
   Pedale melden sich als HID-Tastatur, normale `KeyEvent`s + Anlern-Modus pro

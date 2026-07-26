@@ -820,7 +820,11 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                itemsIndexed(songs) { index, song ->
+                itemsIndexed(
+                    songs,
+                    key = { _, song -> song.id },
+                    contentType = { _, _ -> "song" }
+                ) { index, song ->
                     val isCompletedInActiveSet = song.id in completedSongIdsInSet
                     val isPlannedInGig         = song.id in plannedSongIdsInGig
                     ArchivSongRow(
@@ -991,9 +995,13 @@ private fun ArchivSongRow(
             .height(72.dp)
             // Dimmen ohne Offscreen-Puffer (ModulateAlpha) — sonst legt Compose bei
             // alpha < 1 pro Zeile einen Layer an → Ruckeln, wenn viele Zeilen grau sind.
-            .graphicsLayer {
-                alpha = rowAlpha
-                compositingStrategy = CompositingStrategy.ModulateAlpha
+            // Layer NUR bei tatsächlich gedimmter Zeile anlegen (rowAlpha < 1f) — nicht
+            // gedimmte Zeilen (der Normalfall) bekommen gar keine Compositing-Layer.
+            .let {
+                if (rowAlpha < 1f) it.graphicsLayer {
+                    alpha = rowAlpha
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                } else it
             }
             .background(bgColor, shape = MaterialTheme.shapes.small)
             // Orientierungs-sensitive Geste statt detectHorizontalDragGestures: das

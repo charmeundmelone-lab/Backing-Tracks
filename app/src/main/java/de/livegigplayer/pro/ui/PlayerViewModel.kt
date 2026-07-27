@@ -531,20 +531,45 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { _selectedIds.value.forEach { id -> songs.value.find { it.id == id }?.let { dao.update(it.copy(genre = genre)) } }; clearSelection() }
     }
 
-    fun updateTitle(song: Song, newTitle: String) {
-        if (newTitle.isBlank()) return
-        val u = song.copy(title = newTitle.trim())
-        viewModelScope.launch { dao.update(u) }
-        if (_currentSong.value?.id == song.id) _currentSong.value = u
-    }
-    fun updateArtist(song: Song, newArtist: String) {
-        val u = song.copy(artist = newArtist.trim())
+    /**
+     * Speichert alle Felder des Song-Editors in EINEM Schreibvorgang.
+     *
+     * Vorher liefen Titel/Künstler/Lyrics als drei getrennte update*-Aufrufe, die alle
+     * auf DERSELBEN Song-Kopie aufsetzten — jeder Aufruf schrieb damit die Änderungen
+     * des vorherigen wieder zurück (der Titel ging verloren), und der zwischenzeitlich
+     * per Stepper gesetzte Capo wurde am Ende mit dem alten Wert überbügelt. Deshalb
+     * bekommt diese Methode alle Werte aus dem Editor und schreibt genau einmal.
+     */
+    fun saveSongEdits(
+        song: Song,
+        title: String,
+        artist: String,
+        bpm: Int,
+        keySignature: String,
+        capoPosition: Int,
+        autoStop: Boolean,
+        lyrics: String
+    ) {
+        val u = song.copy(
+            title        = title.trim().ifBlank { song.title },
+            artist       = artist.trim(),
+            bpm          = bpm,
+            keySignature = keySignature.trim(),
+            capoPosition = capoPosition.coerceIn(0, 11),
+            autoStop     = autoStop,
+            lyrics       = lyrics
+        )
         viewModelScope.launch { dao.update(u) }
         if (_currentSong.value?.id == song.id) _currentSong.value = u
     }
 
-    fun updateCapo(song: Song, delta: Int) {
-        val u = song.copy(capoPosition = (song.capoPosition + delta).coerceIn(0, 11))
+    /**
+     * Setzt den Capo ABSOLUT, nicht als Delta. Der Editor kennt den Zielwert bereits;
+     * eine Delta-Rechnung würde auf der Song-Kopie des Aufrufers aufsetzen, die nach
+     * dem ersten Tipp veraltet ist — jeder weitere Tipp landete sonst wieder auf 1.
+     */
+    fun setCapo(song: Song, position: Int) {
+        val u = song.copy(capoPosition = position.coerceIn(0, 11))
         viewModelScope.launch { dao.update(u) }
         if (_currentSong.value?.id == song.id) _currentSong.value = u
     }

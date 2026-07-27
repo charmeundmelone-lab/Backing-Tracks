@@ -947,16 +947,28 @@ private fun SetSongRowSortable(
     val latestDrag       by rememberUpdatedState(onDrag)
     val latestDragEnd    by rememberUpdatedState(onDragEnd)
 
-    val bpmTxt   = if (songInSet.song.bpmExact > 0f)
-        "%.1f BPM".format(songInSet.song.bpmExact) else "${songInSet.song.bpm} BPM"
-    val pre      = if (songInSet.song.artist.isNotEmpty()) "${songInSet.song.artist}  ·  " else ""
-    val subtitle = "$pre$bpmTxt  |  ${songInSet.song.duration}"
+    // Gleiche Meta-Zeile wie in der normalen Set-Ansicht (Tonart · Kapo · Dauer) —
+    // die Zeile soll beim Sortieren nicht plötzlich andere Angaben zeigen.
+    val key  = songInSet.song.keySignature.trim()
+    val capo = songInSet.song.capoPosition
+    val metaParts = buildList {
+        if (key.isNotEmpty()) add(key)
+        if (capo > 0)         add("Kapo $capo")
+        add(songInSet.song.duration)
+    }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(72.dp)
-            .background(if (isDragging) GigVolt.copy(alpha = 0.22f) else Color.Transparent)
+            // Sortier-Modus ist an der Zeile selbst erkennbar: dezent abgesetzte
+            // "Kacheln" (gleiche Palette wie die Karten, nur eine Stufe heller) mit
+            // schmaler Lücke dazwischen — sonst wirken die Zeilen wie eine Fläche.
+            .padding(vertical = 3.dp)
+            .background(
+                if (isDragging) GigVolt.copy(alpha = 0.22f) else GigBgTrack.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(6.dp)
+            )
             .then(if (isDragging) Modifier.shadow(6.dp) else Modifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -971,8 +983,19 @@ private fun SetSongRowSortable(
         Column(modifier = Modifier.weight(1f)) {
             Text(songInSet.song.title, color = GigWhite, fontSize = 20.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = GigGray, fontSize = 11.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                buildAnnotatedString {
+                    metaParts.forEachIndexed { index, part ->
+                        if (index > 0) append("  ·  ")
+                        if (index == 0 && key.isNotEmpty()) {
+                            withStyle(SpanStyle(color = GigCool, fontWeight = FontWeight.Medium)) { append(part) }
+                        } else {
+                            withStyle(SpanStyle(color = GigGray)) { append(part) }
+                        }
+                    }
+                },
+                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
         }
         Icon(
             Icons.Filled.DragIndicator,

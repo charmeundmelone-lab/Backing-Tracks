@@ -897,18 +897,28 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             sheetState       = sheetState,
             containerColor   = BgCard
         ) {
+            // editSheet ist nur eine Momentaufnahme vom Öffnen. Für jeden Schreibvorgang
+            // die frische DB-Version nehmen, sonst überschreibt das Speichern-Häkchen
+            // zwischenzeitliche Änderungen (z.B. den gerade gesetzten Capo) wieder.
+            val editingSong = allSongs.firstOrNull { it.id == editSheet!!.id } ?: editSheet!!
             SongEditorSheet(
-                song             = editSheet!!,
+                song             = editingSong,
                 songs            = songs,
-                onSave           = { t, ar, bpmStr, lyrics ->
-                    val bpm = bpmStr.toIntOrNull() ?: editSheet!!.bpm
-                    vm.updateTitle(editSheet!!, t)
-                    vm.updateArtist(editSheet!!, ar)
-                    if (lyrics != editSheet!!.lyrics) vm.updateLyrics(editSheet!!, lyrics)
+                onSave           = { t, ar, bpmStr, keyVal, capoVal, autoStopVal, lyricsVal ->
+                    vm.saveSongEdits(
+                        song         = editingSong,
+                        title        = t,
+                        artist       = ar,
+                        bpm          = bpmStr.toIntOrNull() ?: editingSong.bpm,
+                        keySignature = keyVal,
+                        capoPosition = capoVal,
+                        autoStop     = autoStopVal,
+                        lyrics       = lyricsVal
+                    )
                     scope.launch { sheetState.hide(); editSheet = null }
                 },
-                onAutoStopChange = { enabled -> vm.updateAutoStop(editSheet!!, enabled) },
-                onCapoChange     = { delta -> vm.updateCapo(editSheet!!, delta) },
+                onAutoStopChange = { enabled -> vm.updateAutoStop(editingSong, enabled) },
+                onCapoChange     = { position -> vm.setCapo(editingSong, position) },
                 onNavigate       = { newSong -> editSheet = newSong },
                 onDismiss        = { scope.launch { sheetState.hide(); editSheet = null } }
             )
@@ -1074,10 +1084,16 @@ private fun ArchivSongRow(
                 fontWeight = FontWeight.Bold, lineHeight = 18.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            val bpmTxt = if (song.bpmExact > 0f) "%.1f BPM".format(song.bpmExact) else "${song.bpm} BPM"
-            val pre    = if (song.artist.isNotEmpty()) "${song.artist}  ·  " else ""
-            val suf    = if (song.genre.isNotEmpty()) "  ·  ${song.genre}" else ""
-            Text("$pre$bpmTxt  |  ${song.duration}$suf", color = Gray.copy(alpha = rowAlpha),
+            // Gleiche Meta-Angaben wie in der Set-Ansicht (Tonart · Kapo · Dauer), hier
+            // zusätzlich mit Künstler — aus dem Archiv heraus werden die Sets gebaut.
+            // BPM ist bewusst raus: für die Bühne irrelevant, kostete nur Platz.
+            val metaParts = buildList {
+                if (song.artist.isNotEmpty())          add(song.artist)
+                if (song.keySignature.isNotBlank())    add(song.keySignature.trim())
+                if (song.capoPosition > 0)             add("Kapo ${song.capoPosition}")
+                if (song.duration.isNotBlank())        add(song.duration)
+            }
+            Text(metaParts.joinToString("  ·  "), color = Gray.copy(alpha = rowAlpha),
                 fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
@@ -1112,7 +1128,9 @@ private fun ArchivSongRow(
 private fun SongEditorSheet(
     song: Song,
     songs: List<Song>,
-    onSave: (String, String, String, String) -> Unit,
+    // (Titel, Künstler, BPM, Tonart, Capo, Auto-Stop, Lyrics) — bewusst ALLE Felder auf
+    // einmal, damit der Aufrufer sie in einem einzigen Schreibvorgang persistieren kann.
+    onSave: (String, String, String, String, Int, Boolean, String) -> Unit,
     onAutoStopChange: (Boolean) -> Unit,
     onCapoChange: (Int) -> Unit,
     onNavigate: (Song) -> Unit,
@@ -1121,6 +1139,7 @@ private fun SongEditorSheet(
     var title    by remember(song.id) { mutableStateOf(song.title) }
     var artist   by remember(song.id) { mutableStateOf(song.artist) }
     var bpm      by remember(song.id) { mutableStateOf(song.bpm.toString()) }
+    var keySig   by remember(song.id) { mutableStateOf(song.keySignature) }
     var capo     by remember(song.id) { mutableStateOf(song.capoPosition) }
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
     var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
@@ -1194,7 +1213,7 @@ private fun SongEditorSheet(
             Text("Song bearbeiten", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f))
             Button(
-                onClick = { onSave(title, artist, bpm, lyrics) },
+                onClick = { onSave(title, artist, bpm, keySig, capo, autoStop, lyrics) },
                 colors = ButtonDefaults.buttonColors(containerColor = Volt),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -1215,6 +1234,10 @@ private fun SongEditorSheet(
         Spacer(modifier = Modifier.height(12.dp))
         SheetField("BPM", bpm) { bpm = it }
         Spacer(modifier = Modifier.height(12.dp))
+        // Tonart wie sie KLINGT (nicht die gegriffene) — steht zusammen mit dem Capo
+        // als Info für die Mitmusiker in der Setliste.
+        SheetField("Tonart (klingend, z.B. G)", keySig) { keySig = it }
+        Spacer(modifier = Modifier.height(12.dp))
         // Capo stepper
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1222,12 +1245,12 @@ private fun SongEditorSheet(
         ) {
             Text("Capo", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text("−", color = if (capo > 0) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(enabled = capo > 0) { capo--; onCapoChange(-1) }
+                modifier = Modifier.clickable(enabled = capo > 0) { capo--; onCapoChange(capo) }
                     .padding(horizontal = 14.dp, vertical = 4.dp))
             Text(capo.toString(), color = if (capo > 0) Volt else Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center, modifier = Modifier.width(30.dp))
             Text("+", color = if (capo < 11) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(enabled = capo < 11) { capo++; onCapoChange(1) }
+                modifier = Modifier.clickable(enabled = capo < 11) { capo++; onCapoChange(capo) }
                     .padding(horizontal = 14.dp, vertical = 4.dp))
         }
         Spacer(modifier = Modifier.height(16.dp))

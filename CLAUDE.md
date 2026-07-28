@@ -257,11 +257,49 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-26  
-**Status:** ✅ Setlist-Redesign (Variante B, PLAN-setlist-lesbarkeit.md) + Set-Restzeit im Griff-Button — vom User live bestätigt ("läuft super, danke!"). Details siehe Sprint-Einträge unten.  
+**Datum:** 2026-07-28  
+**Status:** ✅ Archiv-Songzeile auf das Setlist-Design nachgezogen + Tonart/Kapo aufgehellt — vom User live bestätigt ("das sieht super aus!"). Details siehe Sprint-Eintrag unten.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `f9c5a6d` — "Griff-Button: Restzeit des Sets anzeigen (aufgerundet auf Minuten)"  
-**CI Build:** Grün, verifiziert (Commit `f9c5a6d`, Build #333, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Code-Commit:** `9197839` — "Archiv-Songzeile auf Set-Design + Tonart/Kapo besser lesbar"  
+**CI Build:** Grün, verifiziert (Commit `9197839`, Build #336, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+
+### Archiv-Songzeile im Set-Design + Tonart/Kapo lesbarer DONE (2026-07-28, Commit `9197839`, live bestätigt)
+
+Nachzug der bewusst zurückgestellten Scope-Grenze aus dem Setlist-Redesign
+(Variante B): `ArchivSongRow` (`MainScreen.kt`) folgt jetzt exakt dem Muster von
+`SetSongRow` — dezente graue Nummer (14sp Medium, 26dp statt 24sp Volt-Black,
+44dp, kein `padStart` mehr), dominanter Songname (20sp Bold), aktiver Song mit
+3dp `Volt`-Akzentleiste am linken Rand + gelbem Titel. Gelb bedeutet damit
+app-weit konsequent nur noch "läuft/aktiv".
+
+Zweiter Teil (User-Report: "Lesbarkeit von Capo und Tonart nicht gut genug"):
+`GigCool` von `0xFF9FB2C4` auf `0xFFC2D6EA` aufgehellt, **Kapo bekommt dieselbe
+helle Farbe** (stand vorher im dunklen `GigGray`), beide `SemiBold`, Meta-Zeile
+von 11/12sp auf 13sp. Gilt für Archiv **und** Setlist inkl. Sortier-Modus.
+
+Die Meta-Zeile lebt jetzt in je einem Helper statt dreifach inline:
+`songMetaLine(key, capo, duration)` in `GigManagementScreen.kt` (für `SetSongRow`
++ `SetSongRowSortable`) und `archivMetaLine(song, alpha)` in `MainScreen.kt`
+(zusätzlich mit Künstler). Der Archiv-Helper nimmt `rowAlpha` als Parameter und
+rechnet es in jede Farbe — **kein `graphicsLayer`**, siehe Scroll-Performance-
+Sprint vom 2026-07-26. Bewusst zwei Helper statt einem geteilten: beide Dateien
+haben eigene, private Farbpaletten (`GigCool` vs. neue Konstante `Cool`, gleicher
+Wert) — das war schon vorher so und wurde nicht angefasst.
+
+### Capo-Speicher-Bug DONE (2026-07-27, Commit `31bbbc1`, Build #335)
+
+Der im Song-Editor gesetzte Capo ging beim Speichern verloren: `onSave` rief
+`updateTitle`/`updateArtist`/`updateLyrics` nacheinander auf, alle drei bauten ihr
+Update aus DERSELBEN Song-Kopie vom Öffnen des Sheets — jeder Aufruf schrieb die
+Änderung des vorherigen zurück (auch der Titel ging verloren), der per Stepper
+gespeicherte Capo wurde am Ende mit 0 überbügelt. `updateCapo` rechnete zusätzlich
+relativ auf dieser veralteten Kopie (jeder weitere Tipp landete wieder auf 1).
+Fix: `PlayerViewModel.saveSongEdits()` schreibt alle Editor-Felder in EINEM
+`dao.update()`, `setCapo()` setzt absolut statt als Delta,
+`updateTitle`/`updateArtist`/`updateCapo` entfernt. Der Editor arbeitet jetzt auf
+der frischen DB-Version statt auf der Momentaufnahme; BPM wird tatsächlich
+gespeichert (der geparste Wert wurde vorher berechnet und nie verwendet). Zudem
+werden Kapo/Tonart seitdem in allen Songzeilen angezeigt.
 
 ### Set-Restzeit im Griff-Button DONE (2026-07-26, GrillMe-geplant, live bestätigt)
 
@@ -301,7 +339,8 @@ abgestimmt) — vier Änderungen, alle live bestätigt:
   erledigt, keine Reste gefunden.
 - Bewusst nicht angefasst (laut Plan Phase 2/Scope-Grenze): `ArchivSongRow`
   bekommt das gleiche laute Nummern-/Titel-Muster wie vorher — App-weite
-  Konsistenz ist ein separates Folge-Feature.
+  Konsistenz ist ein separates Folge-Feature. **→ am 2026-07-28 nachgeholt,
+  siehe Sprint-Eintrag ganz oben (Commit `9197839`).**
 - Kein Gradle-Build in der Sandbox möglich (Google-Maven 403, wie immer) —
   nur manuell gegengelesen, dann CI aktiv geprüft (grün) statt blind
   `apk-dist` zu fetchen.

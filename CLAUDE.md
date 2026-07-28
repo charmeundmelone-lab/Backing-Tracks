@@ -259,12 +259,12 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-28  
-**Status:** ✅ Tempo-Filter im Archiv gebaut (Langsam/Mittel/Schnell, Room v18→19) — GrillMe-Interview vollständig durchgeführt, Umsetzung + CI grün. **Noch nicht live getestet** (APK gerade erst an den User geschickt).  
+**Status:** ✅ Tempo-Filter im Archiv gebaut (Langsam/Mittel/Schnell, Room v18→19) — GrillMe-Interview vollständig durchgeführt, Umsetzung + CI grün, **vom User live getestet: "funktioniert"**.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `b35d790` — "Tempo-Filter im Archiv: Langsam/Mittel/Schnell (Room v18→19)"  
-**CI Build:** Grün, verifiziert (Commit `b35d790`, Build #338, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Code-Commit:** `89dad36` — "Session-Abschluss: CLAUDE.md + .status.md (Tempo-Filter dokumentiert)"  
+**CI Build:** Grün, verifiziert (Commit `89dad36`, Build #339, `LiveGigPlayer-release.apk` auf `apk-dist`)  
 
-### Tempo-Filter im Archiv DONE (ungetestet, 2026-07-28, Commit `b35d790`)
+### Tempo-Filter im Archiv DONE (2026-07-28, Commit `b35d790`, live bestätigt)
 
 User erinnerte sich an ein in einer früheren GrillMe-Session geparktes Thema
 ("Filterfunktion") — Suche im Repo/Git-Log ergab: dazu gab es noch **kein**
@@ -298,12 +298,9 @@ Filter-Lebensdauer, Tap-Weg, Benennung, Pre-Mortem) — Ergebnis dokumentiert in
   (User: reine Filter-Mechanik, die frisch aufgeräumte Meta-Zeile bleibt
   unangetastet). Kein Batch-Tagging über die `GenreBar` (Bestand < 50 Songs,
   Editor-Weg reicht laut User).
-- **Nicht verifiziert:** kein Gradle-Build in der Sandbox möglich, nur
-  Klammerbalance/Typen/Aufrufstellen manuell geprüft. CI grün (Build #338).
-  **Nächste Session: live testen** — Lupe tippen → erscheinen Chips sofort?
-  Chip filtert korrekt, nochmal tippen hebt auf? Ungetaggter Song verschwindet
-  im aktiven Filter? Suche schließen setzt Filter zurück? Tag im Editor setzen
-  → speichern → bleibt erhalten?
+- **Live getestet und vom User bestätigt** ("funktioniert") — kein Gradle-Build
+  in der Sandbox möglich (Google-Maven 403, wie immer), aber CI grün (Build #338)
+  und der Feature-Test am echten Gerät war erfolgreich. Nicht mehr offen.
 
 ### Archiv-Songzeile im Set-Design + Tonart/Kapo lesbarer DONE (2026-07-28, Commit `9197839`, live bestätigt)
 
@@ -1911,21 +1908,7 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen
 2. ✅ **CI-Status prüfen:** Letzter Build auf `main` noch grün?
-3. 🔴 **Tempo-Filter live testen** (2026-07-28, Commit `b35d790`, CI grün, noch
-   ungetestet — siehe Sprint-Eintrag oben unter "Letzter Stand"):
-   - Archiv → Lupe tippen: erscheinen die drei Chips ("Langsam"/"Mittel"/"Schnell")
-     sofort zusammen mit dem Suchfeld?
-   - Chip tippen filtert korrekt, nochmal tippen hebt den Filter wieder auf?
-   - Ein Song ohne gesetztes Tempo-Tag verschwindet bei aktivem Filter (kein
-     vierter "ungetaggt"-Zustand, das ist Absicht)?
-   - Suche schließen (X) setzt den Filter automatisch zurück — Archiv danach
-     wieder vollständig?
-   - Song-Editor: Tempo-Chip setzen → Speichern → Song erneut öffnen → Tag
-     noch da?
-   - **WICHTIG:** vor jeder Auslieferung an den User: CI-Status aktiv per
-     `mcp__github__actions_list`/`get_job_logs` prüfen, NICHT nur `apk-dist` fetchen —
-     sonst Risiko, einen alten/kaputten Build zu verschicken (siehe Lektion aus 2026-07-25).
-4. 🔵 **Optional:** Lyrics-Teleprompter Live-Test auf echtem Handy
+3. 🔵 **Optional:** Lyrics-Teleprompter Live-Test auf echtem Handy
    - Song mit Lyrics laden
    - Teleprompter öffnen (Tap auf Song-Titel)
    - Record → zeilengenaues Tippen → Stop
@@ -1937,6 +1920,10 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   - Nur UI (−/+ Buttons im Header) nötig
 
 #### ✅ ERLEDIGT (diese Session)
+- ✅ **Tempo-Filter im Archiv (ERLEDIGT, 2026-07-28, Commit `b35d790`):** Langsam/
+  Mittel/Schnell-Chips in der Suchleiste + Song-Editor, Room v18→19. Vom User live
+  getestet: "funktioniert". Details siehe Sprint-Eintrag oben unter "Letzter Stand".
+  Nicht mehr offen.
 - ✅ **SetCard-Scrollverhalten (ERLEDIGT/ABGESCHLOSSEN, 2026-07-28):** User hat das
   bestehende `forEach{}`-Scrollverhalten (kein `LazyColumn`-Umbau) selbst am Gerät
   getestet: "funktioniert vom Scrollverhalten wunderbar". Der früher als PRIO-1-TODO

@@ -826,11 +826,17 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Search bar
+        val tempoFilter by vm.tempoFilter.collectAsState()
         SearchBar(
             active = searchActive,
             query  = searchQuery,
-            onToggle = { searchActive = !searchActive; if (!searchActive) vm.setSearchQuery("") },
-            onChange = { vm.setSearchQuery(it) }
+            tempoFilter = tempoFilter,
+            onToggle = {
+                searchActive = !searchActive
+                if (!searchActive) { vm.setSearchQuery(""); vm.setTempoFilter(0) }
+            },
+            onChange = { vm.setSearchQuery(it) },
+            onTempoFilter = { vm.setTempoFilter(it) }
         )
 
         if (songs.isEmpty()) {
@@ -939,7 +945,7 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             SongEditorSheet(
                 song             = editingSong,
                 songs            = songs,
-                onSave           = { t, ar, bpmStr, keyVal, capoVal, autoStopVal, lyricsVal ->
+                onSave           = { t, ar, bpmStr, keyVal, capoVal, autoStopVal, lyricsVal, tempoVal ->
                     vm.saveSongEdits(
                         song         = editingSong,
                         title        = t,
@@ -948,7 +954,8 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                         keySignature = keyVal,
                         capoPosition = capoVal,
                         autoStop     = autoStopVal,
-                        lyrics       = lyricsVal
+                        lyrics       = lyricsVal,
+                        tempoTag     = tempoVal
                     )
                     scope.launch { sheetState.hide(); editSheet = null }
                 },
@@ -1165,9 +1172,9 @@ private fun ArchivSongRow(
 private fun SongEditorSheet(
     song: Song,
     songs: List<Song>,
-    // (Titel, Künstler, BPM, Tonart, Capo, Auto-Stop, Lyrics) — bewusst ALLE Felder auf
-    // einmal, damit der Aufrufer sie in einem einzigen Schreibvorgang persistieren kann.
-    onSave: (String, String, String, String, Int, Boolean, String) -> Unit,
+    // (Titel, Künstler, BPM, Tonart, Capo, Auto-Stop, Lyrics, Tempo-Tag) — bewusst ALLE
+    // Felder auf einmal, damit der Aufrufer sie in einem einzigen Schreibvorgang persistiert.
+    onSave: (String, String, String, String, Int, Boolean, String, Int) -> Unit,
     onAutoStopChange: (Boolean) -> Unit,
     onCapoChange: (Int) -> Unit,
     onNavigate: (Song) -> Unit,
@@ -1180,6 +1187,7 @@ private fun SongEditorSheet(
     var capo     by remember(song.id) { mutableStateOf(song.capoPosition) }
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
     var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
+    var tempoTag by remember(song.id) { mutableStateOf(song.tempoTag) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1250,7 +1258,7 @@ private fun SongEditorSheet(
             Text("Song bearbeiten", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f))
             Button(
-                onClick = { onSave(title, artist, bpm, keySig, capo, autoStop, lyrics) },
+                onClick = { onSave(title, artist, bpm, keySig, capo, autoStop, lyrics, tempoTag) },
                 colors = ButtonDefaults.buttonColors(containerColor = Volt),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -1289,6 +1297,35 @@ private fun SongEditorSheet(
             Text("+", color = if (capo < 11) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clickable(enabled = capo < 11) { capo++; onCapoChange(capo) }
                     .padding(horizontal = 14.dp, vertical = 4.dp))
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        // Tempo-Tag fürs Archiv-Filtern (manuell, NICHT aus BPM abgeleitet — siehe
+        // GrillMe 2026-07-28: BPM-Daten im Bestand sind zu unzuverlässig)
+        Text("Tempo", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            tempoTagLabels.forEach { (tag, label) ->
+                val selected = tempoTag == tag
+                Button(
+                    onClick = { tempoTag = if (tempoTag == tag) 0 else tag },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selected) Volt else BgTrack
+                    ),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        label,
+                        color = if (selected) Color.Black else Volt,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
         Spacer(modifier = Modifier.height(16.dp))
         // Lyrics (nur Text, keine Akkorde — wird im Teleprompter beim Abspielen gezeigt)
@@ -1716,36 +1753,74 @@ private fun PlayerBtn(
 }
 
 // ── Search Bar ─────────────────────────────────────────────────────────────────
+private val tempoTagLabels = listOf(1 to "Langsam", 2 to "Mittel", 3 to "Schnell")
+
 @Composable
-private fun SearchBar(active: Boolean, query: String, onToggle: () -> Unit, onChange: (String) -> Unit) {
+private fun SearchBar(
+    active: Boolean,
+    query: String,
+    tempoFilter: Int,
+    onToggle: () -> Unit,
+    onChange: (String) -> Unit,
+    onTempoFilter: (Int) -> Unit
+) {
     val fr = remember { FocusRequester() }
     LaunchedEffect(active) { if (active) fr.requestFocus() }
 
-    Row(
-        modifier = Modifier.fillMaxWidth().background(BgDeep)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (active) {
-            TextField(
-                value = query, onValueChange = onChange,
-                placeholder = { Text("Titel, Artist, BPM, Genre…", color = Gray, fontSize = 13.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f).focusRequester(fr),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = BgCard, unfocusedContainerColor = BgCard,
-                    focusedTextColor = White, unfocusedTextColor = White,
-                    focusedIndicatorColor = Volt, unfocusedIndicatorColor = Gray, cursorColor = Volt
+    Column(modifier = Modifier.fillMaxWidth().background(BgDeep)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (active) {
+                TextField(
+                    value = query, onValueChange = onChange,
+                    placeholder = { Text("Titel, Artist, BPM, Genre…", color = Gray, fontSize = 13.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).focusRequester(fr),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = BgCard, unfocusedContainerColor = BgCard,
+                        focusedTextColor = White, unfocusedTextColor = White,
+                        focusedIndicatorColor = Volt, unfocusedIndicatorColor = Gray, cursorColor = Volt
+                    )
                 )
-            )
-            IconButton(onClick = onToggle) {
-                Icon(Icons.Filled.Close, contentDescription = "Suche schließen", tint = Gray)
+                IconButton(onClick = onToggle) {
+                    Icon(Icons.Filled.Close, contentDescription = "Suche schließen", tint = Gray)
+                }
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onToggle) {
+                    Icon(Icons.Filled.Search, contentDescription = "Suchen", tint = Gray,
+                        modifier = Modifier.size(22.dp))
+                }
             }
-        } else {
-            Spacer(modifier = Modifier.weight(1f))
-            IconButton(onClick = onToggle) {
-                Icon(Icons.Filled.Search, contentDescription = "Suchen", tint = Gray,
-                    modifier = Modifier.size(22.dp))
+        }
+        // Tempo-Chips: erscheinen sofort mit der Suche, kein zweites Aufklappen
+        // (GrillMe 2026-07-28: live müssen es maximal zwei Taps bis zum Filter sein).
+        if (active) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                tempoTagLabels.forEach { (tag, label) ->
+                    val selected = tempoFilter == tag
+                    Button(
+                        onClick = { onTempoFilter(tag) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selected) Volt else BgCard
+                        ),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            label,
+                            color = if (selected) Color.Black else Volt,
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }

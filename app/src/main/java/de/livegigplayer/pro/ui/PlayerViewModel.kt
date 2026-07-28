@@ -39,17 +39,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    val filteredSongs: StateFlow<List<Song>> = songs
-        .combine(_searchQuery) { list, q ->
-            if (q.isBlank()) list
-            else list.filter { s ->
+    // 0 = kein Filter, 1=Langsam, 2=Mittel, 3=Schnell. Lebt zusammen mit der Suche —
+    // MainScreen setzt ihn beim Schließen der Suchleiste zurück auf 0, kein
+    // Persistieren über App-Neustart (GrillMe 2026-07-28).
+    private val _tempoFilter = MutableStateFlow(0)
+    val tempoFilter: StateFlow<Int> = _tempoFilter.asStateFlow()
+
+    fun setTempoFilter(tag: Int) {
+        _tempoFilter.value = if (_tempoFilter.value == tag) 0 else tag
+    }
+
+    val filteredSongs: StateFlow<List<Song>> = combine(songs, _searchQuery, _tempoFilter) { list, q, tempo ->
+        list.filter { s ->
+            (tempo == 0 || s.tempoTag == tempo) &&
+            (q.isBlank() ||
                 s.title.contains(q, ignoreCase = true) ||
                 s.artist.contains(q, ignoreCase = true) ||
                 s.bpm.toString().contains(q) ||
                 s.keySignature.contains(q, ignoreCase = true) ||
-                s.genre.contains(q, ignoreCase = true)
-            }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+                s.genre.contains(q, ignoreCase = true))
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _currentSong   = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -548,7 +558,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         keySignature: String,
         capoPosition: Int,
         autoStop: Boolean,
-        lyrics: String
+        lyrics: String,
+        tempoTag: Int
     ) {
         val u = song.copy(
             title        = title.trim().ifBlank { song.title },
@@ -557,7 +568,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             keySignature = keySignature.trim(),
             capoPosition = capoPosition.coerceIn(0, 11),
             autoStop     = autoStop,
-            lyrics       = lyrics
+            lyrics       = lyrics,
+            tempoTag     = tempoTag
         )
         viewModelScope.launch { dao.update(u) }
         if (_currentSong.value?.id == song.id) _currentSong.value = u

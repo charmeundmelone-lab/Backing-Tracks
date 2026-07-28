@@ -38,5 +38,9 @@ data class Song(
     // durch das Abschnitts-Modell mit Oben-Anker (Sprint 5.46) abgelöst. Spalte bleibt
     // aus Schema-Kompatibilität erhalten (ADD-only-Konvention, Gerät ist bereits auf v17),
     // wird nicht mehr geschrieben — analog lyricsStartMs.
-    val lyricsLeadMs: Long = 0L
+    val lyricsLeadMs: Long = 0L,
+    // Manuelles Tempo-Tag fürs Archiv-Filtern (v19) — bewusst NICHT aus BPM abgeleitet,
+    // da viele BPM-Werte im Bestand unzuverlässig/leer sind. 0=ungetaggt, 1=Langsam,
+    // 2=Mittel, 3=Schnell.
+    val tempoTag: Int = 0
 )

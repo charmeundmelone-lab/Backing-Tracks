@@ -833,7 +833,12 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             tempoFilter = tempoFilter,
             onToggle = {
                 searchActive = !searchActive
-                if (!searchActive) { vm.setSearchQuery(""); vm.setTempoFilter(0) }
+                // Suche schließen räumt komplett auf: Suchbegriff, Tempo-Filter UND
+                // die Mehrfach-Auswahl. Die Auswahl überlebt bewusst jeden
+                // Filterwechsel INNERHALB der offenen Suche (tempo-übergreifend
+                // sammeln), aber nicht das Schließen — sonst blieben unsichtbare
+                // Markierungen zurück, die man nicht mehr sieht.
+                if (!searchActive) { vm.setSearchQuery(""); vm.setTempoFilter(0); vm.clearSelection() }
             },
             onChange = { vm.setSearchQuery(it) },
             onTempoFilter = { vm.setTempoFilter(it) }
@@ -917,7 +922,13 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
 
     // Set-Picker Dialog
     if (showSetPicker) {
-        val orderedIds = songs.filter { it.id in selectedIds }.map { it.id }
+        // Bewusst allSongs statt der gefilterten Liste: wer erst "Langsam" und dann
+        // "Schnell" durchgeht und in beiden markiert, erwartet am Ende ALLE markierten
+        // Songs im Set. Mit der gefilterten Liste fielen die Songs des zuvor aktiven
+        // Tempo-Chips still raus, obwohl der Zähler in der GenreBar sie mitzählte.
+        // Reihenfolge = Archiv-Reihenfolge, unabhängig davon, in welcher Reihenfolge
+        // markiert wurde.
+        val orderedIds = allSongs.filter { it.id in selectedIds }.map { it.id }
         AddToSetDialog(
             gigVm      = gigVm,
             songCount  = selectedIds.size,

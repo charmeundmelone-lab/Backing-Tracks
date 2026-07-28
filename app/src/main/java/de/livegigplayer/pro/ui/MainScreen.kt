@@ -117,8 +117,11 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -147,6 +150,38 @@ private val VoltDim     = Color(0x8CE8FF00)
 private val White       = Color(0xFFFFFFFF)
 private val Gray        = Color(0xFF777777)
 private val RedStop     = Color(0xFFDC2626)
+// Tonart/Kapo in der Songzeile — identisch zu GigCool im Gig-Set-Tab, bewusst
+// deutlich heller als Gray: die beiden wichtigsten Spiel-Infos müssen auf der
+// Bühne sofort lesbar sein.
+private val Cool        = Color(0xFFC2D6EA)
+
+// Meta-Zeile der Archiv-Songzeile: Künstler und Dauer dezent grau, Tonart und Kapo
+// hell hervorgehoben. Gleiches Muster wie songMetaLine() im Gig-Set-Tab, hier
+// zusätzlich mit Künstler — aus dem Archiv heraus werden die Sets gebaut.
+// alpha wird direkt in jede Farbe gerechnet (KEIN graphicsLayer, siehe Kommentar
+// an der Row: gedimmte Zeilen kosteten sonst Scroll-Performance).
+private fun archivMetaLine(song: Song, alpha: Float) = buildAnnotatedString {
+    val key = song.keySignature.trim()
+    var first = true
+    fun sep() {
+        if (!first) append("  ·  ")
+        first = false
+    }
+    val dim  = Gray.copy(alpha = alpha)
+    val warm = Cool.copy(alpha = alpha)
+    if (song.artist.isNotEmpty()) {
+        sep(); withStyle(SpanStyle(color = dim)) { append(song.artist) }
+    }
+    if (key.isNotEmpty()) {
+        sep(); withStyle(SpanStyle(color = warm, fontWeight = FontWeight.SemiBold)) { append(key) }
+    }
+    if (song.capoPosition > 0) {
+        sep(); withStyle(SpanStyle(color = warm, fontWeight = FontWeight.SemiBold)) { append("Kapo ${song.capoPosition}") }
+    }
+    if (song.duration.isNotBlank()) {
+        sep(); withStyle(SpanStyle(color = dim)) { append(song.duration) }
+    }
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 @Composable
@@ -1066,35 +1101,37 @@ private fun ArchivSongRow(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Akzentleiste für den aktiven Song — gleiche Sprache wie im Gig-Set-Tab.
+        if (selected) {
+            Box(modifier = Modifier.width(3.dp).fillMaxHeight().background(Volt.copy(alpha = rowAlpha)))
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         if (interactive) {
             Icon(Icons.Filled.ChevronLeft, contentDescription = null,
                 tint = Gray.copy(alpha = 0.4f * rowAlpha), modifier = Modifier.size(12.dp))
         }
+        // Nummer bewusst dezent (wie im Gig-Set-Tab): der Songname trägt die Zeile,
+        // Gelb bleibt für "läuft/ausgewählt" reserviert.
         Text(
-            text = index.toString().padStart(2, '0'),
-            color = (if (isBatchSelected || selected) Volt else VoltDim).copy(alpha = rowAlpha),
-            fontSize = 24.sp, fontWeight = FontWeight.Black, lineHeight = 26.sp,
-            modifier = Modifier.width(44.dp)
+            text = index.toString(),
+            color = (if (isBatchSelected || selected) Volt else Gray).copy(alpha = rowAlpha),
+            fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 16.sp,
+            modifier = Modifier.width(26.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = song.title, color = White.copy(alpha = rowAlpha), fontSize = 15.sp,
-                fontWeight = FontWeight.Bold, lineHeight = 18.sp,
+                text = song.title,
+                color = (if (selected) Volt else White).copy(alpha = rowAlpha), fontSize = 20.sp,
+                fontWeight = FontWeight.Bold, lineHeight = 23.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            // Gleiche Meta-Angaben wie in der Set-Ansicht (Tonart · Kapo · Dauer), hier
-            // zusätzlich mit Künstler — aus dem Archiv heraus werden die Sets gebaut.
             // BPM ist bewusst raus: für die Bühne irrelevant, kostete nur Platz.
-            val metaParts = buildList {
-                if (song.artist.isNotEmpty())          add(song.artist)
-                if (song.keySignature.isNotBlank())    add(song.keySignature.trim())
-                if (song.capoPosition > 0)             add("Kapo ${song.capoPosition}")
-                if (song.duration.isNotBlank())        add(song.duration)
-            }
-            Text(metaParts.joinToString("  ·  "), color = Gray.copy(alpha = rowAlpha),
-                fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                archivMetaLine(song, rowAlpha),
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
         }
 
         if (interactive) {

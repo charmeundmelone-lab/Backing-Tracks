@@ -105,7 +105,30 @@ private val GigVolt    = Color(0xFFE8FF00)
 private val GigWhite   = Color(0xFFFFFFFF)
 private val GigGray    = Color(0xFF777777)
 private val GigRed     = Color(0xFFDC2626)
-private val GigCool    = Color(0xFF9FB2C4)
+// Tonart/Kapo — bewusst deutlich heller als GigGray: auf der Bühne die beiden
+// wichtigsten Spiel-Infos der Songzeile, waren im alten Blaugrau zu dunkel.
+private val GigCool    = Color(0xFFC2D6EA)
+
+// Meta-Zeile einer Songzeile: Tonart und Kapo hell hervorgehoben (GigCool, SemiBold),
+// Dauer dezent grau. Ein Helper für beide Zeilen-Varianten (normal + Sortier-Modus),
+// damit die Darstellung nicht auseinanderläuft.
+private fun songMetaLine(keySignature: String, capo: Int, duration: String) = buildAnnotatedString {
+    val key = keySignature.trim()
+    var first = true
+    fun sep() {
+        if (!first) append("  ·  ")
+        first = false
+    }
+    if (key.isNotEmpty()) {
+        sep(); withStyle(SpanStyle(color = GigCool, fontWeight = FontWeight.SemiBold)) { append(key) }
+    }
+    if (capo > 0) {
+        sep(); withStyle(SpanStyle(color = GigCool, fontWeight = FontWeight.SemiBold)) { append("Kapo $capo") }
+    }
+    if (duration.isNotBlank()) {
+        sep(); withStyle(SpanStyle(color = GigGray)) { append(duration) }
+    }
+}
 
 // "mm:ss" (song.duration) → Sekunden, für die Restzeit-Anzeige im Griff-Button.
 private fun parseDurationSeconds(s: String): Int {
@@ -951,11 +974,6 @@ private fun SetSongRowSortable(
     // die Zeile soll beim Sortieren nicht plötzlich andere Angaben zeigen.
     val key  = songInSet.song.keySignature.trim()
     val capo = songInSet.song.capoPosition
-    val metaParts = buildList {
-        if (key.isNotEmpty()) add(key)
-        if (capo > 0)         add("Kapo $capo")
-        add(songInSet.song.duration)
-    }
 
     Row(
         modifier = modifier
@@ -984,17 +1002,8 @@ private fun SetSongRowSortable(
             Text(songInSet.song.title, color = GigWhite, fontSize = 20.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                buildAnnotatedString {
-                    metaParts.forEachIndexed { index, part ->
-                        if (index > 0) append("  ·  ")
-                        if (index == 0 && key.isNotEmpty()) {
-                            withStyle(SpanStyle(color = GigCool, fontWeight = FontWeight.Medium)) { append(part) }
-                        } else {
-                            withStyle(SpanStyle(color = GigGray)) { append(part) }
-                        }
-                    }
-                },
-                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                songMetaLine(key, capo, songInSet.song.duration),
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
         }
         Icon(
@@ -1047,11 +1056,6 @@ private fun SetSongRow(
     val endActionLabel = when (songInSet.endAction) { 1 -> "⏹" ; 2 -> "▶▶" ; else -> "⏸" }
     val key  = songInSet.song.keySignature.trim()
     val capo = songInSet.song.capoPosition
-    val metaParts = buildList {
-        if (key.isNotEmpty()) add(key)
-        if (capo > 0)         add("Kapo $capo")
-        add(songInSet.song.duration)
-    }
 
     fun guarded(action: () -> Unit) {
         if (latestCompleted) { pendingAction = action; showAlreadyPlayedDialog = true }
@@ -1153,17 +1157,8 @@ private fun SetSongRow(
             Text(songInSet.song.title, color = if (isCurrentSong) GigVolt else GigWhite, fontSize = 20.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                buildAnnotatedString {
-                    metaParts.forEachIndexed { index, part ->
-                        if (index > 0) append("  ·  ")
-                        if (index == 0 && key.isNotEmpty()) {
-                            withStyle(SpanStyle(color = GigCool, fontWeight = FontWeight.Medium)) { append(part) }
-                        } else {
-                            withStyle(SpanStyle(color = GigGray)) { append(part) }
-                        }
-                    }
-                },
-                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                songMetaLine(key, capo, songInSet.song.duration),
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
         }
         if (isEditing) {

@@ -51,6 +51,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -105,6 +107,11 @@ private val GigVolt    = Color(0xFFE8FF00)
 private val GigWhite   = Color(0xFFFFFFFF)
 private val GigGray    = Color(0xFF777777)
 private val GigRed     = Color(0xFFDC2626)
+
+// Tempo-Chips im "Songs hinzufügen"-Dialog. Bewusst eine eigene Konstante statt
+// eines Imports aus MainScreen.kt: das Pendant dort ist file-private, und beide
+// Dateien halten ohnehin ihre eigenen Farb-/Label-Paletten (siehe GigCool vs. Cool).
+private val gigTempoTagLabels = listOf(1 to "Langsam", 2 to "Mittel", 3 to "Schnell")
 // Tonart/Kapo — bewusst deutlich heller als GigGray: auf der Bühne die beiden
 // wichtigsten Spiel-Infos der Songzeile, waren im alten Blaugrau zu dunkel.
 private val GigCool    = Color(0xFFC2D6EA)
@@ -1189,16 +1196,31 @@ private fun AddSongsToSetDialog(
     var query by remember { mutableStateOf("") }
     var selectedIds by remember { mutableStateOf(emptySet<Long>()) }
     var pendingConfirm by remember { mutableStateOf(false) }
+    // Tempo-Filter wie im Archiv: 0 = kein Filter, sonst tempoTag 1..3. Rein lokal —
+    // der Archiv-Filter im PlayerViewModel bleibt davon unberührt, damit das Öffnen
+    // dieses Dialogs die Archiv-Ansicht dahinter nicht verstellt.
+    var tempoFilter by remember { mutableStateOf(0) }
 
     val available = remember(allSongs, alreadyInSet) {
         allSongs.filter { it.id !in alreadyInSet }
     }
-    val filtered = remember(available, query) {
-        if (query.isBlank()) available
-        else available.filter {
-            it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+    // Suchbegriff UND Tempo-Chip müssen beide passen (gleiche UND-Verknüpfung wie
+    // filteredSongs im PlayerViewModel). Ungetaggte Songs (tempoTag == 0) fallen bei
+    // aktivem Filter automatisch raus — kein Sonderfall nötig.
+    val filtered = remember(available, query, tempoFilter) {
+        available.filter { song ->
+            val matchesQuery = query.isBlank() ||
+                song.title.contains(query, ignoreCase = true) ||
+                song.artist.contains(query, ignoreCase = true)
+            val matchesTempo = tempoFilter == 0 || song.tempoTag == tempoFilter
+            matchesQuery && matchesTempo
         }
     }
+
+    // Bewusst NICHT die gefilterte Liste: wer über mehrere Tempo-Chips hinweg
+    // markiert, erwartet am Ende ALLE markierten Songs im Set (gleiche Regel wie
+    // beim Archiv-Batch, Fix vom 2026-07-28). Reihenfolge = Archiv-Reihenfolge.
+    fun orderedSelection(): List<Long> = available.filter { it.id in selectedIds }.map { it.id }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1216,6 +1238,35 @@ private fun AddSongsToSetDialog(
                         cursorColor = GigVolt
                     )
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                // Tempo-Chips, exakt wie in der Archiv-Suche: genau einer aktiv,
+                // nochmal tippen schaltet ihn wieder aus. Die Auswahl (selectedIds)
+                // überlebt den Filterwechsel bewusst — man kann erst "Langsam" und
+                // dann "Schnell" durchgehen und in beiden markieren.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    gigTempoTagLabels.forEach { (tag, label) ->
+                        val selected = tempoFilter == tag
+                        Button(
+                            onClick = { tempoFilter = if (tempoFilter == tag) 0 else tag },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selected) GigVolt else GigBgTrack
+                            ),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                label,
+                                color = if (selected) Color.Black else GigVolt,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 when {
                     available.isEmpty() -> Text(
@@ -1265,7 +1316,7 @@ private fun AddSongsToSetDialog(
         confirmButton = {
             TextButton(enabled = selectedIds.isNotEmpty(), onClick = {
                 if (selectedIds.any { it in plannedInGig }) pendingConfirm = true
-                else onConfirm(selectedIds.toList())
+                else onConfirm(orderedSelection())
             }) {
                 Text("Hinzufügen (${selectedIds.size})", color = GigVolt, fontWeight = FontWeight.Bold)
             }
@@ -1283,7 +1334,7 @@ private fun AddSongsToSetDialog(
             text  = { Text("Mindestens ein gewählter Song ist in diesem Gig bereits einem anderen Set zugeordnet. Trotzdem alle hinzufügen?",
                 color = GigGray, fontSize = 13.sp) },
             confirmButton = {
-                TextButton(onClick = { pendingConfirm = false; onConfirm(selectedIds.toList()) }) {
+                TextButton(onClick = { pendingConfirm = false; onConfirm(orderedSelection()) }) {
                     Text("Trotzdem hinzufügen", color = GigVolt, fontWeight = FontWeight.Bold)
                 }
             },

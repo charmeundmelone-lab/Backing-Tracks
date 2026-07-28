@@ -140,7 +140,7 @@ app/src/main/java/de/livegigplayer/pro/
 └── MainActivity.kt           — Entry Point, Compose-Setup
 ```
 
-## Datenmodell Song (Room v17)
+## Datenmodell Song (Room v19)
 
 | Feld | Typ | Bedeutung |
 |---|---|---|
@@ -161,6 +161,7 @@ app/src/main/java/de/livegigplayer/pro/
 | lyricsStartMs | Long | Superseded durch lyricsSyncPoints (v16) — nur Schema-Kompatibilität, unbenutzt |
 | lyricsSyncPoints | String | Teleprompter-Kalibrierungspunkte "lineIdx:ms,…", ein Tap pro Abschnitt (v16) |
 | lyricsLeadMs | Long | (v17) Reserviert/unbenutzt — war Vorlauf-Regler, abgelöst durch Abschnitts-Modell (5.46) |
+| tempoTag | Int | (v19) manuelles Tempo-Tag fürs Archiv-Filtern: 0=ungetaggt, 1=Langsam, 2=Mittel, 3=Schnell — bewusst NICHT aus BPM abgeleitet (unzuverlässige Bestandsdaten), nur im Song-Editor gesetzt, im Archiv nicht sichtbar |
 
 ## Build-Setup
 
@@ -258,10 +259,51 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-28  
-**Status:** ✅ Archiv-Songzeile auf das Setlist-Design nachgezogen + Tonart/Kapo aufgehellt — vom User live bestätigt ("das sieht super aus!"). Details siehe Sprint-Eintrag unten.  
+**Status:** ✅ Tempo-Filter im Archiv gebaut (Langsam/Mittel/Schnell, Room v18→19) — GrillMe-Interview vollständig durchgeführt, Umsetzung + CI grün. **Noch nicht live getestet** (APK gerade erst an den User geschickt).  
 **Branch:** `main`  
-**Letzter Code-Commit:** `9197839` — "Archiv-Songzeile auf Set-Design + Tonart/Kapo besser lesbar"  
-**CI Build:** Grün, verifiziert (Commit `9197839`, Build #336, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Code-Commit:** `b35d790` — "Tempo-Filter im Archiv: Langsam/Mittel/Schnell (Room v18→19)"  
+**CI Build:** Grün, verifiziert (Commit `b35d790`, Build #338, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+
+### Tempo-Filter im Archiv DONE (ungetestet, 2026-07-28, Commit `b35d790`)
+
+User erinnerte sich an ein in einer früheren GrillMe-Session geparktes Thema
+("Filterfunktion") — Suche im Repo/Git-Log ergab: dazu gab es noch **kein**
+abgeschlossenes Interview, nur den bereits umgesetzten PDF-Akkord-Filter.
+Volles GrillMe-Interview nachgeholt (Situation, Datenmodell-Frage BPM vs. Tag,
+Erfassung/Bestandsgröße, Ausblend-Verhalten für ungetaggte Songs, Kombinierbarkeit,
+Filter-Lebensdauer, Tap-Weg, Benennung, Pre-Mortem) — Ergebnis dokumentiert in
+`PLAN-tempo-filter.md`.
+
+- **DB (v18→19):** `Song.tempoTag: Int = 0` (0=ungetaggt, 1=Langsam, 2=Mittel,
+  3=Schnell), `MIGRATION_18_19`. Bewusst **kein** BPM-Automatik-Filter — BPM-Werte
+  im Bestand sind laut User zu unzuverlässig, daher manuelles Tag.
+- **PlayerViewModel:** `_tempoFilter`-StateFlow (0 = kein Filter aktiv),
+  `setTempoFilter(tag)` toggelt (nochmal derselbe Chip → aus). `filteredSongs`
+  kombiniert jetzt `songs` + `_searchQuery` + `_tempoFilter` (statt nur 2 Flows) —
+  Song muss BEIDE Bedingungen erfüllen (UND-Verknüpfung). Ungetaggte Songs
+  (`tempoTag == 0`) fallen bei aktivem Filter automatisch raus, kein Sonderfall
+  im Code nötig.
+- **SearchBar (MainScreen.kt):** Chip-Reihe "Langsam · Mittel · Schnell"
+  erscheint **sofort mit dem Suchfeld** (kein zweites Aufklappen — User-Vorgabe
+  aus dem Pre-Mortem: "live keine Zeit" war das befürchtete Scheitern-Szenario).
+  Genau ein Chip aktiv (Volt-gefüllt), nochmal tippen = aus. Suche schließen
+  (`onToggle`) setzt automatisch auch `vm.setTempoFilter(0)` zurück — Filter
+  überlebt die Suche nicht, damit kein Song "verschwunden" wirkt.
+- **SongEditorSheet:** gleiche drei Chips unter dem Capo-Stepper zum Setzen des
+  Tags. `onSave`-Signatur um `tempoTag: Int` (8. Parameter) erweitert,
+  `saveSongEdits()` schreibt ihn in denselben EINEN `dao.update()`-Aufruf wie
+  Titel/Artist/Capo/Lyrics (gleiches Muster wie beim Capo-Speicher-Bug vom
+  2026-07-27 — kein zweiter Schreibpfad, der sich gegenseitig überschreiben kann).
+- **Bewusst NICHT gemacht:** kein Tempo-Anzeige in der Archiv-/Set-Meta-Zeile
+  (User: reine Filter-Mechanik, die frisch aufgeräumte Meta-Zeile bleibt
+  unangetastet). Kein Batch-Tagging über die `GenreBar` (Bestand < 50 Songs,
+  Editor-Weg reicht laut User).
+- **Nicht verifiziert:** kein Gradle-Build in der Sandbox möglich, nur
+  Klammerbalance/Typen/Aufrufstellen manuell geprüft. CI grün (Build #338).
+  **Nächste Session: live testen** — Lupe tippen → erscheinen Chips sofort?
+  Chip filtert korrekt, nochmal tippen hebt auf? Ungetaggter Song verschwindet
+  im aktiven Filter? Suche schließen setzt Filter zurück? Tag im Editor setzen
+  → speichern → bleibt erhalten?
 
 ### Archiv-Songzeile im Set-Design + Tonart/Kapo lesbarer DONE (2026-07-28, Commit `9197839`, live bestätigt)
 
@@ -1869,25 +1911,20 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen
 2. ✅ **CI-Status prüfen:** Letzter Build auf `main` noch grün?
-3. 🟡 **Scroll-Performance weiter polieren (User hat das bewusst zurückgestellt, kein Bug,
-   nur Wunsch nach mehr Feinschliff):**
-   - **SetCard-Songliste ist noch nicht lazy** (`forEach{}` statt `LazyColumn`, siehe Sprint
-     2026-07-25). Ein direkter `LazyColumn`-Umbau CRASHTE beim Set-Öffnen (vermutlich
-     verschachtelte LazyColumn ohne begrenzte Höhe in einer nicht scrollenden `Column`
-     innerhalb der äußeren Sets-LazyColumn). Vor einem erneuten Versuch: Höhen-Constraint
-     sauber lösen (z.B. `Modifier.heightIn(max = ...)` auf der inneren LazyColumn, oder ganz
-     auf eine flache Struktur ohne verschachtelte Scroll-Container umbauen — evtl. die
-     gesamte Song-Liste EINER LazyColumn auf oberster Ebene (Sets + Songs zusammen als ein
-     Item-Stream) statt Sets als LazyColumn mit SetCard-Items, die selbst wieder Listen
-     enthalten). ERST mit kleinem, isoliertem Testfall (z.B. Emulator/Screenshot-Test oder
-     Constraint-Logging) verifizieren, dass KEIN Crash mehr auftritt, bevor an den User
-     ausgeliefert wird — die App crashte beim letzten Versuch sofort und vollständig.
-   - Danach ggf. auch bei `SetCard` selbst state-turbulence reduzieren (Flow-Subscriptions
-     deduzieren, siehe alte Diagnose-Befunde 3+4 aus der Session vom 2026-07-25 — Details im
-     Abschnitt "Scroll-Performance Archiv & Gig-Verwaltung" oben).
+3. 🔴 **Tempo-Filter live testen** (2026-07-28, Commit `b35d790`, CI grün, noch
+   ungetestet — siehe Sprint-Eintrag oben unter "Letzter Stand"):
+   - Archiv → Lupe tippen: erscheinen die drei Chips ("Langsam"/"Mittel"/"Schnell")
+     sofort zusammen mit dem Suchfeld?
+   - Chip tippen filtert korrekt, nochmal tippen hebt den Filter wieder auf?
+   - Ein Song ohne gesetztes Tempo-Tag verschwindet bei aktivem Filter (kein
+     vierter "ungetaggt"-Zustand, das ist Absicht)?
+   - Suche schließen (X) setzt den Filter automatisch zurück — Archiv danach
+     wieder vollständig?
+   - Song-Editor: Tempo-Chip setzen → Speichern → Song erneut öffnen → Tag
+     noch da?
    - **WICHTIG:** vor jeder Auslieferung an den User: CI-Status aktiv per
-     `mcp__github__actions_list`/`get_job_logs` prüfen, NICHT nur `apk-dist` fetchen — sonst
-     Risiko, einen alten/kaputten Build zu verschicken (siehe Lektion aus 2026-07-25).
+     `mcp__github__actions_list`/`get_job_logs` prüfen, NICHT nur `apk-dist` fetchen —
+     sonst Risiko, einen alten/kaputten Build zu verschicken (siehe Lektion aus 2026-07-25).
 4. 🔵 **Optional:** Lyrics-Teleprompter Live-Test auf echtem Handy
    - Song mit Lyrics laden
    - Teleprompter öffnen (Tap auf Song-Titel)
@@ -1900,12 +1937,16 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   - Nur UI (−/+ Buttons im Header) nötig
 
 #### ✅ ERLEDIGT (diese Session)
+- ✅ **SetCard-Scrollverhalten (ERLEDIGT/ABGESCHLOSSEN, 2026-07-28):** User hat das
+  bestehende `forEach{}`-Scrollverhalten (kein `LazyColumn`-Umbau) selbst am Gerät
+  getestet: "funktioniert vom Scrollverhalten wunderbar". Der früher als PRIO-1-TODO
+  offene `LazyColumn`-Umbau ist damit **nicht mehr nötig** — bewusst NICHT umsetzen,
+  nicht wieder vorschlagen, außer der User meldet erneut ein Scroll-Problem.
 - ✅ **Scroll-Performance Archiv & Gig-Verwaltung (ERLEDIGT, Session 2026-07-25):** Swipe-
   Gesture-Bug im Archiv behoben (Fehl-Popup + Ruckeln bei schnellem Vertikal-Wischen), dimm-
   Performance (graphicsLayer+ModulateAlpha) auch in SetSongRow nachgezogen. Vom User live
   getestet, "schon wesentlich besser". Details siehe Abschnitt "Scroll-Performance Archiv &
-  Gig-Verwaltung" oben. Weitere Politur (SetCard-Lazy-Loading) bewusst vom User zurückgestellt,
-  siehe PRIO 1 oben — nicht mehr akut, aber offen.
+  Gig-Verwaltung" oben.
 - ✅ **Lyrics-Teleprompter Grundfunktion (ERLEDIGT):** Sprint 5.30 vom User live
   getestet — Auto-Scroll von oben nach unten funktioniert.
 - ✅ **Struktur-Labels (ERLEDIGT):** Sprint 5.31 — `[Chorus]` etc. werden als

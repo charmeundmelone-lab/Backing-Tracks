@@ -48,12 +48,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -66,6 +68,21 @@ private val LyricsVolt  = Color(0xFFE8FF00)
 private val LyricsGray  = Color(0xFF777777)
 private val LyricsWhite = Color(0xFFFFFFFF)
 private val LyricsRed   = Color(0xFFDC2626)
+
+// ── Lesepunkt & Lichtkegel ───────────────────────────────────────────────────
+// Die zu singende Zeile steht auf 33 % Bildschirmhöhe (nicht mehr am literalen
+// oberen Rand): ein Drittel Rückblick, zwei Drittel Vorschau. Darüber liegt ein
+// fester, NICHT mitscrollender Farbverlauf ("Lichtkegel") — am Lesepunkt klar,
+// zu beiden Rändern hin symmetrisch abblendend. Symmetrisch heißt: gleiche
+// Deckkraft bei gleichem Pixel-Abstand zum Lesepunkt, deshalb ist die volle
+// Abdunklung unten bei 2 × READPOINT_FRACTION erreicht (gleicher Abstand wie
+// vom Lesepunkt zum oberen Rand) und bleibt danach konstant.
+private const val READPOINT_FRACTION  = 0.33f  // Lesepunkt, Anteil der Viewport-Höhe
+private const val CONE_SOFT_FRACTION  = 0.13f  // Abstand, ab dem spürbar abgeblendet wird
+private const val CONE_MID_DIM        = 0.35f  // Deckkraft des Schleiers am Kegelrand
+private const val CONE_EDGE_DIM       = 0.75f  // max. Deckkraft → ~25 % Resthelligkeit,
+                                               // bewusst nicht schwarz: weiter Vorausblick
+                                               // muss lesbar bleiben (User-Vorgabe)
 
 // Struktur-Label wie "[Chorus]" oder "[Verse 1]" — keine Akkorde, nur Songaufbau.
 // Wird als eigene, farblich abgesetzte Überschrift gerendert statt als Lyric-Zeile.
@@ -203,7 +220,9 @@ private fun parseDurationString(s: String): Long {
  *
  * **Rendering:** rein deklarativ aus `positionMs` + Kalibrier-Punkten
  * (`computeTargetOffsetPx()`), kein Frame-Loop. Die zu singende Zeile landet
- * am literalen oberen Bildschirmrand (Top-Anchor); innerhalb eines Vocal-
+ * auf dem Lesepunkt bei 33 % Bildschirmhöhe (`READPOINT_FRACTION`), markiert
+ * durch einen Volt-Balken; darüber liegt der feste Lichtkegel-Verlauf, der
+ * zu beiden Rändern hin abblendet; innerhalb eines Vocal-
  * Segments läuft der Scroll linear zur nächsten Zeile, bei Instrumental steht
  * er still bis zum exakten nächsten Einsatz. `animateFloatAsState(tween(200))`
  * glättet die 200ms-Position-Ticks zu 60fps.
@@ -333,7 +352,7 @@ private fun LyricsContent(
     }
 
     // Während der Kalibrierung treiben die frisch getippten Punkte den Scroll live —
-    // optische Referenz: die gerade getippte Zeile springt sofort an den oberen Rand.
+    // optische Referenz: die gerade getippte Zeile springt sofort auf den Lesepunkt.
     // Nach dem Beenden übernehmen die gespeicherten Punkte wieder normal.
     val breakpoints = if (calibrating) calibrationPoints.sortedBy { it.second } else savedBreakpoints
 
@@ -517,7 +536,15 @@ private fun LyricsContent(
             }
 
             // Scroll-Berechnung: deklarativ aus positionMs + breakpoints. Die zu
-            // singende Zeile landet am literalen oberen Bildschirmrand (Top-Anchor).
+            // singende Zeile landet auf dem Lesepunkt (33 % Bildschirmhöhe).
+            val density = LocalDensity.current
+            val readpointYpx = viewportHeightPx * READPOINT_FRACTION
+            // Polster oben/unten, damit auch die ERSTE und die LETZTE Zeile den
+            // Lesepunkt erreichen können — ohne sie klemmt computeTargetOffsetPx()
+            // am 0- bzw. maxScroll-Rand und die Randzeilen kleben oben/unten fest.
+            val leadPadTop    = with(density) { readpointYpx.toDp() }
+            val leadPadBottom = with(density) { (viewportHeightPx - readpointYpx).coerceAtLeast(0f).toDp() }
+
             val maxScrollPxCalc = (contentHeightPx - viewportHeightPx).coerceAtLeast(0f)
             val targetOffsetPx = computeTargetOffsetPx(
                 positionMs = positionMs,
@@ -525,8 +552,25 @@ private fun LyricsContent(
                 lines = lines,
                 linePositions = linePositions,
                 maxScrollPx = maxScrollPxCalc,
-                readpointY = 0f
+                readpointY = readpointYpx
             )
+
+            // Aktive Zeile für den Volt-Balken: die letzte Gesangszeile, deren
+            // Oberkante den Lesepunkt bereits erreicht hat. Bewusst aus
+            // targetOffsetPx (200ms-Takt) abgeleitet, NICHT aus animatedOffsetPx —
+            // sonst würde der komplette Textblock pro Frame neu komponiert
+            // (Scroll-Performance, siehe Sprint 2026-07-26). Der Balken trägt die
+            // Eindeutigkeit allein: der Lichtkegel blendet die Nachbarzeilen nur
+            // sehr sanft ab, Helligkeit allein würde die aktuelle Zeile beim
+            // kurzen Hinschauen nicht verraten.
+            val readingY = targetOffsetPx + readpointYpx
+            var activeLineIdx = -1
+            if (!calibrating && viewportHeightPx > 0f) {
+                lineIsLyric.forEachIndexed { idx, isLyric ->
+                    val y = linePositions[idx]
+                    if (isLyric && y != null && y <= readingY + 1f) activeLineIdx = idx
+                }
+            }
             val animatedOffsetPx by animateFloatAsState(
                 targetValue = targetOffsetPx,
                 animationSpec = tween(200, easing = LinearEasing),
@@ -557,6 +601,9 @@ private fun LyricsContent(
                         },
                     content = {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
+                            // Vorlauf-Polster: schiebt die erste Zeile auf Höhe des
+                            // Lesepunkts, statt sie am oberen Rand kleben zu lassen.
+                            Spacer(modifier = Modifier.fillMaxWidth().height(leadPadTop))
                             lines.forEachIndexed { index, line ->
                                 val sectionLabel = sectionTagRegex.find(line)?.groupValues?.get(1)
                                 when {
@@ -592,11 +639,15 @@ private fun LyricsContent(
                                                     linePositions[index] = coords.positionInParent().y
                                                 }
                                         ) {
+                                            val isActiveLine = !calibrating && index == activeLineIdx
                                             Box(
                                                 modifier = Modifier
                                                     .width(4.dp)
                                                     .height(30.dp)
-                                                    .background(if (isNextToTap) LyricsVolt else Color.Transparent)
+                                                    .background(
+                                                        if (isNextToTap || isActiveLine) LyricsVolt
+                                                        else Color.Transparent
+                                                    )
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
@@ -612,13 +663,14 @@ private fun LyricsContent(
                                 }
                             }
                             // Platzhalter am Ende, damit die Zeilen des letzten Abschnitts
-                            // noch bis zum oberen Rand hochscrollen können. Sein Oberrand
-                            // (Index lines.size) dient als Sentinel für readingPixel(),
-                            // damit auch die allerletzte Zeile eine gemessene Unterkante hat.
+                            // noch bis zum Lesepunkt hochscrollen können — muss dafür so
+                            // hoch sein wie der Bereich UNTER dem Lesepunkt. Sein Oberrand
+                            // (Index lines.size) dient zusätzlich als Sentinel, damit auch
+                            // die allerletzte Zeile eine gemessene Unterkante hat.
                             Spacer(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(240.dp)
+                                    .height(maxOf(leadPadBottom, 240.dp))
                                     .onGloballyPositioned { coords ->
                                         linePositions[lines.size] = coords.positionInParent().y
                                     }
@@ -634,6 +686,28 @@ private fun LyricsContent(
                         placeable.placeRelative(0, -animatedOffsetPx.roundToInt())
                     }
                 }
+
+                // Lichtkegel: liegt FEST im Bildschirm und scrollt NICHT mit — der
+                // Text läuft darunter durch. Bewusst ein einziger Verlauf über dem
+                // ganzen Viewport statt einer Alpha-Berechnung pro Zeile: kostet
+                // null Rechenzeit pro Frame und löst damit keine Neukomposition des
+                // Textblocks aus (die Fehlerklasse aus den Scroll-Performance-
+                // Sprints). Kein pointerInput → Taps fallen unverändert an den
+                // Tap-to-Sync-Viewport darunter durch.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0f to LyricsBg.copy(alpha = CONE_EDGE_DIM),
+                                (READPOINT_FRACTION - CONE_SOFT_FRACTION) to LyricsBg.copy(alpha = CONE_MID_DIM),
+                                READPOINT_FRACTION to LyricsBg.copy(alpha = 0f),
+                                (READPOINT_FRACTION + CONE_SOFT_FRACTION) to LyricsBg.copy(alpha = CONE_MID_DIM),
+                                (READPOINT_FRACTION * 2f) to LyricsBg.copy(alpha = CONE_EDGE_DIM),
+                                1f to LyricsBg.copy(alpha = CONE_EDGE_DIM)
+                            )
+                        )
+                )
             }
         }
     }

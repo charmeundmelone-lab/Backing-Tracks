@@ -232,8 +232,21 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
       Segment zwischen zwei Kalibrierpunkten gilt als Instrumental, wenn dort
       keine einzige echte Songzeile liegt. Instrumental → Scroll steht still bis
       exakt zum nächsten Tap-Punkt. Vocal → linearer Scroll zwischen den Punkten.
-    - **Top-Anchor:** die aktuell zu singende Zeile landet am literalen oberen
-      Bildschirmrand (`readpointY = 0f`).
+    - **Lesepunkt + Lichtkegel (seit 2026-07-28, ersetzt den früheren Top-Anchor
+      `readpointY = 0f`):** die zu singende Zeile steht auf 33 % Bildschirmhöhe
+      (`READPOINT_FRACTION`) — vorher klebte sie am literalen oberen Rand und
+      verschwand in dem Moment, in dem sie dran war. Damit die erste/letzte Zeile
+      den Lesepunkt auch erreichen können, hat die Text-Column ein Polster oben
+      (`leadPadTop`) und unten (`leadPadBottom`, Spacer). Darüber liegt ein
+      FESTER, nicht mitscrollender `Brush.verticalGradient` in Hintergrundfarbe
+      (klar am Lesepunkt, symmetrisch zu beiden Rändern auf `CONE_EDGE_DIM`=0.75
+      abblendend → ~25 % Resthelligkeit, bewusst lesbar für weiten Vorausblick).
+      **Bewusst EIN Verlauf über dem Viewport statt Alpha pro Zeile** — kostet
+      nichts pro Frame und komponiert den Textblock nicht neu (sonst genau die
+      Fehlerklasse aus dem Scroll-Performance-Sprint). Die aktive Zeile trägt
+      einen Volt-Balken links (`activeLineIdx`, aus `targetOffsetPx` im 200ms-Takt
+      abgeleitet, NIE aus `animatedOffsetPx`) — der Kegel blendet Nachbarzeilen
+      nur sanft ab, Helligkeit allein würde die aktuelle Zeile nicht verraten.
     - **Nach wie vor gültig (aus der alten Architektur übernommen, NICHT ändern):**
       - KEIN `ScrollState`/`verticalScroll` — eigenes `Layout`, das die
         Content-Column explizit mit `constraints.copy(maxHeight =
@@ -263,6 +276,30 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 **Branch:** `main`  
 **Letzter Code-Commit:** `89dad36` — "Session-Abschluss: CLAUDE.md + .status.md (Tempo-Filter dokumentiert)"  
 **CI Build:** Grün, verifiziert (Commit `89dad36`, Build #339, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+
+### Teleprompter: Lesepunkt 33 % + Lichtkegel (2026-07-28, GrillMe-geplant, UNGETESTET)
+
+User-Report: TabSync läuft gut, aber der Text "läuft davon" — Root Cause im
+GrillMe-Interview gefunden: `readpointY = 0f`, die zu singende Zeile dockt am
+literalen oberen Rand an, erscheint und verschwindet also gleichzeitig. Kein
+Vorlauf, kein Rückblick. Nutzungsmuster laut Interview: überwiegend auswendig,
+kurze Blicke → "sofort wiederfinden" ist die eigentliche Anforderung.
+
+Entscheidungen aus dem Interview: Lesepunkt bei **33 %** (Drittel Rückblick /
+zwei Drittel Vorschau); Lichtkegel **fest im Bildschirm**, Text scrollt hindurch;
+**symmetrischer** Verlauf, Nachbarzeilen fast genauso hell; **"Kegel gewinnt"** —
+kein Sonderfall "schon gesungen" mehr, Helligkeit hängt nur am Abstand zum
+Lesepunkt; Ränder auf ~25 % Resthelligkeit (nicht schwarz, weiter Vorausblick
+muss lesbar bleiben). Sein eigenes Pre-mortem ("ich finde mich nicht wieder")
+wird durch den **Volt-Balken links an der aktiven Zeile** abgefangen — gleiche
+Sprache wie der aktive Song in der Setlist. Umsetzung siehe Gotcha 12.
+
+- **Nicht verifiziert:** kein Gradle-Build in der Sandbox möglich (Google-Maven
+  403, wie immer). **Nächste Session: live testen** — steht die zu singende Zeile
+  jetzt auf einem Drittel Höhe, ist der Balken beim kurzen Blick eindeutig, und
+  sind die Randbereiche noch lesbar genug zum Vorausschauen? Feinjustierung liefe
+  über die vier Konstanten am Kopf von `LyricsOverlay.kt`
+  (`READPOINT_FRACTION`/`CONE_SOFT_FRACTION`/`CONE_MID_DIM`/`CONE_EDGE_DIM`).
 
 ### Tempo-Filter im Archiv DONE (2026-07-28, Commit `b35d790`, live bestätigt)
 

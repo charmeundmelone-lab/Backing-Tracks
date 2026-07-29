@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,14 +44,10 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -96,7 +91,6 @@ import androidx.compose.ui.zIndex
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.SetProgress
-import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
 import kotlin.math.roundToInt
 
@@ -108,10 +102,6 @@ private val GigWhite   = Color(0xFFFFFFFF)
 private val GigGray    = Color(0xFF777777)
 private val GigRed     = Color(0xFFDC2626)
 
-// Tempo-Chips im "Songs hinzufügen"-Dialog. Bewusst eine eigene Konstante statt
-// eines Imports aus MainScreen.kt: das Pendant dort ist file-private, und beide
-// Dateien halten ohnehin ihre eigenen Farb-/Label-Paletten (siehe GigCool vs. Cool).
-private val gigTempoTagLabels = listOf(1 to "Langsam", 2 to "Mittel", 3 to "Schnell")
 // Tonart/Kapo — bewusst deutlich heller als GigGray: auf der Bühne die beiden
 // wichtigsten Spiel-Infos der Songzeile, waren im alten Blaugrau zu dunkel.
 private val GigCool    = Color(0xFFC2D6EA)
@@ -146,7 +136,12 @@ private fun parseDurationSeconds(s: String): Int {
 }
 
 @Composable
-fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel, isLocked: Boolean = false) {
+fun GigManagementScreen(
+    gigVm: GigViewModel,
+    playerVm: PlayerViewModel,
+    isLocked: Boolean = false,
+    onRequestAddSongs: (SetEntity) -> Unit = {}
+) {
     val allGigs       by gigVm.allGigs.collectAsState()
     val selectedGigId by gigVm.selectedGigId.collectAsState()
     val setsForGig    by gigVm.setsForSelectedGig.collectAsState()
@@ -170,7 +165,8 @@ fun GigManagementScreen(gigVm: GigViewModel, playerVm: PlayerViewModel, isLocked
             isLocked  = isLocked,
             onBack    = { gigVm.selectGig(null) },
             onCreate  = { gigVm.createSetForGig(selectedGig.gigId, it, setsForGig.size) },
-            onDeleteSet = { gigVm.deleteSet(it) }
+            onDeleteSet = { gigVm.deleteSet(it) },
+            onRequestAddSongs = onRequestAddSongs
         )
     }
 }
@@ -291,7 +287,8 @@ private fun GigDetailView(
     isLocked: Boolean,
     onBack: () -> Unit,
     onCreate: (String) -> Unit,
-    onDeleteSet: (SetEntity) -> Unit
+    onDeleteSet: (SetEntity) -> Unit,
+    onRequestAddSongs: (SetEntity) -> Unit
 ) {
     var showDialog   by remember { mutableStateOf(false) }
     var showOverview by remember { mutableStateOf(false) }
@@ -397,12 +394,13 @@ private fun GigDetailView(
             }
         } else if (currentSet != null) {
             SetCard(
-                set              = currentSet,
-                gigVm            = gigVm,
-                playerVm         = playerVm,
-                isLocked         = isLocked,
-                onResetCompleted = { gigVm.resetCompletedForSet(currentSet.setId) },
-                modifier         = Modifier.weight(1f)
+                set               = currentSet,
+                gigVm             = gigVm,
+                playerVm          = playerVm,
+                isLocked          = isLocked,
+                onResetCompleted  = { gigVm.resetCompletedForSet(currentSet.setId) },
+                onRequestAddSongs = { onRequestAddSongs(currentSet) },
+                modifier          = Modifier.weight(1f)
             )
         }
     }
@@ -743,6 +741,7 @@ private fun SetCard(
     playerVm: PlayerViewModel,
     isLocked: Boolean,
     onResetCompleted: () -> Unit,
+    onRequestAddSongs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context     = LocalContext.current
@@ -757,7 +756,6 @@ private fun SetCard(
     var draggingId       by remember(set.setId) { mutableStateOf<Long?>(null) }
     var dragOffset       by remember(set.setId) { mutableStateOf(0f) }
     var menuExpanded     by remember(set.setId) { mutableStateOf(false) }
-    var showAddSongs     by remember(set.setId) { mutableStateOf(false) }
 
     LaunchedEffect(set.setId) { gigVm.sanitizeSetPositions(set.setId) }
     LaunchedEffect(set.setId) { gigVm.armSetIfIdle(set.setId, playerVm) }
@@ -836,7 +834,7 @@ private fun SetCard(
                 ) {
                     DropdownMenuItem(
                         text = { Text("Songs hinzufügen", color = GigWhite) },
-                        onClick = { menuExpanded = false; showAddSongs = true }
+                        onClick = { menuExpanded = false; onRequestAddSongs() }
                     )
                     DropdownMenuItem(
                         text = { Text("Completed zurücksetzen", color = GigWhite) },
@@ -947,17 +945,6 @@ private fun SetCard(
         }
     }
 
-    if (showAddSongs) {
-        val allSongs by playerVm.songs.collectAsState()
-        val songIdsInGig by gigVm.getSongIdsInGig(set.gigOwnerId).collectAsState(emptyList())
-        AddSongsToSetDialog(
-            allSongs     = allSongs,
-            alreadyInSet = songs.map { it.song.id }.toSet(),
-            plannedInGig = songIdsInGig.toSet(),
-            onConfirm    = { ids -> gigVm.addSongsToSet(set.setId, ids, playerVm); showAddSongs = false },
-            onDismiss    = { showAddSongs = false }
-        )
-    }
 }
 
 @Composable
@@ -1184,166 +1171,6 @@ private fun SetSongRow(
 }
 
 // ── Dialog ────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun AddSongsToSetDialog(
-    allSongs: List<Song>,
-    alreadyInSet: Set<Long>,
-    plannedInGig: Set<Long> = emptySet(),
-    onConfirm: (List<Long>) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var query by remember { mutableStateOf("") }
-    var selectedIds by remember { mutableStateOf(emptySet<Long>()) }
-    var pendingConfirm by remember { mutableStateOf(false) }
-    // Tempo-Filter wie im Archiv: 0 = kein Filter, sonst tempoTag 1..3. Rein lokal —
-    // der Archiv-Filter im PlayerViewModel bleibt davon unberührt, damit das Öffnen
-    // dieses Dialogs die Archiv-Ansicht dahinter nicht verstellt.
-    var tempoFilter by remember { mutableStateOf(0) }
-
-    val available = remember(allSongs, alreadyInSet) {
-        allSongs.filter { it.id !in alreadyInSet }
-    }
-    // Suchbegriff UND Tempo-Chip müssen beide passen (gleiche UND-Verknüpfung wie
-    // filteredSongs im PlayerViewModel). Ungetaggte Songs (tempoTag == 0) fallen bei
-    // aktivem Filter automatisch raus — kein Sonderfall nötig.
-    val filtered = remember(available, query, tempoFilter) {
-        available.filter { song ->
-            val matchesQuery = query.isBlank() ||
-                song.title.contains(query, ignoreCase = true) ||
-                song.artist.contains(query, ignoreCase = true)
-            val matchesTempo = tempoFilter == 0 || song.tempoTag == tempoFilter
-            matchesQuery && matchesTempo
-        }
-    }
-
-    // Bewusst NICHT die gefilterte Liste: wer über mehrere Tempo-Chips hinweg
-    // markiert, erwartet am Ende ALLE markierten Songs im Set (gleiche Regel wie
-    // beim Archiv-Batch, Fix vom 2026-07-28). Reihenfolge = Archiv-Reihenfolge.
-    fun orderedSelection(): List<Long> = available.filter { it.id in selectedIds }.map { it.id }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor   = GigBgCard,
-        title = { Text("Songs zum Set hinzufügen", color = GigWhite, fontWeight = FontWeight.Bold) },
-        text  = {
-            Column {
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true,
-                    placeholder = { Text("Suchen …", color = GigGray, fontSize = 13.sp) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = GigVolt, unfocusedBorderColor = GigGray,
-                        focusedTextColor = GigWhite, unfocusedTextColor = GigWhite,
-                        cursorColor = GigVolt
-                    )
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                // Tempo-Chips, exakt wie in der Archiv-Suche: genau einer aktiv,
-                // nochmal tippen schaltet ihn wieder aus. Die Auswahl (selectedIds)
-                // überlebt den Filterwechsel bewusst — man kann erst "Langsam" und
-                // dann "Schnell" durchgehen und in beiden markieren.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    gigTempoTagLabels.forEach { (tag, label) ->
-                        val selected = tempoFilter == tag
-                        Button(
-                            onClick = { tempoFilter = if (tempoFilter == tag) 0 else tag },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selected) GigVolt else GigBgTrack
-                            ),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                label,
-                                color = if (selected) Color.Black else GigVolt,
-                                fontSize = 12.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                when {
-                    available.isEmpty() -> Text(
-                        "Alle Archiv-Songs sind bereits in diesem Set.",
-                        color = GigGray, fontSize = 13.sp, modifier = Modifier.padding(vertical = 16.dp)
-                    )
-                    filtered.isEmpty() -> Text(
-                        "Keine Treffer.",
-                        color = GigGray, fontSize = 13.sp, modifier = Modifier.padding(vertical = 16.dp)
-                    )
-                    else -> LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                        items(filtered, key = { it.id }) { song ->
-                            val plannedElsewhere = song.id in plannedInGig
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer {
-                                        alpha = if (plannedElsewhere) 0.4f else 1f
-                                        compositingStrategy = CompositingStrategy.ModulateAlpha
-                                    }
-                                    .clickable {
-                                        selectedIds = if (song.id in selectedIds)
-                                            selectedIds - song.id else selectedIds + song.id
-                                    }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = song.id in selectedIds,
-                                    onCheckedChange = {
-                                        selectedIds = if (it) selectedIds + song.id else selectedIds - song.id
-                                    },
-                                    colors = CheckboxDefaults.colors(checkedColor = GigVolt, uncheckedColor = GigGray)
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(song.title, color = GigWhite, fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(song.artist, color = GigGray, fontSize = 12.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = selectedIds.isNotEmpty(), onClick = {
-                if (selectedIds.any { it in plannedInGig }) pendingConfirm = true
-                else onConfirm(orderedSelection())
-            }) {
-                Text("Hinzufügen (${selectedIds.size})", color = GigVolt, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Abbrechen", color = GigGray) }
-        }
-    )
-
-    if (pendingConfirm) {
-        AlertDialog(
-            onDismissRequest = { pendingConfirm = false },
-            containerColor   = GigBgCard,
-            title = { Text("Schon im Gig verplant", color = GigWhite, fontWeight = FontWeight.Bold) },
-            text  = { Text("Mindestens ein gewählter Song ist in diesem Gig bereits einem anderen Set zugeordnet. Trotzdem alle hinzufügen?",
-                color = GigGray, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = { pendingConfirm = false; onConfirm(orderedSelection()) }) {
-                    Text("Trotzdem hinzufügen", color = GigVolt, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingConfirm = false }) { Text("Abbrechen", color = GigGray) }
-            }
-        )
-    }
-}
 
 @Composable
 private fun CreateNameDialog(

@@ -124,7 +124,8 @@ app/src/main/java/de/livegigplayer/pro/
 │   │                             seit "Set-Umschalten" nur noch über SetSwitcherRow im
 │   │                             SetSwitcherSheet (nicht mehr in SetCard). SetCards eigenes
 │   │                             "⋮"-DropdownMenu enthält nur noch song-bezogene Aktionen
-│   │                             ("Songs hinzufügen" → AddSongsToSetDialog, "Completed
+│   │                             ("Songs hinzufügen" → schaltet in den Archiv-Tab, siehe
+│   │                             Sprint "Songs hinzufügen läuft übers Archiv"; "Completed
 │   │                             zurücksetzen"); der per-Set "Bearbeiten"-Toggle steuert
 │   │                             weiterhin nur die Song-Zeilen-Controls (End-Aktion/Entfernen).
 │   └── LyricsOverlay.kt      — Vollbild-Teleprompter (nur Lyrics, keine Akkorde), Hochkant
@@ -276,6 +277,48 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 **Branch:** `main`  
 **Letzter Code-Commit:** `89dad36` — "Session-Abschluss: CLAUDE.md + .status.md (Tempo-Filter dokumentiert)"  
 **CI Build:** Grün, verifiziert (Commit `89dad36`, Build #339, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+
+### Songs hinzufügen läuft übers Archiv (2026-07-29, UNGETESTET)
+
+User-Wunsch nach zwei Fehlermeldungen am `AddSongsToSetDialog` ("es erscheinen
+nicht alle Songs", "einige sind ausgegraut obwohl sie es nicht dürften"): beim
+Hinzufügen soll sich **das Songarchiv als einzige Quelle der Wahrheit** öffnen.
+Vorgabe: nach dem Hinzufügen zurück ins Set, keine Logikfehler.
+
+- **`AddSongsToSetDialog` ersatzlos entfernt** (~160 Zeilen). Er hatte Suche,
+  Tempo-Chips, Mehrfachauswahl und Einfüge-Reihenfolge als zweite, eigene
+  Implementierung — genau deshalb musste derselbe Auswahl-Bug zweimal gefixt
+  werden (Commits `9a002b7` Archiv, `e428746` Dialog).
+- **Neuer Ablauf:** `SetCard` "⋮" → "Songs hinzufügen" ruft `onRequestAddSongs(set)`
+  (durchgereicht `MainScreen → GigManagementScreen → GigDetailView → SetCard`,
+  gleiches Muster wie `isLocked`, Gotcha 10). `MainScreen` merkt sich das Ziel-Set
+  (`addSongsTarget: SetEntity?`) und schaltet auf Tab Archiv; "Hinzufügen" bzw.
+  "Abbrechen" schaltet zurück auf den Set-Tab.
+- **Archiv im Hinzufügen-Modus:** `selectionMode` ist ZWINGEND an
+  (`selectedIds.isNotEmpty() || addMode`) — sonst spielt der erste Tap den Song ab
+  statt ihn zu markieren. Oben ein Hinweisband mit Set-Name + Abbrechen, unten
+  `AddToSetBar` (Zähler + "→ Set-Name") statt der `GenreBar`; `BackHandler` bricht
+  den Modus ab statt die App zu verlassen; Tab-Wechsel über die Tab-Leiste beendet
+  ihn ebenfalls (sonst bliebe eine unsichtbare Auswahl für ein verlassenes Set).
+- **REPLACE-Falle abgesichert (wichtigster Logikpunkt):** `insertCrossRef` läuft auf
+  `OnConflictStrategy.REPLACE` — ein Song, der im Ziel-Set schon steht, würde beim
+  erneuten Hinzufügen `isCompleted`/`isSpontaneous`/`endAction` verlieren und ans
+  Set-Ende wandern. Solche Songs sind im Archiv daher **sichtbar** (die Liste bleibt
+  vollständig — das war die Beschwerde), aber nicht markierbar: gedimmt, mit
+  "im Set"-Label, Tap erklärt es per Toast. Zusätzlich filtert der Confirm-Pfad sie
+  nochmal heraus (Gürtel und Hosenträger).
+- **Erhalten geblieben:** die Rückfrage "Schon im Gig verplant" vor dem Hinzufügen
+  (jetzt in `ArchivTab`); sie warnt, blockiert aber nicht. Ihr `showPlannedWarn`-State
+  wird beim Moduswechsel per `LaunchedEffect(addSongsTarget?.setId)` zurückgesetzt —
+  `ArchivTab` bleibt beim Verlassen komponiert, sonst poppte ein stehen gelassener
+  Dialog beim nächsten Öffnen sofort wieder auf (beim Gegenlesen gefunden).
+- **Ausnahme bei der Suche:** Suche schließen räumt sonst die Auswahl mit auf — im
+  Hinzufügen-Modus NICHT, dort ist die Auswahl der Zweck des Bildschirms und endet
+  nur über "Hinzufügen"/"Abbrechen".
+- **Nicht verifiziert:** kein Gradle-Build in der Sandbox (Google-Maven 403).
+  **Nächste Session live testen:** Set → ⋮ → Songs hinzufügen → über mehrere
+  Tempo-Chips hinweg markieren → Hinzufügen → landet man wieder im Set und sind
+  alle Songs drin? Zurück-Geste und Tab-Wechsel als Abbruch prüfen.
 
 ### Teleprompter: Lesepunkt 33 % + Lichtkegel (2026-07-28, GrillMe-geplant, UNGETESTET)
 
@@ -2060,10 +2103,11 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   UI-Screens, Report als Artifact, danach komplett umgesetzt (Commit b5732f5,
   siehe Sprint 5.29). Details siehe dort — inkl. Lösch-Bestätigungen,
   Performance-Lock im Gig-Set-Tab, Wisch-Hinweise, LOOP-Toasts u.a.
-- ✅ **Song-zu-Set direkt im UI (ERLEDIGT):** Neuer Menüpunkt "Songs hinzufügen"
-  im "⋮"-Menü der `SetCard` öffnet `AddSongsToSetDialog` (Suchfeld + Checkbox-Liste
-  aller Archiv-Songs, die noch nicht im Set sind), ruft `gigVm.addSongsToSet()`.
-  Bisheriger Weg über den Archiv-Batch-Dialog bleibt zusätzlich bestehen.
+- ✅ **Song-zu-Set direkt im UI (ERLEDIGT, seit 2026-07-29 über den Archiv-Tab):**
+  Menüpunkt "Songs hinzufügen" im "⋮"-Menü der `SetCard` schaltet in den Archiv-Tab
+  (früher: eigener `AddSongsToSetDialog`, entfernt). Siehe Sprint "Songs hinzufügen
+  läuft übers Archiv". Der Weg über die Archiv-Mehrfachauswahl + "→ Set" bleibt
+  zusätzlich bestehen.
 - **Aufräumen toter Code:** `SetDao.updateSongPosition`, `sanitizeSetPositionsInternal`
   und Reste der alten Shift-Strategie prüfen, ob noch gebraucht (Batch-Write hat sie
   größtenteils ersetzt). Nicht löschen ohne Nutzungs-Check (z.B. addSongsToSet,

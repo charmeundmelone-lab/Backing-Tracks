@@ -13,6 +13,7 @@ import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -133,11 +134,15 @@ import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbDetachTester
 import de.livegigplayer.pro.audio.UsbIsoToneTester
 import de.livegigplayer.pro.audio.UsbToneTester
+import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.Song
+import de.livegigplayer.pro.data.SongInSet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 private val BgDeep      = Color(0xFF0A0A0A)
@@ -213,6 +218,10 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Sets
     var isLocked         by remember { mutableStateOf(false) }
+    // Ziel-Set des "Songs hinzufügen"-Modus. Nicht-null ⇒ der Archiv-Tab läuft im
+    // Auswahl-Modus für dieses Set (eine einzige Quelle der Wahrheit fürs Auswählen,
+    // statt eines zweiten Dialogs mit eigener Such-/Filter-/Auswahl-Logik).
+    var addSongsTarget   by remember { mutableStateOf<SetEntity?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -235,7 +244,13 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             // Top bar (enthält Tab-Navigation)
             TopBar(
                 selectedTab   = selectedTab,
-                onTabSelect   = { selectedTab = it },
+                onTabSelect   = { tab ->
+                    // Verlässt man den Archiv-Tab per Tab-Leiste, endet der
+                    // Hinzufügen-Modus — sonst bliebe eine unsichtbare Auswahl für
+                    // ein Set stehen, das man längst verlassen hat.
+                    if (tab != 0 && addSongsTarget != null) { addSongsTarget = null; vm.clearSelection() }
+                    selectedTab = tab
+                },
                 isLocked      = isLocked,
                 onLockToggle  = { isLocked = !isLocked },
                 onMixerToggle = { vm.toggleMixer() },
@@ -246,8 +261,23 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             // Tab content
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
-                    0 -> ArchivTab(vm = vm, gigVm = gigVm, isLocked = isLocked)
-                    1 -> GigManagementScreen(gigVm = gigVm, playerVm = vm, isLocked = isLocked)
+                    0 -> ArchivTab(
+                        vm                = vm,
+                        gigVm             = gigVm,
+                        isLocked          = isLocked,
+                        addSongsTarget    = addSongsTarget,
+                        onFinishAddSongs  = { addSongsTarget = null; vm.clearSelection(); selectedTab = 1 }
+                    )
+                    1 -> GigManagementScreen(
+                        gigVm    = gigVm,
+                        playerVm = vm,
+                        isLocked = isLocked,
+                        onRequestAddSongs = { set ->
+                            vm.clearSelection()   // nie mit Altlasten aus einer früheren Auswahl starten
+                            addSongsTarget = set
+                            selectedTab = 0
+                        }
+                    )
                 }
             }
 
@@ -805,7 +835,13 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
 // ── Tab A: Archiv ─────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolean) {
+private fun ArchivTab(
+    vm: PlayerViewModel,
+    gigVm: GigViewModel,
+    isLocked: Boolean,
+    addSongsTarget: SetEntity? = null,
+    onFinishAddSongs: () -> Unit = {}
+) {
     val context       = LocalContext.current
     val songs         by vm.filteredSongs.collectAsState()
     val allSongs      by vm.songs.collectAsState()
@@ -813,18 +849,67 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
     val selectedIds   by vm.selectedIds.collectAsState()
     val importStatus  by vm.importStatus.collectAsState()
     val searchQuery   by vm.searchQuery.collectAsState()
-    val selectionMode = selectedIds.isNotEmpty()
     val activeSetId              by gigVm.activeSetId.collectAsState()
     val completedSongIdsInSet    by gigVm.completedSongIdsInActiveSet.collectAsState()
     val plannedSongIdsInGig      by gigVm.songIdsInSelectedGig.collectAsState()
 
+    // ── Hinzufügen-Modus ────────────────────────────────────────────────────
+    // Das Archiv ist die einzige Quelle der Wahrheit fürs Song-Auswählen. Kommt
+    // man aus einer Set-Karte, läuft es im Auswahl-Modus für dieses Ziel-Set:
+    // Tap markiert (statt abzuspielen), unten steht die Hinzufügen-Leiste.
+    val addMode = addSongsTarget != null
+    // selectionMode ist im Hinzufügen-Modus IMMER an — sonst würde der erste Tap
+    // den Song abspielen statt ihn zu markieren (auf der Bühne fatal).
+    val selectionMode = selectedIds.isNotEmpty() || addMode
+
+    // Songs, die im Ziel-Set bereits stehen. Sie bleiben sichtbar (die Liste soll
+    // vollständig sein), sind aber nicht markierbar: insertCrossRef läuft auf
+    // REPLACE — ein erneutes Hinzufügen würde isCompleted/isSpontaneous/endAction
+    // des Songs zurücksetzen und ihn ans Set-Ende verschieben.
+    val targetSetFlow: Flow<List<SongInSet>> = remember(addSongsTarget?.setId) {
+        addSongsTarget?.let { gigVm.getSongsInSet(it.setId) } ?: flowOf(emptyList())
+    }
+    val songsInTargetSet by targetSetFlow.collectAsState(emptyList())
+    val idsInTargetSet = remember(songsInTargetSet) { songsInTargetSet.map { it.song.id }.toSet() }
+
     var searchActive     by remember { mutableStateOf(false) }
     var editSheet        by remember { mutableStateOf<Song?>(null) }
     var showSetPicker    by remember { mutableStateOf(false) }
+    var showPlannedWarn  by remember { mutableStateOf(false) }
     val sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope            = rememberCoroutineScope()
 
+    // Zurück-Geste bricht den Hinzufügen-Modus ab, statt die App zu verlassen.
+    BackHandler(enabled = addMode) { onFinishAddSongs() }
+
+    // ArchivTab bleibt beim Verlassen des Modus komponiert — ohne diesen Reset
+    // bliebe ein offen stehen gelassener Warndialog als true im Zustand hängen
+    // und würde beim nächsten Öffnen des Hinzufügen-Modus sofort aufpoppen.
+    LaunchedEffect(addSongsTarget?.setId) { showPlannedWarn = false }
+
     Column(modifier = Modifier.fillMaxSize()) {
+        // Hinweisband: macht unmissverständlich, dass das Archiv gerade als
+        // Auswahl-Fläche für ein Set dient und ein Tap nicht abspielt.
+        if (addSongsTarget != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(BgBatch)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.QueueMusic, contentDescription = null,
+                    tint = Volt, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Songs für \u00bb${addSongsTarget.name}\u00ab auswählen",
+                    color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onFinishAddSongs) {
+                    Text("Abbrechen", color = Gray, fontSize = 12.sp)
+                }
+            }
+        }
+
         // Search bar
         val tempoFilter by vm.tempoFilter.collectAsState()
         SearchBar(
@@ -838,7 +923,12 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                 // Filterwechsel INNERHALB der offenen Suche (tempo-übergreifend
                 // sammeln), aber nicht das Schließen — sonst blieben unsichtbare
                 // Markierungen zurück, die man nicht mehr sieht.
-                if (!searchActive) { vm.setSearchQuery(""); vm.setTempoFilter(0); vm.clearSelection() }
+                // Ausnahme Hinzufügen-Modus: dort IST die Auswahl der Zweck des
+                // Bildschirms — sie endet nur über "Hinzufügen" oder "Abbrechen".
+                if (!searchActive) {
+                    vm.setSearchQuery(""); vm.setTempoFilter(0)
+                    if (!addMode) vm.clearSelection()
+                }
             },
             onChange = { vm.setSearchQuery(it) },
             onTempoFilter = { vm.setTempoFilter(it) }
@@ -878,6 +968,16 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                 ) { index, song ->
                     val isCompletedInActiveSet = song.id in completedSongIdsInSet
                     val isPlannedInGig         = song.id in plannedSongIdsInGig
+                    val isInTargetSet          = addMode && song.id in idsInTargetSet
+                    // Ein Song, der im Ziel-Set schon steht, darf nicht erneut
+                    // markiert werden (REPLACE-Falle, siehe oben) — der Tap sagt
+                    // stattdessen, warum nichts passiert.
+                    val toggle: () -> Unit = {
+                        if (isInTargetSet) Toast.makeText(
+                            context, "\u201c${song.title}\u201d ist bereits in diesem Set", Toast.LENGTH_SHORT
+                        ).show()
+                        else vm.toggleSelect(song.id)
+                    }
                     ArchivSongRow(
                         index                  = index + 1,
                         song                   = song,
@@ -887,9 +987,10 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                         selectionMode          = selectionMode,
                         isCompletedInActiveSet = isCompletedInActiveSet,
                         isPlannedInGig         = isPlannedInGig,
+                        isInTargetSet          = isInTargetSet,
                         onPlay          = { if (!isLocked) vm.selectSong(song, context) },
-                        onToggleSelect  = { vm.toggleSelect(song.id) },
-                        onActivateBatch = { vm.toggleSelect(song.id) },
+                        onToggleSelect  = toggle,
+                        onActivateBatch = toggle,
                         onOpenSheet     = { editSheet = song },
                         onDelete        = { vm.deleteSong(song) },
                         onQueueNext     = {
@@ -909,8 +1010,35 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
             }
         }
 
-        // Batch genre bar + Set-Zuweisung
-        if (selectionMode) {
+        // Untere Leiste: im Hinzufügen-Modus die Set-Leiste, sonst wie gehabt die
+        // Genre-/Batch-Leiste. Bewusst exklusiv — zwei Bestätigen-Knöpfe
+        // übereinander wären auf der Bühne eine Fehlerquelle.
+        if (addSongsTarget != null) {
+            AddToSetBar(
+                setName   = addSongsTarget.name,
+                count     = selectedIds.size,
+                onConfirm = {
+                    // Sicherheitsnetz: bereits im Ziel-Set stehende Songs können
+                    // hier gar nicht markiert sein, werden aber trotzdem gefiltert
+                    // (REPLACE würde ihren Completed-/End-Aktion-Zustand löschen).
+                    val ids = allSongs
+                        .filter { it.id in selectedIds && it.id !in idsInTargetSet }
+                        .map { it.id }
+                    if (ids.isEmpty()) {
+                        onFinishAddSongs()
+                    } else if (ids.any { it in plannedSongIdsInGig }) {
+                        showPlannedWarn = true
+                    } else {
+                        gigVm.addSongsToSet(addSongsTarget.setId, ids, vm)
+                        Toast.makeText(context,
+                            "${ids.size} Song${if (ids.size == 1) "" else "s"} → ${addSongsTarget.name}",
+                            Toast.LENGTH_SHORT).show()
+                        onFinishAddSongs()
+                    }
+                },
+                onCancel = onFinishAddSongs
+            )
+        } else if (selectionMode) {
             GenreBar(
                 count      = selectedIds.size,
                 onGenre    = { vm.applyGenre(it) },
@@ -918,6 +1046,34 @@ private fun ArchivTab(vm: PlayerViewModel, gigVm: GigViewModel, isLocked: Boolea
                 onAddToSet = { showSetPicker = true }
             )
         }
+    }
+
+    // Gleiche Rückfrage wie früher im Dialog: warnt vor Doppelbuchung innerhalb
+    // desselben Gigs, blockiert sie aber nicht (Zugabe/Wunsch kann doppelt laufen).
+    if (showPlannedWarn && addSongsTarget != null) {
+        val ids = allSongs
+            .filter { it.id in selectedIds && it.id !in idsInTargetSet }
+            .map { it.id }
+        AlertDialog(
+            onDismissRequest = { showPlannedWarn = false },
+            containerColor   = BgCard,
+            title = { Text("Schon im Gig verplant", color = White, fontWeight = FontWeight.Bold) },
+            text  = { Text("Mindestens ein gewählter Song ist in diesem Gig bereits einem anderen Set zugeordnet. Trotzdem alle hinzufügen?",
+                color = Gray, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPlannedWarn = false
+                    gigVm.addSongsToSet(addSongsTarget.setId, ids, vm)
+                    Toast.makeText(context,
+                        "${ids.size} Song${if (ids.size == 1) "" else "s"} → ${addSongsTarget.name}",
+                        Toast.LENGTH_SHORT).show()
+                    onFinishAddSongs()
+                }) { Text("Trotzdem hinzufügen", color = Volt, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPlannedWarn = false }) { Text("Abbrechen", color = Gray) }
+            }
+        )
     }
 
     // Set-Picker Dialog
@@ -988,6 +1144,9 @@ private fun ArchivSongRow(
     isLocked: Boolean, selectionMode: Boolean,
     isCompletedInActiveSet: Boolean = false,
     isPlannedInGig: Boolean = false,
+    // Nur im Hinzufügen-Modus gesetzt: Song steht bereits im Ziel-Set und ist
+    // deshalb nicht markierbar (siehe ArchivTab, REPLACE-Falle).
+    isInTargetSet: Boolean = false,
     onPlay: () -> Unit, onToggleSelect: () -> Unit, onActivateBatch: () -> Unit,
     onOpenSheet: () -> Unit, onDelete: () -> Unit,
     onQueueNext: () -> Unit, onQueueEnd: () -> Unit
@@ -1033,7 +1192,7 @@ private fun ArchivSongRow(
         selected        -> BgTrack
         else            -> BgCard
     }
-    val rowAlpha = if (isCompletedInActiveSet || isPlannedInGig) 0.4f else 1f
+    val rowAlpha = if (isCompletedInActiveSet || isPlannedInGig || isInTargetSet) 0.4f else 1f
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -1150,6 +1309,17 @@ private fun ArchivSongRow(
                 archivMetaLine(song, rowAlpha),
                 fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+        }
+
+        // Sagt im Hinzufügen-Modus, WARUM diese Zeile nicht markierbar ist —
+        // ohne das wirkte sie schlicht kaputt.
+        if (isInTargetSet) {
+            Text(
+                "im Set",
+                color = Volt.copy(alpha = 0.7f * rowAlpha),
+                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1
+            )
+            Spacer(modifier = Modifier.width(4.dp))
         }
 
         if (interactive) {
@@ -1978,6 +2148,42 @@ private fun fmtMs(ms: Long): String {
 }
 
 // ── Genre Bar ─────────────────────────────────────────────────────────────────
+// Untere Leiste im Hinzufügen-Modus. Bewusst ohne Genre-Knöpfe: hier geht es
+// ausschließlich darum, die Auswahl ins Ziel-Set zu übernehmen oder abzubrechen.
+@Composable
+private fun AddToSetBar(setName: String, count: Int, onConfirm: () -> Unit, onCancel: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(BgDeep)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "$count Song${if (count == 1) "" else "s"} markiert",
+            color = White, fontSize = 13.sp, modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = onCancel) { Text("Abbrechen", color = Gray, fontSize = 12.sp) }
+        Spacer(modifier = Modifier.width(4.dp))
+        Button(
+            onClick = onConfirm,
+            enabled = count > 0,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Volt, disabledContainerColor = BgCard
+            ),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Icon(Icons.Filled.QueueMusic, contentDescription = null,
+                tint = if (count > 0) Color.Black else Gray, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                "→ $setName",
+                color = if (count > 0) Color.Black else Gray,
+                fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 @Composable
 private fun GenreBar(count: Int, onGenre: (String) -> Unit, onClear: () -> Unit, onAddToSet: () -> Unit) {
     var showCustomDialog by remember { mutableStateOf(false) }

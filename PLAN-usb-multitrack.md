@@ -167,6 +167,35 @@ Recherche-Ergebnis (Quellen: Sweetwater, DcSoundOp Firmware v11749, behringer.co
   am eigenen Gerät den `UsbDescriptorScanner` laufen lassen und `bNrChannels` am
   OUT-Endpoint ablesen — gemessen statt geglaubt.
 
+## Noch zu klären, BEVOR Code entsteht (Stand 2026-07-29, Ende der Interview-Session)
+
+Das Interview hat das *Verhalten* geklärt, nicht die *Mechanik*. Diese sechs Punkte sind
+offen und sollten in der nächsten Session zuerst besprochen werden:
+
+1. **Wer liefert die Samples?** Heute dekodiert ExoPlayer pro Stem. Der native
+   usbfs-Weg braucht rohes PCM aus bis zu 6 Dateien, sample-genau synchron, in einen
+   isochronen Puffer. Eigener WAV-Reader oder ExoPlayer-Extraktion? Damit hängt der
+   komplette Transport (Start, Position, Ende) am Multitrack-Weg neu — "nur Play/Stop"
+   ist deutlich mehr Arbeit, als es klingt.
+2. **Welche App-Funktionen gelten im Multitrack-Modus?** Countdown/Fortschritt, Seek,
+   Loop, Auto-Stop und vor allem der **Lyrics-Teleprompter** hängen an `positionMs` aus
+   `AudioEngine`. Im Multitrack kommt die Position aus der nativen Engine. Was läuft
+   weiter, was wird bewusst gesperrt? (Das ist Pre-mortem-Risiko (a) des Users:
+   "App-Funktionen gehen im Multitrack-Modus verloren".)
+3. **Ist die Klinke im Multitrack wirklich still?** Entschieden ist "das Handy gibt
+   nichts mehr über Klinke aus". Offen: wird `AudioEngine` dafür hart stillgelegt?
+   Solange sie mitläuft, existiert ein zweiter Click-Pfad — genau das, was nie
+   passieren darf.
+4. **Stem → Rolle beim Import.** Wie wird ein Dateiname einer der sechs Rollen
+   zugeordnet, und wo wird die Antwort auf "unbekannter Stem" bzw. die Rollenart
+   "Stereo" gespeichert (pro Song)? Braucht neue DB-Felder.
+5. **Room-Migration v19→v20 einmal komplett planen:** Modus am Gig, globales Routing
+   (Rolle → Kanal, L/R, Mute), Stem-Rollen pro Song. Lieber einmal sauber als zweimal
+   migrieren.
+6. **USB-Berechtigung auf der Bühne.** Android fragt beim Anstecken um Erlaubnis für
+   das Gerät. Ohne `USB_DEVICE_ATTACHED`-Intent-Filter / "immer für dieses Gerät
+   verwenden" steht mitten im Soundcheck ein Systemdialog im Weg.
+
 ## Nächster Schritt (erst jetzt technisch)
 
 1. Diagnose-Code von Branch `claude/read-current-md-file-7fy90m` nach `main` holen

@@ -273,14 +273,15 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-07-29  
-**Status:** Vier Änderungen gebaut, alle CI-grün, alle noch **UNGETESTET** außer dem Gig-Einsatz der Vorversion:
-Teleprompter-Lesepunkt 33 % + Lichtkegel (#341), Archiv-Auswahl über Tempo-Filter hinweg gefixt (#342),
-Tempo-Chips im Hinzufügen-Dialog (#343, danach mitsamt Dialog wieder entfernt), "Songs hinzufügen"
-läuft jetzt über den Archiv-Tab statt über einen eigenen Dialog (#344).
-**Vom User im echten Gig getestet:** die Version davor lief einwandfrei.  
+**Status:** Vier Änderungen gebaut und **vom User live am Gerät getestet — alle in Ordnung, keine
+Fehler festgestellt** (2026-07-29): Teleprompter-Lesepunkt 33 % + Lichtkegel (#341), Archiv-Auswahl
+über Tempo-Filter hinweg gefixt (#342), Tempo-Chips im Hinzufügen-Dialog (#343, danach mitsamt Dialog
+wieder entfernt), "Songs hinzufügen" läuft jetzt über den Archiv-Tab statt über einen eigenen Dialog
+(#344). Damit ist keine offene Test-Baustelle mehr da.
 **Branch:** `main`  
 **Letzter Code-Commit:** `6efcc6a` — "Songs hinzufuegen laeuft ueber das Archiv statt ueber einen Extra-Dialog"  
-**CI Build:** Grün, verifiziert (Build #344, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**CI Build:** Grün, verifiziert (Build #345, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Nächstes Thema laut User:** USB-Multitrack — Feedback-Sync über Endpoint 0x81 (IN), siehe TODO unten.  
 
 **Offene Gesprächsfäden (noch nicht gebaut, kein Code angefasst):**
 - **Zweitgerät-Anzeige (GrillMe steht noch aus, User will das später durchgehen):** Keyboarder soll
@@ -304,7 +305,7 @@ Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Z
 Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
 alte APKs nach dem Installieren löschen.  
 
-### Songs hinzufügen läuft übers Archiv (2026-07-29, UNGETESTET)
+### Songs hinzufügen läuft übers Archiv (2026-07-29, live bestätigt)
 
 User-Wunsch nach zwei Fehlermeldungen am `AddSongsToSetDialog` ("es erscheinen
 nicht alle Songs", "einige sind ausgegraut obwohl sie es nicht dürften"): beim
@@ -341,12 +342,11 @@ Vorgabe: nach dem Hinzufügen zurück ins Set, keine Logikfehler.
 - **Ausnahme bei der Suche:** Suche schließen räumt sonst die Auswahl mit auf — im
   Hinzufügen-Modus NICHT, dort ist die Auswahl der Zweck des Bildschirms und endet
   nur über "Hinzufügen"/"Abbrechen".
-- **Nicht verifiziert:** kein Gradle-Build in der Sandbox (Google-Maven 403).
-  **Nächste Session live testen:** Set → ⋮ → Songs hinzufügen → über mehrere
-  Tempo-Chips hinweg markieren → Hinzufügen → landet man wieder im Set und sind
-  alle Songs drin? Zurück-Geste und Tab-Wechsel als Abbruch prüfen.
+- **Live getestet und vom User bestätigt (2026-07-29):** "so weit in Ordnung, keine
+  Fehler festgestellt". Kein Gradle-Build in der Sandbox möglich (Google-Maven 403),
+  aber CI grün (#345) + Gerätetest erfolgreich. Nicht mehr offen.
 
-### Teleprompter: Lesepunkt 33 % + Lichtkegel (2026-07-28, GrillMe-geplant, UNGETESTET)
+### Teleprompter: Lesepunkt 33 % + Lichtkegel (2026-07-28, GrillMe-geplant, live bestätigt)
 
 User-Report: TabSync läuft gut, aber der Text "läuft davon" — Root Cause im
 GrillMe-Interview gefunden: `readpointY = 0f`, die zu singende Zeile dockt am
@@ -363,10 +363,8 @@ muss lesbar bleiben). Sein eigenes Pre-mortem ("ich finde mich nicht wieder")
 wird durch den **Volt-Balken links an der aktiven Zeile** abgefangen — gleiche
 Sprache wie der aktive Song in der Setlist. Umsetzung siehe Gotcha 12.
 
-- **Nicht verifiziert:** kein Gradle-Build in der Sandbox möglich (Google-Maven
-  403, wie immer). **Nächste Session: live testen** — steht die zu singende Zeile
-  jetzt auf einem Drittel Höhe, ist der Balken beim kurzen Blick eindeutig, und
-  sind die Randbereiche noch lesbar genug zum Vorausschauen? Feinjustierung liefe
+- **Live getestet und vom User bestätigt (2026-07-29):** "so weit in Ordnung, keine
+  Fehler festgestellt". Nicht mehr offen. Feinjustierung (falls je gewünscht) liefe
   über die vier Konstanten am Kopf von `LyricsOverlay.kt`
   (`READPOINT_FRACTION`/`CONE_SOFT_FRACTION`/`CONE_MID_DIM`/`CONE_EDGE_DIM`).
 
@@ -2014,11 +2012,14 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 #### 🔴 PRIO 1 — Sofort nach Session-Start
 1. ✅ **Branch verifizieren:** `git branch` → `* main` zeigen
 2. ✅ **CI-Status prüfen:** Letzter Build auf `main` noch grün?
-3. 🔵 **Optional:** Lyrics-Teleprompter Live-Test auf echtem Handy
-   - Song mit Lyrics laden
-   - Teleprompter öffnen (Tap auf Song-Titel)
-   - Record → zeilengenaues Tippen → Stop
-   - Abspielen: Läuft Text smooth? Jede Zeile oben beim Singen?
+3. ✅ **Live-Tests erledigt (2026-07-29):** Teleprompter (Lesepunkt 33 % + Lichtkegel)
+   und "Songs hinzufügen über den Archiv-Tab" vom User am Gerät geprüft, beides in
+   Ordnung. Keine offene Test-Baustelle mehr.
+4. 🔵 **Nächstes Thema laut User:** USB-Multitrack — Feedback-Sync über Endpoint
+   0x81 (IN), siehe TODO "Echtes Multitrack-Audio … CQ20B" oben. Achtung: der
+   Diagnose-Code (`cpp/usb_tone.c`, `UsbIsoToneTester.kt`) liegt auf dem alten
+   Branch `claude/read-current-md-file-7fy90m`, NICHT auf `main` — vor dem
+   Weiterbauen erst nach `main` holen.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

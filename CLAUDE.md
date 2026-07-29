@@ -281,7 +281,11 @@ wieder entfernt), "Songs hinzufügen" läuft jetzt über den Archiv-Tab statt ü
 **Branch:** `main`  
 **Letzter Code-Commit:** `6efcc6a` — "Songs hinzufuegen laeuft ueber das Archiv statt ueber einen Extra-Dialog"  
 **CI Build:** Grün, verifiziert (Build #345, `LiveGigPlayer-release.apk` auf `apk-dist`)  
-**Nächstes Thema laut User:** USB-Multitrack — Feedback-Sync über Endpoint 0x81 (IN), siehe TODO unten.  
+**Nächstes Thema laut User:** USB-Multitrack — GrillMe-Interview zur Koexistenz Stereo/Multitrack
+**begonnen, aber nicht abgeschlossen** (2026-07-29). 18 Entscheidungen stehen fest, **4 Punkte sind
+noch offen** — alles in `PLAN-usb-multitrack.md`. Dort weitermachen, BEVOR Code entsteht.
+Wichtigste Vorgabe daraus: der **Stereo-Weg ist unantastbar** (Kill-Kriterium des Users), der
+Multitrack-Weg kommt rein additiv daneben; der **Click darf nie unbeabsichtigt in die PA**.  
 
 **Offene Gesprächsfäden (noch nicht gebaut, kein Code angefasst):**
 - **Zweitgerät-Anzeige (GrillMe steht noch aus, User will das später durchgehen):** Keyboarder soll
@@ -2015,11 +2019,13 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 3. ✅ **Live-Tests erledigt (2026-07-29):** Teleprompter (Lesepunkt 33 % + Lichtkegel)
    und "Songs hinzufügen über den Archiv-Tab" vom User am Gerät geprüft, beides in
    Ordnung. Keine offene Test-Baustelle mehr.
-4. 🔵 **Nächstes Thema laut User:** USB-Multitrack — Feedback-Sync über Endpoint
-   0x81 (IN), siehe TODO "Echtes Multitrack-Audio … CQ20B" oben. Achtung: der
-   Diagnose-Code (`cpp/usb_tone.c`, `UsbIsoToneTester.kt`) liegt auf dem alten
-   Branch `claude/read-current-md-file-7fy90m`, NICHT auf `main` — vor dem
-   Weiterbauen erst nach `main` holen.
+4. 🔴 **USB-Multitrack: GrillMe-Interview zu Ende führen (PRIO 1, kein Code vorher).**
+   `PLAN-usb-multitrack.md` lesen — 18 Entscheidungen stehen, vier Punkte fehlen:
+   (a) Ablauf der Gig-Modus-Abfrage, (b) Bildschirm-Verhalten bei USB-Abbruch mitten
+   im Song, (c) Routing-UI, (d) Kanalzahl/feste Rollen. Reihenfolge einhalten, nicht
+   springen. Erst danach der technische Teil (Feedback-Sync über EP 0x81) — dessen
+   Diagnose-Code (`cpp/usb_tone.c`, `UsbIsoToneTester.kt`) liegt auf dem alten Branch
+   `claude/read-current-md-file-7fy90m`, NICHT auf `main`, und muss vorher geholt werden.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

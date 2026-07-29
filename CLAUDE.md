@@ -272,11 +272,37 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-28  
-**Status:** ✅ Tempo-Filter im Archiv gebaut (Langsam/Mittel/Schnell, Room v18→19) — GrillMe-Interview vollständig durchgeführt, Umsetzung + CI grün, **vom User live getestet: "funktioniert"**.  
+**Datum:** 2026-07-29  
+**Status:** Vier Änderungen gebaut, alle CI-grün, alle noch **UNGETESTET** außer dem Gig-Einsatz der Vorversion:
+Teleprompter-Lesepunkt 33 % + Lichtkegel (#341), Archiv-Auswahl über Tempo-Filter hinweg gefixt (#342),
+Tempo-Chips im Hinzufügen-Dialog (#343, danach mitsamt Dialog wieder entfernt), "Songs hinzufügen"
+läuft jetzt über den Archiv-Tab statt über einen eigenen Dialog (#344).
+**Vom User im echten Gig getestet:** die Version davor lief einwandfrei.  
 **Branch:** `main`  
-**Letzter Code-Commit:** `89dad36` — "Session-Abschluss: CLAUDE.md + .status.md (Tempo-Filter dokumentiert)"  
-**CI Build:** Grün, verifiziert (Commit `89dad36`, Build #339, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Code-Commit:** `6efcc6a` — "Songs hinzufuegen laeuft ueber das Archiv statt ueber einen Extra-Dialog"  
+**CI Build:** Grün, verifiziert (Build #344, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+
+**Offene Gesprächsfäden (noch nicht gebaut, kein Code angefasst):**
+- **Zweitgerät-Anzeige (GrillMe steht noch aus, User will das später durchgehen):** Keyboarder soll
+  live sehen, was gerade läuft und was als Nächstes kommt — KEIN Audio-Sync nötig, nur Anzeige
+  (±100 ms völlig ausreichend). Zwei geklärte Knackpunkte: (a) Room vergibt Song-IDs beim Import
+  automatisch, dieselbe Datei bekommt auf dem zweiten Gerät eine ANDERE ID → es braucht einen
+  stabilen gemeinsamen Schlüssel (z.B. Ordnername aus `audioFilePath`) oder einen DB-Export;
+  (b) der User fährt wegen GSM-Sirren im Flugmodus — ein klassischer Hotspot ist dort auf vielen
+  Geräten gesperrt, also Wi-Fi Direct/Nearby oder Bluetooth wählen, NICHT Tethering.
+- **Freies Spielen aus dem Archiv (vom User zurückgestellt, "das bleibt alles so"):** Analyse liegt
+  vor — Ausgrauung hat ZWEI Quellen (`isCompletedInActiveSet` und `isPlannedInGig`), und ein naiver
+  Frei-Modus über `isGigSetMode` wäre falsch, weil `skipNext()` das Flag an jeden Folgesong vererbt.
+- **Einzelnen Song auf "nicht gespielt" zurücksetzen:** Es gibt bisher nur den Set-weiten Reset
+  ("⋮" → "Completed zurücksetzen"). `markSongCompleted(setId, songId, completed)` kann in DAO und
+  ViewModel längst beides — es fehlt nur ein Bedienweg. User hat sich noch nicht für einen Ort
+  entschieden.
+
+**Installationsproblem gelöst (nicht mehr offen):** "App wurde nicht installiert" lag an vollem
+Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Zertifikat
+(SHA256 `EEF3D6…A74A`) ist identisch mit `app/debug.keystore` im Repo, unverändert seit 24.07.
+Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
+alte APKs nach dem Installieren löschen.  
 
 ### Songs hinzufügen läuft übers Archiv (2026-07-29, UNGETESTET)
 

@@ -282,10 +282,17 @@ wieder entfernt), "Songs hinzufügen" läuft jetzt über den Archiv-Tab statt ü
 **Letzter Code-Commit:** `6efcc6a` — "Songs hinzufuegen laeuft ueber das Archiv statt ueber einen Extra-Dialog"  
 **CI Build:** Grün, verifiziert (Build #345, `LiveGigPlayer-release.apk` auf `apk-dist`)  
 **Nächstes Thema laut User:** USB-Multitrack — GrillMe-Interview zur Koexistenz Stereo/Multitrack
-**begonnen, aber nicht abgeschlossen** (2026-07-29). 18 Entscheidungen stehen fest, **4 Punkte sind
-noch offen** — alles in `PLAN-usb-multitrack.md`. Dort weitermachen, BEVOR Code entsteht.
-Wichtigste Vorgabe daraus: der **Stereo-Weg ist unantastbar** (Kill-Kriterium des Users), der
-Multitrack-Weg kommt rein additiv daneben; der **Click darf nie unbeabsichtigt in die PA**.  
+**vollständig abgeschlossen** (2026-07-29). Alle Entscheidungen inkl. der zuletzt offenen vier
+Punkte (Gig-Modus-Abfrage, USB-Abbruch, Routing-UI, Rollen/Kanäle) stehen ausformuliert in
+`PLAN-usb-multitrack.md`. **Ab jetzt darf Code entstehen**, erster Schritt ist der technische
+Teil (Diagnose-Code vom alten Branch holen, dann Feedback-Sync über EP 0x81).
+Wichtigste Vorgaben daraus: der **Stereo-Weg ist unantastbar** (Kill-Kriterium des Users), der
+Multitrack-Weg kommt rein additiv daneben; der **Click darf nie unbeabsichtigt in die PA**.
+Kernentscheidungen der zweiten Interview-Hälfte in Kurzform: Modus liegt am Gig und wird beim
+Öffnen bestätigt (nur eine aktive Umstellung schreibt); Pult-Abbruch → sofort Stopp, roter Balken,
+Song startet von vorn und gilt nicht als gespielt, Play bleibt grau bis der USB-Pfad wieder trägt;
+Routing als Rollen-Liste (Rolle → Kanal, L/R, Mute), ein globaler Patch, Vorbelegung ab Kanal 1;
+sechs feste Rollen; Multitrack-Mixer zeigt **nur Stumm-Schalter, keine Regler**.  
 
 **Offene Gesprächsfäden (noch nicht gebaut, kein Code angefasst):**
 - **Zweitgerät-Anzeige (GrillMe steht noch aus, User will das später durchgehen):** Keyboarder soll
@@ -2019,13 +2026,18 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
 3. ✅ **Live-Tests erledigt (2026-07-29):** Teleprompter (Lesepunkt 33 % + Lichtkegel)
    und "Songs hinzufügen über den Archiv-Tab" vom User am Gerät geprüft, beides in
    Ordnung. Keine offene Test-Baustelle mehr.
-4. 🔴 **USB-Multitrack: GrillMe-Interview zu Ende führen (PRIO 1, kein Code vorher).**
-   `PLAN-usb-multitrack.md` lesen — 18 Entscheidungen stehen, vier Punkte fehlen:
-   (a) Ablauf der Gig-Modus-Abfrage, (b) Bildschirm-Verhalten bei USB-Abbruch mitten
-   im Song, (c) Routing-UI, (d) Kanalzahl/feste Rollen. Reihenfolge einhalten, nicht
-   springen. Erst danach der technische Teil (Feedback-Sync über EP 0x81) — dessen
-   Diagnose-Code (`cpp/usb_tone.c`, `UsbIsoToneTester.kt`) liegt auf dem alten Branch
-   `claude/read-current-md-file-7fy90m`, NICHT auf `main`, und muss vorher geholt werden.
+4. ✅ **USB-Multitrack: GrillMe-Interview ABGESCHLOSSEN (2026-07-29).** Alle vier
+   offenen Punkte (a) Gig-Modus-Abfrage, (b) USB-Abbruch, (c) Routing-UI, (d) Rollen
+   und Kanäle sind geklärt und stehen ausformuliert in `PLAN-usb-multitrack.md`.
+   Nebenbefund dort ebenfalls notiert: der Behringer FLOW 8 des Users taugt NICHT für
+   echtes Multitrack (max. 4 Playback-Kanäle per Firmware) — bewusst nicht mitgebaut.
+5. 🔴 **USB-Multitrack: technischer Teil (PRIO 1, jetzt darf Code entstehen).**
+   Reihenfolge: (1) Diagnose-Code vom alten Branch `claude/read-current-md-file-7fy90m`
+   nach `main` holen (`cpp/usb_tone.c`, `cpp/usb_detach.c`, `UsbIsoToneTester.kt`,
+   `UsbDetachTester.kt` — liegen NICHT auf `main`); (2) **Feedback-Sync über EP 0x81**
+   bauen (behebt "Töne kamen nach und nach dazu" + Anlauf-Knacken); (3) danach echte
+   Stems statt Sinus und das in `PLAN-usb-multitrack.md` beschriebene Routing-/
+   Gig-Modus-Modell. Kill-Kriterium bleibt: der Stereo-Weg darf sich nicht ändern.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

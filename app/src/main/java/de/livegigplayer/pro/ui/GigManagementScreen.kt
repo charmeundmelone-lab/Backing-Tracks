@@ -105,6 +105,10 @@ private val GigRed     = Color(0xFFDC2626)
 // Tonart/Kapo — bewusst deutlich heller als GigGray: auf der Bühne die beiden
 // wichtigsten Spiel-Infos der Songzeile, waren im alten Blaugrau zu dunkel.
 private val GigCool    = Color(0xFFC2D6EA)
+// Cyan der Webseite jangregersen.show ("HÖRPROBEN"-Akzent), aus einem Screenshot
+// ausgelesen. Kennzeichnet das aktive Set — bewusst NICHT Volt, damit Gelb weiter
+// nur "läuft/aktiv" am Song bedeutet.
+private val GigWeb     = Color(0xFF00E5FF)
 
 // Meta-Zeile einer Songzeile: Tonart und Kapo hell hervorgehoben (GigCool, SemiBold),
 // Dauer dezent grau. Ein Helper für beide Zeilen-Varianten (normal + Sortier-Modus),
@@ -335,7 +339,7 @@ private fun GigDetailView(
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (currentSet != null) {
                     Text("  ›  ", color = GigGray.copy(alpha = 0.5f), fontSize = 13.sp)
-                    Text(currentSet.name, color = GigWhite, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    Text(currentSet.name, color = GigWeb, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -356,7 +360,7 @@ private fun GigDetailView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(currentSet.name, color = GigWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    Text(currentSet.name, color = GigWeb, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("$currentCompleted/$currentTotal gespielt · ~$remainingMinutes Min", color = GigGray, fontSize = 12.sp)
                 }

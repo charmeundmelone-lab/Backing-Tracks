@@ -266,6 +266,10 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onDeleteAll   = { vm.deleteAllSongs() }
             )
 
+            // Erinnert an den Flugmodus, solange das Pult per USB hängt — zeigt sich
+            // nur in genau diesem Fall (siehe UsbAirplaneHint.kt).
+            UsbAirplaneHint()
+
             // Tab content
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {

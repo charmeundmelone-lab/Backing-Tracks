@@ -814,7 +814,9 @@ private fun SetCard(
                     Icon(
                         if (sortMode) Icons.Filled.Check else Icons.Filled.SwapVert,
                         contentDescription = if (sortMode) "Fertig" else "Sortieren",
-                        tint = when { sortMode -> GigVolt; isLocked -> GigGray.copy(alpha = 0.4f); else -> GigGray },
+                        // Volt statt Grau: die Header-Icons waren auf der Bühne zu dunkel.
+                        // Aktiver Modus bleibt am Häkchen-Icon + Statuszeile erkennbar.
+                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -829,7 +831,7 @@ private fun SetCard(
                     Icon(
                         if (editSongsMode) Icons.Filled.Check else Icons.Filled.Edit,
                         contentDescription = if (editSongsMode) "Fertig" else "Songs bearbeiten",
-                        tint = when { editSongsMode -> GigVolt; isLocked -> GigGray.copy(alpha = 0.4f); else -> GigGray },
+                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -837,7 +839,7 @@ private fun SetCard(
             Box {
                 IconButton(onClick = { menuExpanded = true }, enabled = !isLocked) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Weitere Optionen",
-                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigGray, modifier = Modifier.size(20.dp))
+                        tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt, modifier = Modifier.size(20.dp))
                 }
                 DropdownMenu(
                     expanded = menuExpanded,

@@ -792,6 +792,18 @@ private fun SetCard(
         ) {
             Spacer(modifier = Modifier.weight(1f))
 
+            // Songs hinzufügen ist die häufigste Aktion an einer Set-Karte und lag
+            // vorher zwei Taps tief im "⋮"-Menü — jetzt direkt als eigener Knopf,
+            // in Volt getönt, damit er auf der Bühne sofort ins Auge fällt.
+            IconButton(onClick = onRequestAddSongs, enabled = !isLocked) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = "Songs hinzufügen",
+                    tint = if (isLocked) GigGray.copy(alpha = 0.4f) else GigVolt,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
             if (songs.size > 1) {
                 IconButton(
                     onClick = {
@@ -832,10 +844,8 @@ private fun SetCard(
                     onDismissRequest = { menuExpanded = false },
                     containerColor = GigBgCard
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Songs hinzufügen", color = GigWhite) },
-                        onClick = { menuExpanded = false; onRequestAddSongs() }
-                    )
+                    // "Songs hinzufügen" steht bewusst NICHT mehr hier — es hat einen
+                    // eigenen "+"-Knopf im Header (ein Weg, ein Tap).
                     DropdownMenuItem(
                         text = { Text("Completed zurücksetzen", color = GigWhite) },
                         onClick = { menuExpanded = false; onResetCompleted() }

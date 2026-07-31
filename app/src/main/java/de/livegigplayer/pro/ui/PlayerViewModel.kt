@@ -49,6 +49,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _tempoFilter.value = if (_tempoFilter.value == tag) 0 else tag
     }
 
+    /**
+     * Setzt Suchbegriff UND Tempo-Filter zurück, sodass das Archiv garantiert
+     * ALLE Songs zeigt. Wird beim Betreten und beim Verlassen des Song-Auswahl-
+     * Modus gerufen: beides lebt im ViewModel und überlebte bisher einen
+     * kompletten Durchlauf, wodurch beim zweiten "Songs hinzufügen" noch der
+     * alte Tempo-Chip aktiv war und Songs unsichtbar blieben.
+     */
+    fun resetArchivFilters() {
+        _searchQuery.value = ""
+        _tempoFilter.value = 0
+    }
+
     val filteredSongs: StateFlow<List<Song>> = combine(songs, _searchQuery, _tempoFilter) { list, q, tempo ->
         list.filter { s ->
             (tempo == 0 || s.tempoTag == tempo) &&

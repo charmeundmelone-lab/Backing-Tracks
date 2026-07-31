@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -118,6 +119,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -239,7 +241,11 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier.fillMaxSize().background(BgDeep).systemBarsPadding()
+            // imePadding: die App läuft auf Android 15 randlos (targetSdk 35) — ohne
+            // das legt sich die Bildschirmtastatur ÜBER die unterste Leiste, statt sie
+            // hochzuschieben. Genau dadurch war der "Hinzufügen"-Button im
+            // Song-Auswahl-Modus erst nach dem Wegdrücken der Tastatur erreichbar.
+            modifier = Modifier.fillMaxSize().background(BgDeep).systemBarsPadding().imePadding()
         ) {
             // Top bar (enthält Tab-Navigation)
             TopBar(
@@ -248,7 +254,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                     // Verlässt man den Archiv-Tab per Tab-Leiste, endet der
                     // Hinzufügen-Modus — sonst bliebe eine unsichtbare Auswahl für
                     // ein Set stehen, das man längst verlassen hat.
-                    if (tab != 0 && addSongsTarget != null) { addSongsTarget = null; vm.clearSelection() }
+                    if (tab != 0 && addSongsTarget != null) {
+                        addSongsTarget = null; vm.clearSelection(); vm.resetArchivFilters()
+                    }
                     selectedTab = tab
                 },
                 isLocked      = isLocked,
@@ -266,14 +274,22 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                         gigVm             = gigVm,
                         isLocked          = isLocked,
                         addSongsTarget    = addSongsTarget,
-                        onFinishAddSongs  = { addSongsTarget = null; vm.clearSelection(); selectedTab = 1 }
+                        onFinishAddSongs  = {
+                            addSongsTarget = null
+                            vm.clearSelection()
+                            // Filter aufräumen: sonst steht beim nächsten Hinzufügen noch
+                            // der alte Tempo-Chip aktiv und es fehlen sichtbar Songs.
+                            vm.resetArchivFilters()
+                            selectedTab = 1
+                        }
                     )
                     1 -> GigManagementScreen(
                         gigVm    = gigVm,
                         playerVm = vm,
                         isLocked = isLocked,
                         onRequestAddSongs = { set ->
-                            vm.clearSelection()   // nie mit Altlasten aus einer früheren Auswahl starten
+                            vm.clearSelection()        // nie mit Altlasten aus einer früheren Auswahl starten
+                            vm.resetArchivFilters()    // und nie mit einem alten Tempo-Filter, der Songs versteckt
                             addSongsTarget = set
                             selectedTab = 0
                         }
@@ -873,11 +889,16 @@ private fun ArchivTab(
     val idsInTargetSet = remember(songsInTargetSet) { songsInTargetSet.map { it.song.id }.toSet() }
 
     var searchActive     by remember { mutableStateOf(false) }
+    // Steuert, ob sich beim Aufklappen der Suche direkt die Tastatur öffnet. True
+    // nur, wenn der User selbst auf die Lupe tippt — beim automatischen Aufklappen
+    // im Hinzufügen-Modus bleibt sie zu (Tempo-Chips sichtbar, volle Liste frei).
+    var searchAutoFocus  by remember { mutableStateOf(true) }
     var editSheet        by remember { mutableStateOf<Song?>(null) }
     var showSetPicker    by remember { mutableStateOf(false) }
     var showPlannedWarn  by remember { mutableStateOf(false) }
     val sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope            = rememberCoroutineScope()
+    val focusManager     = LocalFocusManager.current
 
     // Zurück-Geste bricht den Hinzufügen-Modus ab, statt die App zu verlassen.
     BackHandler(enabled = addMode) { onFinishAddSongs() }
@@ -886,6 +907,13 @@ private fun ArchivTab(
     // bliebe ein offen stehen gelassener Warndialog als true im Zustand hängen
     // und würde beim nächsten Öffnen des Hinzufügen-Modus sofort aufpoppen.
     LaunchedEffect(addSongsTarget?.setId) { showPlannedWarn = false }
+
+    // Im Hinzufügen-Modus klappt die Suche automatisch auf — damit sind die
+    // Tempo-Chips ohne Extra-Tap da. Bewusst OHNE Tastatur (searchAutoFocus =
+    // false): die soll erst kommen, wenn wirklich ins Feld getippt wird.
+    LaunchedEffect(addMode) {
+        if (addMode) { searchAutoFocus = false; searchActive = true }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Hinweisband: macht unmissverständlich, dass das Archiv gerade als
@@ -916,7 +944,10 @@ private fun ArchivTab(
             active = searchActive,
             query  = searchQuery,
             tempoFilter = tempoFilter,
+            requestFocusOnOpen = searchAutoFocus,
             onToggle = {
+                // Manuelles Antippen der Lupe darf die Tastatur mitbringen.
+                searchAutoFocus = true
                 searchActive = !searchActive
                 // Suche schließen räumt komplett auf: Suchbegriff, Tempo-Filter UND
                 // die Mehrfach-Auswahl. Die Auswahl überlebt bewusst jeden
@@ -973,6 +1004,9 @@ private fun ArchivTab(
                     // markiert werden (REPLACE-Falle, siehe oben) — der Tap sagt
                     // stattdessen, warum nichts passiert.
                     val toggle: () -> Unit = {
+                        // Erster Song-Tap beendet das Tippen: die Tastatur verschwindet,
+                        // die Liste und die Hinzufügen-Leiste haben wieder den ganzen Platz.
+                        focusManager.clearFocus()
                         if (isInTargetSet) Toast.makeText(
                             context, "\u201c${song.title}\u201d ist bereits in diesem Set", Toast.LENGTH_SHORT
                         ).show()
@@ -1943,10 +1977,13 @@ private fun SearchBar(
     tempoFilter: Int,
     onToggle: () -> Unit,
     onChange: (String) -> Unit,
-    onTempoFilter: (Int) -> Unit
+    onTempoFilter: (Int) -> Unit,
+    requestFocusOnOpen: Boolean = true
 ) {
     val fr = remember { FocusRequester() }
-    LaunchedEffect(active) { if (active) fr.requestFocus() }
+    // Fokus nur anfordern, wenn die Suche bewusst geöffnet wurde. Klappt sie
+    // automatisch auf (Hinzufügen-Modus), bleibt die Tastatur weg.
+    LaunchedEffect(active) { if (active && requestFocusOnOpen) fr.requestFocus() }
 
     Column(modifier = Modifier.fillMaxWidth().background(BgDeep)) {
         Row(

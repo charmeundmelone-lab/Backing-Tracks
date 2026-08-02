@@ -1,6 +1,8 @@
 package de.livegigplayer.pro.audio
 
 import android.content.Context
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import de.livegigplayer.pro.data.Song
@@ -37,7 +39,8 @@ object WavFormatCheck {
         val channels: Int = 0,
         val error: String? = null
     ) {
-        val label: String get() = error ?: "$sampleRate Hz / $bits bit / ${channels}ch"
+        val label: String get() = error ?: "$sampleRate Hz / ${bitsLabel} / ${channels}ch"
+        val bitsLabel: String get() = if (bits > 0) "$bits bit" else "Bittiefe n/a"
         val isTarget: Boolean get() = error == null && sampleRate == 48000
     }
 
@@ -52,8 +55,16 @@ object WavFormatCheck {
     ): String = withContext(Dispatchers.IO) {
         val perSong = LinkedHashMap<Song, List<FileFormat>>()
         songs.forEachIndexed { index, song ->
-            perSong[song] = wavFilesOf(context, song).map { (name, uri) ->
-                readFormat(context, uri)?.copy(name = name) ?: FileFormat(name, error = "Kopf unlesbar")
+            val files = wavFilesOf(context, song)
+            perSong[song] = if (files.isEmpty()) {
+                // Keine Datei auffindbar — den rohen Pfad mitschreiben, sonst steht man
+                // wie beim ersten Anlauf vor "0 Dateien" ohne jeden Anhaltspunkt.
+                listOf(FileFormat(name = "", error = "keine Datei gefunden — Pfad: ${song.audioFilePath.take(90)}"))
+            } else {
+                files.map { (name, uri) ->
+                    readFormat(context, uri)?.copy(name = name)
+                        ?: FileFormat(name, error = "Format nicht lesbar")
+                }
             }
             onProgress(index + 1, songs.size)
         }
@@ -63,7 +74,7 @@ object WavFormatCheck {
     private fun buildReport(perSong: Map<Song, List<FileFormat>>): String = buildString {
         val allFiles = perSong.values.flatten()
         val counts = allFiles.filter { it.error == null }
-            .groupingBy { "${it.sampleRate} Hz / ${it.bits} bit" }
+            .groupingBy { "${it.sampleRate} Hz / ${it.bitsLabel}" }
             .eachCount()
             .toList()
             .sortedByDescending { it.second }
@@ -114,10 +125,16 @@ object WavFormatCheck {
         unknown.take(40).forEach { appendLine("  • $it") }
         if (unknown.size > 40) appendLine("  … und ${unknown.size - 40} weitere")
 
-        val unreadable = allFiles.count { it.error != null }
-        if (unreadable > 0) {
+        val problems = perSong.filterValues { files -> files.any { it.error != null } }
+        if (problems.isNotEmpty()) {
             appendLine()
-            appendLine("Nicht lesbar: $unreadable Dateien")
+            appendLine("PROBLEME (${problems.size} Songs):")
+            problems.entries.take(15).forEach { (song, files) ->
+                files.filter { it.error != null }.forEach {
+                    appendLine("  • ${song.title}: ${it.error}")
+                }
+            }
+            if (problems.size > 15) appendLine("  … und ${problems.size - 15} weitere")
         }
     }
 
@@ -128,6 +145,16 @@ object WavFormatCheck {
     private fun wavFilesOf(context: Context, song: Song): List<Pair<String, Uri>> {
         val path = song.audioFilePath.trim()
         if (path.isEmpty()) return emptyList()
+
+        // Modus B (Einzeldatei je Song, Musik L / Click R): FolderImporter legt hier die
+        // nackte Dokument-URI ab, KEIN "tree||ordner". Fehlte in der ersten Fassung —
+        // dadurch fand die Prüfung bei einer reinen Modus-B-Bibliothek null Dateien.
+        if ("||" !in path && path.startsWith("content://")) {
+            val uri  = Uri.parse(path)
+            val name = runCatching { DocumentFile.fromSingleUri(context, uri)?.name }
+                .getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "?"
+            return listOf(name to uri)
+        }
 
         if ("||" in path) {
             val delimIdx   = path.indexOf("||")
@@ -152,8 +179,33 @@ object WavFormatCheck {
         }
     }
 
+    /**
+     * Format einer Datei: erst der WAV-Header (exakt, inkl. Bittiefe), sonst
+     * MediaExtractor als Auffangnetz für alles andere (mp3, m4a, flac …).
+     */
+    private fun readFormat(context: Context, uri: Uri): FileFormat? =
+        readWavHeader(context, uri) ?: readViaExtractor(context, uri)
+
+    /** Samplerate/Kanäle über den Media-Stack — Bittiefe ist dort meist nicht bekannt. */
+    private fun readViaExtractor(context: Context, uri: Uri): FileFormat? = runCatching {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            if (extractor.trackCount == 0) return@runCatching null
+            val format = extractor.getTrackFormat(0)
+            FileFormat(
+                name       = "",
+                sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE),
+                bits       = 0,
+                channels   = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            )
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }.getOrNull()
+
     /** Liest den `fmt `-Chunk eines WAV-Headers. Null, wenn es keine gültige WAV ist. */
-    private fun readFormat(context: Context, uri: Uri): FileFormat? = runCatching {
+    private fun readWavHeader(context: Context, uri: Uri): FileFormat? = runCatching {
         context.contentResolver.openInputStream(uri)?.use { input ->
             val riff = ByteArray(12)
             if (input.readFully(riff) < 12) return@use null

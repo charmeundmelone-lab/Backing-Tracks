@@ -10,6 +10,7 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -32,7 +33,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -144,7 +147,8 @@ fun UsbAirplaneHint(modifier: Modifier = Modifier) {
  */
 @Composable
 fun WiredAudioDiagnostic(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+    val context   = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     // Zählt hoch, wenn "Neu einlesen" gedrückt wird — Kabel kann bei offenem Dialog
     // gesteckt werden, ohne den Dialog schließen zu müssen.
     var reloads by remember { mutableStateOf(0) }
@@ -175,14 +179,45 @@ fun WiredAudioDiagnostic(modifier: Modifier = Modifier) {
             rawUsb.forEach { Text("  • $it", color = Color.Gray, fontSize = 12.sp) }
         }
 
-        Text(
-            "Neu einlesen",
-            color = HintAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clickable { reloads++ }
-                .padding(vertical = 6.dp)
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Neu einlesen",
+                color = HintAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable { reloads++ }
+                    .padding(vertical = 6.dp, horizontal = 2.dp)
+            )
+            Spacer(modifier = Modifier.width(20.dp))
+            Text(
+                "Kopieren",
+                color = HintAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable {
+                        clipboard.setText(
+                            AnnotatedString(diagnosticText(airplane, hintShown, sinks, rawUsb))
+                        )
+                        Toast.makeText(context, "Diagnose kopiert", Toast.LENGTH_SHORT).show()
+                    }
+                    .padding(vertical = 6.dp, horizontal = 2.dp)
+            )
+        }
     }
+}
+
+/** Derselbe Inhalt wie die Anzeige, aber als zusammenhängender Text zum Einfügen. */
+private fun diagnosticText(
+    airplane: Boolean,
+    hintShown: Boolean,
+    sinks: List<String>,
+    rawUsb: List<String>
+): String = buildString {
+    appendLine("Flugmodus-Hinweis — Diagnose")
+    appendLine("Flugmodus: ${if (airplane) "AN" else "AUS"}")
+    appendLine("Hinweis müsste erscheinen: ${if (hintShown) "JA" else "NEIN"}")
+    appendLine("Kabel-Audio-Ausgänge (${sinks.size}):")
+    if (sinks.isEmpty()) appendLine("  - keine -") else sinks.forEach { appendLine("  - $it") }
+    appendLine("USB-Geräte (${rawUsb.size}):")
+    if (rawUsb.isEmpty()) appendLine("  - keine -") else rawUsb.forEach { appendLine("  - $it") }
 }
 
 /** Alle kabelgebundenen Audio-Ausgänge als lesbare Zeilen ("USB_HEADSET — Name"). */

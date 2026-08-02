@@ -119,9 +119,11 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
@@ -136,6 +138,7 @@ import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbDetachTester
 import de.livegigplayer.pro.audio.UsbIsoToneTester
 import de.livegigplayer.pro.audio.UsbToneTester
+import de.livegigplayer.pro.audio.WavFormatCheck
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.SongInSet
@@ -224,6 +227,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     // Auswahl-Modus für dieses Set (eine einzige Quelle der Wahrheit fürs Auswählen,
     // statt eines zweiten Dialogs mit eigener Such-/Filter-/Auswahl-Logik).
     var addSongsTarget   by remember { mutableStateOf<SetEntity?>(null) }
+    var showFormatCheck  by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -263,7 +267,8 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onLockToggle  = { isLocked = !isLocked },
                 onMixerToggle = { vm.toggleMixer() },
                 onImport      = { importLauncher.launch(null) },
-                onDeleteAll   = { vm.deleteAllSongs() }
+                onDeleteAll   = { vm.deleteAllSongs() },
+                onCheckFormats = { showFormatCheck = true }
             )
 
             // Erinnert an den Flugmodus, solange das Pult per USB hängt — zeigt sich
@@ -348,6 +353,11 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             )
         }
 
+        // Formatprüfung der WAV-Bibliothek (Vorbereitung USB-Multitrack)
+        if (showFormatCheck) {
+            SongFormatCheckDialog(vm = vm, onDismiss = { showFormatCheck = false })
+        }
+
         // Mixer overlay
         MixerOverlay(
             visible        = showMixer,
@@ -403,7 +413,7 @@ private fun TopBar(
     selectedTab: Int, onTabSelect: (Int) -> Unit,
     isLocked: Boolean, onLockToggle: () -> Unit,
     onMixerToggle: () -> Unit, onImport: () -> Unit,
-    onDeleteAll: () -> Unit
+    onDeleteAll: () -> Unit, onCheckFormats: () -> Unit = {}
 ) {
     var menuExpanded        by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
@@ -471,6 +481,10 @@ private fun TopBar(
                     containerColor = BgCard
                 ) {
                     DropdownMenuItem(
+                        text = { Text("Song-Formate prüfen", color = White) },
+                        onClick = { menuExpanded = false; onCheckFormats() }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Alle Songs löschen", color = RedStop) },
                         onClick = { menuExpanded = false; showDeleteAllDialog = true }
                     )
@@ -504,6 +518,50 @@ private fun TopBar(
     if (showUsbDiagnostic) {
         UsbAudioDiagnosticDialog(onDismiss = { showUsbDiagnostic = false })
     }
+}
+
+// Liest aus jeder WAV-Datei der Bibliothek Samplerate/Bittiefe (siehe WavFormatCheck)
+// und zeigt den Bericht zum Kopieren. Vorbereitung fürs USB-Multitrack: dort werden die
+// Samples roh mit 48 kHz zum Pult geschoben, 44,1-kHz-Material müsste umgerechnet werden.
+@Composable
+private fun SongFormatCheckDialog(vm: PlayerViewModel, onDismiss: () -> Unit) {
+    val context   = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val songs by vm.songs.collectAsState()
+
+    var done   by remember { mutableStateOf(0) }
+    var report by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        report = WavFormatCheck.report(context, songs) { d, _ -> done = d }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = BgCard,
+        title = { Text("Song-Formate", color = White, fontWeight = FontWeight.Bold) },
+        text = {
+            val text = report
+            if (text == null) {
+                Text("Lese Dateiköpfe … $done / ${songs.size} Songs",
+                    color = Gray, fontSize = 13.sp)
+            } else {
+                Text(text, color = White, fontSize = 11.sp,
+                    modifier = Modifier.verticalScroll(rememberScrollState()))
+            }
+        },
+        confirmButton = {
+            report?.let { text ->
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(text))
+                    Toast.makeText(context, "Bericht kopiert", Toast.LENGTH_SHORT).show()
+                }) { Text("Kopieren", color = Volt, fontWeight = FontWeight.Bold) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Schließen", color = Gray) }
+        }
+    )
 }
 
 // Zeigt für jedes aktuell angeschlossene USB-Audiogerät die von Android gemeldete

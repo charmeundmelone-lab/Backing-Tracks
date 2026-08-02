@@ -11,13 +11,16 @@ beide Formate ohne Zutun.
 Bedienung (im Ordner mit den WAV-Dateien ausführen):
 
     python konvertiere_auf_48k.py                 # nur anzeigen, was zu tun wäre
-    python konvertiere_auf_48k.py --start         # umrechnen nach ./48k/
+    python konvertiere_auf_48k.py --start         # umrechnen
     python konvertiere_auf_48k.py --start --ersetzen
-                                                  # Originale nach ./_originale/ sichern
-                                                  # und die neuen an ihre Stelle legen
+                                                  # Originale wegsichern und die neuen
+                                                  # an ihre Stelle legen
 
-Ohne --start passiert nichts, es wird nur gelistet. Originale werden nie überschrieben:
-mit --ersetzen wandern sie nach ./_originale/, ohne bleiben sie unangetastet liegen.
+Ohne --start passiert nichts, es wird nur gelistet. Originale werden nie überschrieben.
+
+Die Arbeitsordner ("<Ordnername> 48k" und "<Ordnername> _originale") entstehen bewusst
+NEBEN dem Track-Ordner, nicht darin: Die App wertet beim Import jeden Unterordner als
+Multitrack-Song, ein Arbeitsordner im Track-Ordner würde als Geister-Song erscheinen.
 
 Voraussetzung: ffmpeg muss installiert sein (bringt den Umrechner mit).
     Windows: winget install Gyan.FFmpeg
@@ -90,7 +93,7 @@ def main() -> int:
     parser.add_argument("ordner", nargs="?", default=".", help="Ordner mit den WAVs (Standard: aktueller)")
     parser.add_argument("--start", action="store_true", help="wirklich umrechnen (sonst nur anzeigen)")
     parser.add_argument("--ersetzen", action="store_true",
-                        help="Originale nach ./_originale/ sichern und die neuen an ihre Stelle legen")
+                        help="Originale wegsichern und die neuen an ihre Stelle legen")
     args = parser.parse_args()
 
     wurzel = Path(args.ordner).resolve()
@@ -98,8 +101,12 @@ def main() -> int:
         print(f"Ordner nicht gefunden: {wurzel}")
         return 1
 
-    ausgabe_ordner = wurzel / "48k"
-    backup_ordner = wurzel / "_originale"
+    # WICHTIG: beide Arbeitsordner liegen NEBEN dem Track-Ordner, nicht darin.
+    # Die App wertet beim Import jeden Unterordner als Multitrack-Song mit den
+    # enthaltenen Dateien als Spuren — ein "48k"- oder "_originale"-Ordner im
+    # Track-Ordner würde also als Geister-Song mit 25 Spuren auftauchen.
+    ausgabe_ordner = wurzel.parent / f"{wurzel.name} 48k"
+    backup_ordner = wurzel.parent / f"{wurzel.name} _originale"
 
     # Unterordner werden mitgenommen (Multitrack-Songs liegen als Ordner vor),
     # die eigenen Arbeitsordner aber nicht.
@@ -175,7 +182,7 @@ def main() -> int:
         fertig += 1
 
     if args.ersetzen:
-        # Leere Gerüstordner unter ./48k/ aufräumen.
+        # Leeres Gerüst des Ausgabeordners aufräumen.
         for ordner in sorted(ausgabe_ordner.rglob("*"), reverse=True):
             if ordner.is_dir() and not any(ordner.iterdir()):
                 ordner.rmdir()

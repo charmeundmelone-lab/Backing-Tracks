@@ -147,6 +147,37 @@ Damit ist der Weg frei für den technischen Plan (Feedback-Sync EP 0x81).
   Vocals→4, Click→5, Cue→6. Der User patcht das Pult entsprechend.
 - Also **6 belegte Kanäle** von 24 (mehr nur, wenn eine Stereo-Rolle zwei belegt).
 
+## Entschieden am 2026-08-02: Altbestand und Mixer-Ansicht
+
+Anlass: Formatprüfung der Bibliothek (`WavFormatCheck`, Menü "⋮ → Song-Formate prüfen")
+ergab **38 Songs, allesamt Einzeldatei-Stereo** (Musik hart links, Click **und Cue
+gemeinsam** hart rechts), davon 25 in 44,1 kHz/16 bit und 13 in 48 kHz/24 bit. Dazu
+der entscheidende neue Fakt: **die Studio-One-Projekte dazu existieren nicht mehr** —
+diese 38 Songs lassen sich nicht nachträglich als Stems exportieren.
+
+- **Stereo-Songs laufen im Multitrack-Modus als Zwei-Kanal-Song.** Ein Song ohne Stems
+  ist dort schlicht ein Song mit zwei Rollen: linker Kanal → Rolle "Musik", rechter
+  Kanal → Rolle "Click + Cue". Kein Sonderfall, keine Sperre, keine Rückschaltung auf
+  Stereo. Stem-Songs und Stereo-Songs dürfen im selben Set direkt hintereinander laufen.
+- **Damit profitiert der Altbestand sofort**, ohne einen einzigen neuen Export: der
+  Click liegt auf einem eigenen Pultkanal statt mit der Musik in einem Stereo-Kanalzug
+  und kann nicht mehr versehentlich in die PA. Das ist genau die Sicherheitsregel oben.
+- **Click und Cue werden NICHT getrennt.** Sie liegen im Bestand gemischt auf dem
+  rechten Kanal; sie auseinanderzurechnen wäre der schwerste Teil überhaupt und bringt
+  nichts, solange beide ohnehin zusammen ins In-Ear gehen. Die sechs Rollen aus (d)
+  bleiben für Stem-Songs; für Stereo-Songs gelten die zwei oben.
+- **Mixer-Ansicht richtet sich nach dem geladenen Song, Positionen bleiben aber fest.**
+  Nicht vorhandene Rollen werden weiterhin ausgegraut mitangezeigt (heutiges Verhalten
+  von `MixerOverlay`), damit "Drums stumm" auf der Bühne bei jedem Song derselbe Knopf
+  an derselben Stelle ist — Muscle Memory schlägt aufgeräumte Liste.
+- **Kein Resampling in der App.** Die 44,1-kHz-Dateien sind fertige Stereo-Mixe und
+  werden im Multitrack-Modus nur als Zwei-Kanal-Song gebraucht; neue Stem-Exporte macht
+  der User ohnehin in 48 kHz/24 bit (sein Studio-One-Template). Regel statt Code.
+- **Offen (kleiner Folgepunkt):** `SongScanner` erkennt Stems bisher nur bei exakt
+  `drums/bass/keys/vocals/click/cue.wav`. Studio One exportiert mit Song- oder
+  Spurnamen davor. Erkennung muss den Rollennamen **im** Dateinamen finden, sonst
+  müsste der User jede Datei von Hand umbenennen (ausdrücklich unerwünscht).
+
 ## Nebenbefund: Behringer FLOW 8 (geprüft, kein Multitrack-Kandidat)
 
 Der User besitzt zusätzlich einen Behringer FLOW 8 und wollte wissen, was damit ginge.

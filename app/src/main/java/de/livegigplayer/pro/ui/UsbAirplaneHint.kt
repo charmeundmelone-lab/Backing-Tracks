@@ -12,6 +12,7 @@ import android.media.AudioManager
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -133,6 +134,108 @@ fun UsbAirplaneHint(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Diagnose-Abschnitt für den USB-Dialog: zeigt schwarz auf weiß, was das Telefon
+ * gerade meldet und ob der Flugmodus-Hinweis danach erscheinen müsste.
+ *
+ * Grund: Ohne PC gibt es kein Logcat — ohne diese Anzeige lässt sich ein "der Balken
+ * kommt nicht" nicht von einem "das Kabel wird gar nicht gemeldet" unterscheiden.
+ * Ein Screenshot davon reicht zur Auswertung.
+ */
+@Composable
+fun WiredAudioDiagnostic(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    // Zählt hoch, wenn "Neu einlesen" gedrückt wird — Kabel kann bei offenem Dialog
+    // gesteckt werden, ohne den Dialog schließen zu müssen.
+    var reloads by remember { mutableStateOf(0) }
+
+    val airplane   = remember(reloads) { isAirplaneModeOn(context) }
+    val sinks      = remember(reloads) { wiredAudioSinkLabels(context) }
+    val rawUsb     = remember(reloads) { rawUsbDeviceLabels(context) }
+    val hintShown  = (sinks.isNotEmpty() || rawUsb.any { it.contains("Audio") }) && !airplane
+
+    Column(modifier = modifier) {
+        Text("Flugmodus-Hinweis — Diagnose", color = HintAmber,
+            fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("Flugmodus: ${if (airplane) "AN" else "AUS"}", color = Color.White, fontSize = 12.sp)
+        Text("Hinweis müsste erscheinen: ${if (hintShown) "JA" else "NEIN"}",
+            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+        Text("Kabel-Audio-Ausgänge (${sinks.size}):", color = Color.White, fontSize = 12.sp)
+        if (sinks.isEmpty()) {
+            Text("  – keine –", color = Color.Gray, fontSize = 12.sp)
+        } else {
+            sinks.forEach { Text("  • $it", color = Color.Gray, fontSize = 12.sp) }
+        }
+
+        Text("USB-Geräte (${rawUsb.size}):", color = Color.White, fontSize = 12.sp)
+        if (rawUsb.isEmpty()) {
+            Text("  – keine –", color = Color.Gray, fontSize = 12.sp)
+        } else {
+            rawUsb.forEach { Text("  • $it", color = Color.Gray, fontSize = 12.sp) }
+        }
+
+        Text(
+            "Neu einlesen",
+            color = HintAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clickable { reloads++ }
+                .padding(vertical = 6.dp)
+        )
+    }
+}
+
+/** Alle kabelgebundenen Audio-Ausgänge als lesbare Zeilen ("USB_HEADSET — Name"). */
+private fun wiredAudioSinkLabels(context: Context): List<String> {
+    val manager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return emptyList()
+    return runCatching {
+        manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .filter { isWiredSink(it.type) }
+            .map { "${audioTypeName(it.type)} — ${it.productName}" }
+    }.getOrDefault(emptyList())
+}
+
+/** Rohe USB-Geräte samt Interface-Klassen ("22F0:0022 — Klassen: Audio, HID"). */
+private fun rawUsbDeviceLabels(context: Context): List<String> {
+    val manager = context.getSystemService(Context.USB_SERVICE) as? UsbManager ?: return emptyList()
+    return runCatching {
+        manager.deviceList.values.map { device ->
+            val classes = (0 until device.interfaceCount)
+                .map { usbClassName(device.getInterface(it).interfaceClass) }
+                .distinct()
+                .joinToString(", ")
+            val vid = "%04X".format(device.vendorId)
+            val pid = "%04X".format(device.productId)
+            "$vid:$pid — Klassen: $classes"
+        }
+    }.getOrDefault(emptyList())
+}
+
+private fun audioTypeName(type: Int): String = when (type) {
+    AudioDeviceInfo.TYPE_USB_DEVICE      -> "USB_DEVICE"
+    AudioDeviceInfo.TYPE_USB_HEADSET     -> "USB_HEADSET"
+    AudioDeviceInfo.TYPE_USB_ACCESSORY   -> "USB_ACCESSORY"
+    AudioDeviceInfo.TYPE_WIRED_HEADSET   -> "KLINKE_HEADSET"
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES-> "KLINKE_KOPFHOERER"
+    AudioDeviceInfo.TYPE_LINE_ANALOG     -> "LINE_ANALOG"
+    AudioDeviceInfo.TYPE_LINE_DIGITAL    -> "LINE_DIGITAL"
+    AudioDeviceInfo.TYPE_AUX_LINE        -> "AUX"
+    AudioDeviceInfo.TYPE_DOCK            -> "DOCK"
+    else                                 -> "TYP_$type"
+}
+
+private fun usbClassName(cls: Int): String = when (cls) {
+    UsbConstants.USB_CLASS_AUDIO       -> "Audio"
+    UsbConstants.USB_CLASS_HID         -> "HID"
+    UsbConstants.USB_CLASS_MASS_STORAGE-> "Speicher"
+    UsbConstants.USB_CLASS_COMM        -> "Comm"
+    UsbConstants.USB_CLASS_VIDEO       -> "Video"
+    UsbConstants.USB_CLASS_MISC        -> "Misc"
+    UsbConstants.USB_CLASS_PER_INTERFACE -> "PerInterface"
+    UsbConstants.USB_CLASS_VENDOR_SPEC -> "Hersteller"
+    else                               -> "Klasse $cls"
+}
+
 private fun isAirplaneModeOn(context: Context): Boolean =
     Settings.Global.getInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
 
@@ -148,21 +251,21 @@ private fun hasWiredAudioOutput(context: Context): Boolean =
 private fun hasWiredAudioSink(context: Context): Boolean {
     val manager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
     return runCatching {
-        manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
-            when (device.type) {
-                AudioDeviceInfo.TYPE_USB_DEVICE,
-                AudioDeviceInfo.TYPE_USB_HEADSET,
-                AudioDeviceInfo.TYPE_USB_ACCESSORY,
-                AudioDeviceInfo.TYPE_WIRED_HEADSET,
-                AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                AudioDeviceInfo.TYPE_LINE_ANALOG,
-                AudioDeviceInfo.TYPE_LINE_DIGITAL,
-                AudioDeviceInfo.TYPE_AUX_LINE,
-                AudioDeviceInfo.TYPE_DOCK -> true
-                else -> false
-            }
-        }
+        manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { isWiredSink(it.type) }
     }.getOrDefault(false)
+}
+
+private fun isWiredSink(type: Int): Boolean = when (type) {
+    AudioDeviceInfo.TYPE_USB_DEVICE,
+    AudioDeviceInfo.TYPE_USB_HEADSET,
+    AudioDeviceInfo.TYPE_USB_ACCESSORY,
+    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+    AudioDeviceInfo.TYPE_LINE_ANALOG,
+    AudioDeviceInfo.TYPE_LINE_DIGITAL,
+    AudioDeviceInfo.TYPE_AUX_LINE,
+    AudioDeviceInfo.TYPE_DOCK -> true
+    else -> false
 }
 
 /**

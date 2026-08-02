@@ -569,7 +569,16 @@ private fun UsbAudioDiagnosticDialog(onDismiss: () -> Unit) {
         containerColor   = BgCard,
         title = { Text("USB-Audio-Diagnose", color = White, fontWeight = FontWeight.Bold) },
         text = {
-            Column {
+            // Scrollbar, seit die Kabel-/Flugmodus-Diagnose oben mit drinsteht —
+            // sonst wären die Test-Buttons darunter auf kleinen Displays abgeschnitten.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                // Zeigt, was das Telefon an Kabeln meldet und ob der Flugmodus-Hinweis
+                // danach erscheinen müsste (siehe UsbAirplaneHint.kt).
+                WiredAudioDiagnostic()
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BgTrack))
+                Spacer(modifier = Modifier.height(8.dp))
+
                 if (usbDevices.isEmpty()) {
                     Text(
                         "Kein USB-Audiogerät verbunden. CQ20B per USB-C→USB-B anschließen und Dialog erneut öffnen.",

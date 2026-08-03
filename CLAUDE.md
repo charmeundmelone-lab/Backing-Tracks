@@ -84,7 +84,12 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── FolderImporter.kt     — SAF-Import: Modus A (WAV-Stems), Modus B (Legacy)
 │   ├── PdfLyricsImporter.kt  — PDF-Textlayer → Akkord-Filter → Lyrics (PdfBox-Android),
 │   │                            merkt zuletzt genutzten PDF-Ordner (SharedPreferences)
-│   └── SongScanner.kt        — erkennt TrackMode aus DocumentFile-Struktur
+│   ├── SongScanner.kt        — erkennt TrackMode aus DocumentFile-Struktur
+│   ├── WavFormatCheck.kt     — liest Samplerate/Bittiefe aller WAVs (Menü "⋮ → Song-Formate
+│   │                            prüfen"), Bericht zum Kopieren; Vorbereitung USB-Multitrack
+│   └── Usb*.kt               — Diagnose fürs geplante Multitrack: UsbDescriptorScanner,
+│                                UsbToneTester, UsbDetachTester, UsbIsoToneTester
+│                                (LIEGEN AUF main, nicht auf einem alten Branch)
 ├── data/
 │   ├── Song.kt               — Room-Entity (id, title, artist, bpm, bpmExact, keySignature,
 │   │                            genre, capoPosition, volDrums/Bass/Keys/Vocals/Click/Cue,
@@ -128,6 +133,10 @@ app/src/main/java/de/livegigplayer/pro/
 │   │                             Sprint "Songs hinzufügen läuft übers Archiv"; "Completed
 │   │                             zurücksetzen"); der per-Set "Bearbeiten"-Toggle steuert
 │   │                             weiterhin nur die Song-Zeilen-Controls (End-Aktion/Entfernen).
+│   ├── UsbAirplaneHint.kt    — Hinweisband "Flugmodus aus", solange ein Kabel-Audioausgang
+│   │                            aktiv ist (AudioManager, NICHT UsbManager — siehe Sprint
+│   │                            2026-08-02); enthält auch WiredAudioDiagnostic() für den
+│   │                            USB-Dialog
 │   └── LyricsOverlay.kt      — Vollbild-Teleprompter (nur Lyrics, keine Akkorde), Hochkant
 │                                erzwungen solange sichtbar, Auto-Scroll an echte
 │                                Wiedergabeposition gekoppelt, abschnittsweise konstante
@@ -272,20 +281,26 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-07-29  
-**Status:** Vier Änderungen gebaut und **vom User live am Gerät getestet — alle in Ordnung, keine
-Fehler festgestellt** (2026-07-29): Teleprompter-Lesepunkt 33 % + Lichtkegel (#341), Archiv-Auswahl
-über Tempo-Filter hinweg gefixt (#342), Tempo-Chips im Hinzufügen-Dialog (#343, danach mitsamt Dialog
-wieder entfernt), "Songs hinzufügen" läuft jetzt über den Archiv-Tab statt über einen eigenen Dialog
-(#344). Damit ist keine offene Test-Baustelle mehr da.
+**Datum:** 2026-08-03  
+**Status:** Fünf Themen gebaut, alle vom User live am Gerät geprüft: "Songs hinzufügen" vereinfacht,
+Farben (aktives Set im Webseiten-Cyan, Header-Icons in Volt), Flugmodus-Hinweis bei angeschlossenem
+Kabel, Song-Formatprüfung, Konvertier-Skript für 48 kHz. **Gig am 2026-08-01 lief einwandfrei.**
+Details siehe Sprint-Eintrag "Session 2026-08-02/03" direkt unter diesem Block.
 **Branch:** `main`  
-**Letzter Code-Commit:** `6efcc6a` — "Songs hinzufuegen laeuft ueber das Archiv statt ueber einen Extra-Dialog"  
-**CI Build:** Grün, verifiziert (Build #345, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Commit:** `7e3259f` — "Konvertier-Skript: Arbeitsordner neben statt in den Track-Ordner"  
+**CI Build:** Grün, verifiziert (Build #361, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
+Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
+scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
+entwickelt.)  
 **Nächstes Thema laut User:** USB-Multitrack — GrillMe-Interview zur Koexistenz Stereo/Multitrack
 **vollständig abgeschlossen** (2026-07-29). Alle Entscheidungen inkl. der zuletzt offenen vier
 Punkte (Gig-Modus-Abfrage, USB-Abbruch, Routing-UI, Rollen/Kanäle) stehen ausformuliert in
 `PLAN-usb-multitrack.md`. **Ab jetzt darf Code entstehen**, erster Schritt ist der technische
-Teil (Diagnose-Code vom alten Branch holen, dann Feedback-Sync über EP 0x81).
+Teil: **Feedback-Sync über EP 0x81**. (KORREKTUR 2026-08-02: Der Diagnose-Code liegt längst auf
+`main` — `cpp/usb_tone.c`, `cpp/usb_detach.c`, `UsbIsoToneTester.kt`, `UsbDetachTester.kt`,
+`UsbDescriptorScanner.kt`, `UsbToneTester.kt` sind alle da. Die Anweisung "vom alten Branch holen"
+weiter unten in den TODOs ist überholt, dieser Schritt entfällt.)
 Wichtigste Vorgaben daraus: der **Stereo-Weg ist unantastbar** (Kill-Kriterium des Users), der
 Multitrack-Weg kommt rein additiv daneben; der **Click darf nie unbeabsichtigt in die PA**.
 Kernentscheidungen der zweiten Interview-Hälfte in Kurzform: Modus liegt am Gig und wird beim
@@ -315,6 +330,67 @@ Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Z
 (SHA256 `EEF3D6…A74A`) ist identisch mit `app/debug.keystore` im Repo, unverändert seit 24.07.
 Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
 alte APKs nach dem Installieren löschen.  
+
+### Session 2026-08-02/03: Hinzufügen-Flow, Farben, Flugmodus-Hinweis, Formatprüfung
+
+**Vorgeschichte:** Der Container startete mit einer 5 Tage alten, historisch unabhängigen Kopie
+(`git status` meldete irreführend "50 voraus / 50 zurück", `merge-base` war leer). Fix war
+`git reset --hard origin/main`. **Falls das wieder auftritt: kein Merge versuchen, einfach hart
+auf `origin/main` zurücksetzen** — vorher prüfen, ob Dateien nur lokal existieren.
+
+- **"Songs hinzufügen" vereinfacht** (`32b6213`): eigener **"+"-Knopf im SetCard-Header** (Volt,
+  `isLocked`-gegatet), Menüpunkt im "⋮" entfernt — ein Weg, ein Tap. Neu
+  `PlayerViewModel.resetArchivFilters()` (Suchbegriff + Tempo-Filter), gerufen beim **Betreten UND
+  Verlassen** des Hinzufügen-Modus; vorher blieb der zuletzt gewählte Tempo-Chip aktiv und versteckte
+  beim nächsten Mal Songs. **`imePadding()` auf der Haupt-Column** — die App läuft randlos
+  (targetSdk 35), die Tastatur legte sich dadurch ÜBER die "Hinzufügen"-Leiste statt sie
+  hochzuschieben; zusätzlich schließt der erste Song-Tap die Tastatur (`focusManager.clearFocus()`).
+  Die Suche klappt im Hinzufügen-Modus automatisch auf, aber OHNE Fokus
+  (`SearchBar.requestFocusOnOpen`) → Tempo-Chips sofort da, keine Tastatur.
+- **Farben** (`1f9a13c`): neue Konstante `GigWeb = #00E5FF` (Akzentfarbe von jangregersen.show, aus
+  einem Screenshot ausgelesen) für den Set-Namen in Brotkrume **und** Griff-Button; Header-Icons
+  (Sortieren/Bearbeiten/⋮) von `GigGray` auf `GigVolt` — waren auf der Bühne kaum lesbar.
+- **Flugmodus-Hinweis** (`cd838c1`, Fix `fe7a820`): `ui/UsbAirplaneHint.kt`. Mobilfunk-Sendebursts
+  koppeln über das Kabel in den Audioweg ("GSM-Sirren"); beim User NUR bei angeschlossenem Kabel.
+  Die App darf den Flugmodus nicht schalten (WRITE_SECURE_SETTINGS), also: Zustand lesen, Band unter
+  der TopBar zeigen, Tap springt in die Systemeinstellung. **Gotcha:** Die erste Fassung fragte
+  `UsbManager.deviceList` und blieb unsichtbar — ein USB-auf-Klinke-Adapter taucht dort NICHT auf,
+  Android reicht Audio-Adapter am Audio-System vorbei durch. Erkennung läuft jetzt über
+  `AudioManager.getDevices(GET_DEVICES_OUTPUTS)` + `AudioDeviceCallback`; der UsbManager-Zweig bleibt
+  als Fallback für den späteren Multitrack-Betrieb (dort wird `snd-usb-audio` gelöst und das Pult
+  fällt aus der Audio-Liste). Vom User am Gig bestätigt.
+- **USB-Dialog: Diagnose + Kopieren** (`cf6d89b`, `9815137`): `WiredAudioDiagnostic()` zeigt
+  Flugmodus, "Hinweis müsste erscheinen: JA/NEIN", alle Kabel-Audio-Ausgänge mit Typ und alle
+  USB-Geräte mit VID:PID; "Neu einlesen" + "Kopieren". **Der User hat keinen PC/adb** — ohne so eine
+  Anzeige ist jedes "geht nicht" nicht diagnostizierbar. Dialog-Inhalt jetzt scrollbar.
+- **Song-Formate prüfen** (`4e3abfa`, Fix `6a7ae48`): `audio/WavFormatCheck.kt`, Menüpunkt im
+  Archiv-"⋮". Liest den `fmt`-Chunk jeder WAV (MediaExtractor als Fallback), Bericht mit Verteilung,
+  Songs ≠ 48 kHz, uneinheitlichen Songs und Dateinamen außerhalb des Stem-Schemas, plus
+  Kopieren-Knopf. **Gotcha:** Die erste Fassung fand 0 Dateien — Modus B speichert in
+  `audioFilePath` die nackte `content://`-URI (kein `tree||ordner`), das deckte nur `SongScanner`
+  ab. Bericht nennt jetzt bei Fehlschlag den rohen Pfad.
+- **`tools/konvertiere_auf_48k.py`** (`50b12f7`, `7e3259f`): rechnet WAVs per ffmpeg auf
+  48 kHz/24 Bit, Trockenlauf als Standard, `--start`, `--ersetzen`. Arbeitsordner liegen **neben**
+  dem Track-Ordner — im Track-Ordner wären sie beim nächsten Import ein Geister-Multitrack-Song.
+  Gegen eine nachgebaute Bibliothek geprüft: Panorama, Länge und Pegel unverändert. **Vom User am
+  Desktop ausgeführt, Ergebnis live getestet: "die Tracks laufen perfekt"** — damit ist auch belegt,
+  dass die App die von ffmpeg geschriebenen 24-Bit-WAVs (WAVE_FORMAT_EXTENSIBLE) abspielt.
+
+**Faktenstand der Bibliothek (gemessen, nicht geschätzt):** 38 Songs, **alle Modus B**
+(eine Stereo-Datei je Song, Musik hart links, Click **und Cue gemeinsam** hart rechts). Vorher
+25× 44,1 kHz/16 Bit und 13× 48 kHz/24 Bit; nach dem Konvertierlauf einheitlich 48 kHz.
+**Die Studio-One-Projekte dazu existieren nicht mehr** — diese Songs lassen sich nicht
+nachträglich als Stems exportieren. Daraus folgen die Plan-Ergänzungen in
+`PLAN-usb-multitrack.md` (Abschnitt "Entschieden am 2026-08-02"), Kurzform: Stereo-Songs laufen im
+Multitrack-Modus als **Zwei-Kanal-Song** (Musik / Click+Cue) und dürfen neben Stem-Songs im selben
+Set stehen; **Click und Cue werden NICHT getrennt**; der Mixer zeigt fehlende Rollen weiter
+ausgegraut (feste Knopfpositionen fürs Blindtreffen); **kein Resampling in der App**, stattdessen
+die Regel "neue Stem-Exporte 48 kHz/24 Bit".
+
+**Offen als nächster kleiner Schritt:** `SongScanner` erkennt Stems nur bei exakt
+`drums/bass/keys/vocals/click/cue.wav`. Studio One exportiert mit Song-/Spurnamen davor — die
+Erkennung muss den Rollennamen **im** Dateinamen finden (User soll nichts umbenennen). Der User
+wollte dafür einen Song testweise als Stems exportieren und die Dateinamen schicken.
 
 ### Songs hinzufügen läuft übers Archiv (2026-07-29, live bestätigt)
 
@@ -2032,12 +2108,19 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
    Nebenbefund dort ebenfalls notiert: der Behringer FLOW 8 des Users taugt NICHT für
    echtes Multitrack (max. 4 Playback-Kanäle per Firmware) — bewusst nicht mitgebaut.
 5. 🔴 **USB-Multitrack: technischer Teil (PRIO 1, jetzt darf Code entstehen).**
-   Reihenfolge: (1) Diagnose-Code vom alten Branch `claude/read-current-md-file-7fy90m`
-   nach `main` holen (`cpp/usb_tone.c`, `cpp/usb_detach.c`, `UsbIsoToneTester.kt`,
-   `UsbDetachTester.kt` — liegen NICHT auf `main`); (2) **Feedback-Sync über EP 0x81**
-   bauen (behebt "Töne kamen nach und nach dazu" + Anlauf-Knacken); (3) danach echte
-   Stems statt Sinus und das in `PLAN-usb-multitrack.md` beschriebene Routing-/
-   Gig-Modus-Modell. Kill-Kriterium bleibt: der Stereo-Weg darf sich nicht ändern.
+   Schritt "Diagnose-Code vom alten Branch holen" ist **hinfällig** — alles liegt auf
+   `main` (2026-08-02 geprüft: `cpp/usb_tone.c`, `cpp/usb_detach.c`, `UsbIsoToneTester.kt`,
+   `UsbDetachTester.kt`, `UsbDescriptorScanner.kt`, `UsbToneTester.kt`). Also direkt:
+   (1) **Feedback-Sync über EP 0x81** bauen (behebt "Töne kamen nach und nach dazu" +
+   Anlauf-Knacken); (2) danach echte Stems statt Sinus und das in
+   `PLAN-usb-multitrack.md` beschriebene Routing-/Gig-Modus-Modell inkl. der Ergänzungen
+   vom 2026-08-02 (Stereo-Songs als Zwei-Kanal-Song). Kill-Kriterium bleibt: der
+   Stereo-Weg darf sich nicht ändern.
+6. 🔵 **Kleiner Zwischenschritt, vom User gewünscht:** Stem-Erkennung in `SongScanner`
+   flexibel machen (Rollenname **im** Dateinamen statt exakt `drums.wav` …), sobald der
+   User einen Testexport aus Studio One geschickt hat. Danach kann er zum ersten Mal
+   einen echten Multitrack-Song importieren — noch über Klinke gemischt, aber mit
+   Einzelreglern im Mixer.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

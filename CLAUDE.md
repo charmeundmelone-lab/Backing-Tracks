@@ -87,6 +87,9 @@ app/src/main/java/de/livegigplayer/pro/
 │   ├── SongScanner.kt        — erkennt TrackMode aus DocumentFile-Struktur
 │   ├── WavFormatCheck.kt     — liest Samplerate/Bittiefe aller WAVs (Menü "⋮ → Song-Formate
 │   │                            prüfen"), Bericht zum Kopieren; Vorbereitung USB-Multitrack
+│   ├── SongLinkCheck.kt      — prüft pro Song, ob die Datei noch auffindbar ist + gleichnamige
+│   │                            Duplikate (Menü "⋮ → Song-Verknüpfungen prüfen"), Diagnose für
+│   │                            "Songs verschwinden aus Sets"-Verdachtsfälle
 │   └── Usb*.kt               — Diagnose fürs geplante Multitrack: UsbDescriptorScanner,
 │                                UsbToneTester, UsbDetachTester, UsbIsoToneTester
 │                                (LIEGEN AUF main, nicht auf einem alten Branch)
@@ -281,14 +284,16 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-08-03  
-**Status:** Fünf Themen gebaut, alle vom User live am Gerät geprüft: "Songs hinzufügen" vereinfacht,
-Farben (aktives Set im Webseiten-Cyan, Header-Icons in Volt), Flugmodus-Hinweis bei angeschlossenem
-Kabel, Song-Formatprüfung, Konvertier-Skript für 48 kHz. **Gig am 2026-08-01 lief einwandfrei.**
-Details siehe Sprint-Eintrag "Session 2026-08-02/03" direkt unter diesem Block.
+**Datum:** 2026-08-25  
+**Status:** Diagnose-Tool "Song-Verknüpfungen prüfen" gebaut und am Gerät ausgewertet
+(Verdacht auf Reimport/Cascade-Bug widerlegt — 0 defekte Verknüpfungen, 0 Duplikate).
+Tatsächliche Ursache für den gemeldeten Bug ("Sunny Afternoon spielt nicht mehr, Songs
+scheinbar aus Sets verschwunden") war eine einzelne beschädigte WAV-Datei, kein App-Bug —
+vom User selbst durch Neukopieren vom Laptop behoben. Details siehe Sprint-Eintrag
+"Diagnose: Song-Verknüpfungen prüfen" direkt unter diesem Block.
 **Branch:** `main`  
-**Letzter Commit:** `7e3259f` — "Konvertier-Skript: Arbeitsordner neben statt in den Track-Ordner"  
-**CI Build:** Grün, verifiziert (Build #361, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Commit:** `31e608c` — "Song-Verknüpfungen prüfen: Diagnose für Songs, die aus Sets verschwinden"  
+**CI Build:** Grün, verifiziert (Build #363, `LiveGigPlayer-release.apk` auf `apk-dist`)  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -330,6 +335,35 @@ Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Z
 (SHA256 `EEF3D6…A74A`) ist identisch mit `app/debug.keystore` im Repo, unverändert seit 24.07.
 Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
 alte APKs nach dem Installieren löschen.  
+
+### Diagnose: Song-Verknüpfungen prüfen (2026-08-25, Commit `31e608c`)
+
+User-Report: einzelne Songs schienen nach einem Reimport aus ihren Sets verschwunden
+zu sein (noch im Archiv sichtbar, aber nicht mehr im Set), zusätzlich spielte
+"Sunny Afternoon" gar nicht mehr. Bewusst kein Blind-Fix — erst Diagnose-Tool gebaut,
+dann anhand des echten Berichts entschieden.
+
+- **`audio/SongLinkCheck.kt` (neu):** prüft pro Song, ob die Datei noch auffindbar ist
+  (wiederverwendet `WavFormatCheck.wavFilesOf`, dafür `private` → `internal`), und
+  gruppiert gleichnamige Songs als mögliche Duplikate samt automatischer Einordnung.
+  `SetDao.getAllCrossRefMembershipOnce()` (neue gigübergreifende Query) liefert dazu,
+  in welchen Sets ein Song noch steckt. Menüpunkt "Song-Verknüpfungen prüfen" im
+  Archiv-"⋮", gleiches Dialog-Muster wie die bestehende Formatprüfung.
+- **Bericht vom Gerät: 0 defekte Verknüpfungen, 0 Duplikate unter 38 Songs** —
+  widerlegt die ursprüngliche Verdachtstheorie (Reimport erzeugt bei geänderter
+  SAF-URI eine neue Song-ID ohne Set-Zuordnung, alte Zeile bleibt als Duplikat
+  liegen). Die Set-Zuordnung war die ganze Zeit intakt.
+- **Tatsächliche Ursache:** die WAV-Datei von "Sunny Afternoon" war beschädigt
+  ("Format nicht lesbar" laut Song-Formatprüfung) — vermutlich vom 48-kHz-
+  Konvertier-Skript verursacht, kein App-Bug. User hat die Originaldatei vom Laptop
+  neu in den Ordner kopiert und reimportiert, Song funktioniert wieder.
+- **Ursprünglicher "Songs verschwinden aus Sets"-Eindruck plausibel erklärt:**
+  `AudioEngine` hat keinen Fehler-Listener auf den ExoPlayer-Instanzen — scheitert
+  eine Datei beim Laden, passiert sichtbar gar nichts (kein Toast, kein Fehler-UI).
+  Am Gig dürfte genau das mit "Song fehlt" verwechselt worden sein. Ein entsprechender
+  Fix (sichtbares Fehler-Feedback) wurde dem User angeboten und von ihm als
+  **nicht mehr nötig** abgelehnt — das Diagnose-Tool bleibt für künftige, ähnliche
+  Fälle im Code. Thema abgeschlossen, keine weiteren Schritte offen.
 
 ### Session 2026-08-02/03: Hinzufügen-Flow, Farben, Flugmodus-Hinweis, Formatprüfung
 

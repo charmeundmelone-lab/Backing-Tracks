@@ -44,6 +44,17 @@ abstract class SetDao {
     @Update(onConflict = OnConflictStrategy.REPLACE)
     protected abstract suspend fun updateRawSets(sets: List<SetEntity>)
 
+    // Alle Set-Zugehörigkeiten in der gesamten DB, gigübergreifend — für die
+    // Song-Verknüpfungsprüfung (SongLinkCheck): zeigt pro Song, in wie vielen/
+    // welchen Sets er noch referenziert wird, unabhängig vom aktuell offenen Gig.
+    @Query("""
+        SELECT ref.songId AS songId, s.setId AS setId, s.name AS setName, g.name AS gigName
+        FROM set_song_cross_ref ref
+        INNER JOIN sets s ON s.setId = ref.setId
+        INNER JOIN gigs g ON g.gigId = s.gigOwnerId
+    """)
+    abstract suspend fun getAllCrossRefMembershipOnce(): List<CrossRefMembership>
+
     @Transaction
     @Query("""
         SELECT songs.*, ref.positionInSet, ref.isCompleted AS completedInSet, ref.isSpontaneous AS spontaneousInSet, ref.endAction AS endAction

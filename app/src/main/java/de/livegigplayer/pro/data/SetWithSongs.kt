@@ -45,3 +45,12 @@ data class SongInSet(
     val spontaneousInSet: Boolean,
     val endAction:       Int
 )
+
+// Eine Set-Zugehörigkeit eines Songs, gigübergreifend — für SongLinkCheck (Diagnose:
+// "in welchen Sets steckt dieser Song noch, falls überhaupt").
+data class CrossRefMembership(
+    val songId:  Long,
+    val setId:   Long,
+    val setName: String,
+    val gigName: String
+)

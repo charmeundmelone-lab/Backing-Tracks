@@ -134,6 +134,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
 import de.livegigplayer.pro.audio.PdfLyricsImporter
+import de.livegigplayer.pro.audio.SongLinkCheck
 import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbDetachTester
 import de.livegigplayer.pro.audio.UsbIsoToneTester
@@ -228,6 +229,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     // statt eines zweiten Dialogs mit eigener Such-/Filter-/Auswahl-Logik).
     var addSongsTarget   by remember { mutableStateOf<SetEntity?>(null) }
     var showFormatCheck  by remember { mutableStateOf(false) }
+    var showLinkCheck    by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -268,7 +270,8 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onMixerToggle = { vm.toggleMixer() },
                 onImport      = { importLauncher.launch(null) },
                 onDeleteAll   = { vm.deleteAllSongs() },
-                onCheckFormats = { showFormatCheck = true }
+                onCheckFormats = { showFormatCheck = true },
+                onCheckLinks   = { showLinkCheck = true }
             )
 
             // Erinnert an den Flugmodus, solange das Pult per USB hängt — zeigt sich
@@ -357,6 +360,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
         if (showFormatCheck) {
             SongFormatCheckDialog(vm = vm, onDismiss = { showFormatCheck = false })
         }
+        if (showLinkCheck) {
+            SongLinkCheckDialog(vm = vm, gigVm = gigVm, onDismiss = { showLinkCheck = false })
+        }
 
         // Mixer overlay
         MixerOverlay(
@@ -413,7 +419,7 @@ private fun TopBar(
     selectedTab: Int, onTabSelect: (Int) -> Unit,
     isLocked: Boolean, onLockToggle: () -> Unit,
     onMixerToggle: () -> Unit, onImport: () -> Unit,
-    onDeleteAll: () -> Unit, onCheckFormats: () -> Unit = {}
+    onDeleteAll: () -> Unit, onCheckFormats: () -> Unit = {}, onCheckLinks: () -> Unit = {}
 ) {
     var menuExpanded        by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
@@ -485,6 +491,10 @@ private fun TopBar(
                         onClick = { menuExpanded = false; onCheckFormats() }
                     )
                     DropdownMenuItem(
+                        text = { Text("Song-Verknüpfungen prüfen", color = White) },
+                        onClick = { menuExpanded = false; onCheckLinks() }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Alle Songs löschen", color = RedStop) },
                         onClick = { menuExpanded = false; showDeleteAllDialog = true }
                     )
@@ -544,6 +554,52 @@ private fun SongFormatCheckDialog(vm: PlayerViewModel, onDismiss: () -> Unit) {
             val text = report
             if (text == null) {
                 Text("Lese Dateiköpfe … $done / ${songs.size} Songs",
+                    color = Gray, fontSize = 13.sp)
+            } else {
+                Text(text, color = White, fontSize = 11.sp,
+                    modifier = Modifier.verticalScroll(rememberScrollState()))
+            }
+        },
+        confirmButton = {
+            report?.let { text ->
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(text))
+                    Toast.makeText(context, "Bericht kopiert", Toast.LENGTH_SHORT).show()
+                }) { Text("Kopieren", color = Volt, fontWeight = FontWeight.Bold) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Schließen", color = Gray) }
+        }
+    )
+}
+
+// Prüft, ob jeder Song im Archiv noch auf eine auffindbare Datei zeigt, und meldet
+// gleichnamige Songs (mögliche Duplikate). Diagnose für den Verdacht, dass ein
+// Reimport (z.B. nach dem 48-kHz-Konvertier-Skript) Songs unbemerkt aus ihren Sets
+// gerissen hat — siehe SongLinkCheck.kt für den Mechanismus.
+@Composable
+private fun SongLinkCheckDialog(vm: PlayerViewModel, gigVm: GigViewModel, onDismiss: () -> Unit) {
+    val context   = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val songs by vm.songs.collectAsState()
+
+    var done   by remember { mutableStateOf(0) }
+    var report by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val crossRefs = gigVm.allCrossRefMembershipOnce()
+        report = SongLinkCheck.report(context, songs, crossRefs) { d, _ -> done = d }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = BgCard,
+        title = { Text("Song-Verknüpfungen", color = White, fontWeight = FontWeight.Bold) },
+        text = {
+            val text = report
+            if (text == null) {
+                Text("Prüfe Verknüpfungen … $done / ${songs.size} Songs",
                     color = Gray, fontSize = 13.sp)
             } else {
                 Text(text, color = White, fontSize = 11.sp,

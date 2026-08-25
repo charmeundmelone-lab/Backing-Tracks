@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.livegigplayer.pro.LiveGigPlayerApp
+import de.livegigplayer.pro.data.CrossRefMembership
 import de.livegigplayer.pro.data.GigEntity
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.SetProgress
@@ -109,6 +110,10 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.IO) {
             if (setIds.isEmpty()) emptyMap() else setDao.getSetProgress(setIds).associateBy { it.setId }
         }
+
+    // Alle Set-Zugehörigkeiten in der gesamten DB, gigübergreifend — für SongLinkCheck.
+    suspend fun allCrossRefMembershipOnce(): List<CrossRefMembership> =
+        withContext(Dispatchers.IO) { setDao.getAllCrossRefMembershipOnce() }
 
     fun addSongsToSet(setId: Long, songIds: List<Long>, playerVm: PlayerViewModel? = null) {
         viewModelScope.launch(Dispatchers.IO) {

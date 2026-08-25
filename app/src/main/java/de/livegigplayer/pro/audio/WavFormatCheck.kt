@@ -142,7 +142,7 @@ object WavFormatCheck {
      * Alle WAV-Dateien eines Songs als (Dateiname, Uri) — bewusst ALLE, nicht nur die
      * sechs bekannten Rollen, damit auch abweichend benannte Stems im Bericht auftauchen.
      */
-    private fun wavFilesOf(context: Context, song: Song): List<Pair<String, Uri>> {
+    internal fun wavFilesOf(context: Context, song: Song): List<Pair<String, Uri>> {
         val path = song.audioFilePath.trim()
         if (path.isEmpty()) return emptyList()
 

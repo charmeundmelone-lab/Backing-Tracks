@@ -10,9 +10,12 @@ import de.livegigplayer.pro.LiveGigPlayerApp
 import de.livegigplayer.pro.audio.AudioEngine
 import de.livegigplayer.pro.audio.FolderImporter
 import de.livegigplayer.pro.audio.SongScanner
+import de.livegigplayer.pro.audio.VoiceNoteRecorder
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.TrackMode
+import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -224,7 +227,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                             when (activeEndAction.value) {
                                 1 -> { engine.pause(); _isPlaying.value = false }                   // STOP
                                 0 -> { skipNext(); _isPlaying.value = false }                       // CUE (arm, kein Play)
-                                else -> { skipNext(); engine.play(); _isPlaying.value = true }       // AUTOPLAY
+                                else -> {                                                            // AUTOPLAY
+                                    // Song loopt wegen REPEAT_MODE_ONE bereits lautlos von vorn
+                                    // (Gotcha 2) — sofort stumm schalten, bevor die Show-Automatik
+                                    // (Nachlauf-/Vorlauf-Notiz oder Fallback-Pause) beginnt.
+                                    engine.pause(); _isPlaying.value = false
+                                    val finished = _currentSong.value
+                                    if (finished != null) startAutomatikPause(finished, next)
+                                    else { skipNext(); engine.play(); _isPlaying.value = true }
+                                }
                             }
                         }
                         _currentSong.value?.autoStop == true -> {
@@ -514,6 +525,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun togglePlayPause() {
+        // Show-Automatik: jede Transport-Interaktion während einer laufenden Pause/
+        // Ansage überspringt sie sofort (PLAN-show-automatik.md, Teil 1 Punkt 10) —
+        // sonst würde play() den bereits (wegen REPEAT_MODE_ONE) neu gestarteten,
+        // eigentlich fertigen Song parallel zur Notiz wieder hörbar machen.
+        if (_automatikRemainingMs.value != null) { skipAutomatikPause(); return }
         if (engine.isPlaying) {
             engine.pause(); _isPlaying.value = false
         } else {
@@ -525,13 +541,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-    fun stopPlayback()    { engine.stop(); _isPlaying.value = false }
+    fun stopPlayback() {
+        if (_automatikRemainingMs.value != null) { skipAutomatikPause(); return }
+        engine.stop(); _isPlaying.value = false
+    }
     fun seekTo(ms: Long)  { engine.seekTo(ms.coerceIn(0L, _durationMs.value)) }
     fun skipPrevious()    { val l = songs.value; val i = l.indexOfFirst { it.id == _currentSong.value?.id }; if (i > 0) selectSong(l[i-1], getApplication(), isGigSet = _isGigSetMode.value) else engine.seekTo(0L) }
     var onSongCompleted: ((songId: Long) -> Unit)? = null
     val activeEndAction = MutableStateFlow(0) // 0=CUE, 1=STOP, 2=AUTOPLAY — set by GigViewModel
 
     fun skipNext() {
+        // Manueller Skip während einer laufenden Automatik-Pause: siehe togglePlayPause().
+        if (_automatikRemainingMs.value != null) { skipAutomatikPause(); return }
         val completedId = _currentSong.value?.id
         val isGigSet    = _isGigSetMode.value
         val queued = dequeueFirst()
@@ -544,6 +565,75 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         completedId?.let { onSongCompleted?.invoke(it) }
         selectSong(next, getApplication(), _currentPlaylistId.value, isGigSet = isGigSet)
     }
+
+    // ── Show-Automatik: Pause/Ansage bei Auto-Advance (Schritt 4) ───────────────
+    // Ausschließlich vom Auto-Advance-Zweig oben ausgelöst — manuelles Skippen
+    // ruft skipNext() direkt und läuft nie über startAutomatikPause() (Punkt 5).
+    private var automatikJob: Job? = null
+
+    private val _automatikRemainingMs = MutableStateFlow<Long?>(null)
+    val automatikRemainingMs: StateFlow<Long?> = _automatikRemainingMs.asStateFlow()
+
+    private val _automatikLabel = MutableStateFlow("")
+    val automatikLabel: StateFlow<String> = _automatikLabel.asStateFlow()
+
+    private val _automatikError = MutableStateFlow<String?>(null)
+    val automatikError: StateFlow<String?> = _automatikError.asStateFlow()
+
+    fun clearAutomatikError() { _automatikError.value = null }
+
+    private fun startAutomatikPause(finishedSong: Song, upcoming: Song) {
+        automatikJob?.cancel()
+        automatikJob = viewModelScope.launch {
+            var playedSomething = false
+            if (playAutomatikSegment(finishedSong.outroNoteFilePath, "Nachlauf-Notiz von „${finishedSong.title}“"))
+                playedSomething = true
+            if (playAutomatikSegment(upcoming.introNoteFilePath, "Vorlauf-Notiz von „${upcoming.title}“"))
+                playedSomething = true
+            if (!playedSomething && upcoming.manualPauseSeconds > 0) {
+                _automatikLabel.value = "Pause bis zum nächsten Song"
+                var remaining = upcoming.manualPauseSeconds * 1000L
+                while (remaining > 0) {
+                    _automatikRemainingMs.value = remaining
+                    delay(50L)
+                    remaining -= 50L
+                }
+            }
+            _automatikRemainingMs.value = null
+            skipNext(); engine.play(); _isPlaying.value = true
+        }
+    }
+
+    // Spielt eine Notiz hart rechts gepannt ab, aktualisiert währenddessen den
+    // Countdown. Fehlt/defekt → Fehler-Hinweis (Teil 3 Punkt 1), Show läuft sofort
+    // weiter (behandelt wie "keine Notiz"). Gibt zurück, ob überhaupt etwas lief.
+    private suspend fun playAutomatikSegment(path: String, label: String): Boolean {
+        if (path.isBlank()) return false
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) {
+            _automatikError.value = "$label fehlt oder ist defekt — bitte neu aufnehmen"
+            return false
+        }
+        _automatikLabel.value = label
+        var done = false
+        engine.playVoiceNote(path) { done = true }
+        while (!done) {
+            val dur = engine.voiceNoteDurationMs.takeIf { it > 0 } ?: VoiceNoteRecorder.durationOf(file)
+            _automatikRemainingMs.value = (dur - engine.voiceNotePositionMs).coerceAtLeast(0L)
+            delay(50L)
+        }
+        return true
+    }
+
+    /** Bricht die laufende Pause/Ansage ab und startet den nächsten Song sofort (Punkt 10). */
+    fun skipAutomatikPause() {
+        if (_automatikRemainingMs.value == null) return
+        automatikJob?.cancel()
+        engine.stopVoiceNote()
+        _automatikRemainingMs.value = null
+        skipNext(); engine.play(); _isPlaying.value = true
+    }
+
     fun toggleMixer()  { _showMixer.value = !_showMixer.value }
     fun closeMixer()   { _showMixer.value = false }
 

@@ -82,6 +82,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -228,6 +229,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val activeEndAction   by vm.activeEndAction.collectAsState()
     val activeSetId       by gigVm.activeSetId.collectAsState()
     val loopHint          by vm.loopHint.collectAsState()
+    val automatikRemainingMs by vm.automatikRemainingMs.collectAsState()
+    val automatikLabel        by vm.automatikLabel.collectAsState()
+    val automatikError        by vm.automatikError.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Sets
     var isLocked         by remember { mutableStateOf(false) }
@@ -332,12 +336,17 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 loopStartMs      = loopStartMs,
                 loopEndMs        = loopEndMs,
                 activeEndAction  = activeEndAction,
+                automatikRemainingMs = automatikRemainingMs,
+                automatikLabel       = automatikLabel,
+                automatikError       = automatikError,
                 onSeekTo         = { ms -> vm.seekTo(ms) },
                 onPlayPause      = { vm.togglePlayPause() },
                 onStop           = { vm.stopPlayback() },
                 onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
                 onSetLoopButton  = { vm.onSetLoopButtonPressed() },
                 onOpenLyrics     = { vm.openLyrics() },
+                onSkipAutomatik  = { vm.skipAutomatikPause() },
+                onDismissAutomatikError = { vm.clearAutomatikError() },
                 onCycleEndAction = {
                     val sid = activeSetId
                     val song = currentSong
@@ -2049,10 +2058,17 @@ private fun GlobalPlayer(
     positionMs: Long, durationMs: Long,
     loopStartMs: Long?, loopEndMs: Long?,
     activeEndAction: Int = 0,
+    // Show-Automatik: != null ⇒ eine Pause/Ansage läuft gerade (Nachlauf-/Vorlauf-
+    // Notiz oder Fallback-Sekunden), verdrängt dann die normale Titel-Zeile.
+    automatikRemainingMs: Long? = null,
+    automatikLabel: String = "",
+    automatikError: String? = null,
     onSeekTo: (Long) -> Unit = {},
     onPlayPause: () -> Unit, onStop: () -> Unit,
     onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit,
     onOpenLyrics: () -> Unit = {},
+    onSkipAutomatik: () -> Unit = {},
+    onDismissAutomatikError: () -> Unit = {},
     onCycleEndAction: () -> Unit = {}
 ) {
     var isSeeking by remember { mutableStateOf(false) }
@@ -2104,6 +2120,49 @@ private fun GlobalPlayer(
             if (isSeeking)
                 drawCircle(color = Volt, radius = 6.dp.toPx(), center = Offset(filled, cy))
         }
+        // Show-Automatik: persistenter Fehler-Hinweis (Teil 3 Punkt 1) — unabhängig
+        // von automatikRemainingMs, damit der Fehler auch nach der Pause auffällt.
+        if (automatikError != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .background(Color(0xFF3A2400))
+                    .clickable(onClick = onDismissAutomatikError)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Warning, contentDescription = null,
+                    tint = Color(0xFFFFB300), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(automatikError, color = Color(0xFFFFB300), fontSize = 11.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Icon(Icons.Filled.Close, contentDescription = "Hinweis schließen",
+                    tint = Gray, modifier = Modifier.size(16.dp))
+            }
+        }
+        if (automatikRemainingMs != null) {
+            // Show-Automatik: Pause/Ansage läuft — großer Countdown statt Titelzeile,
+            // ganze Zeile tippbar zum Überspringen (Punkt 10/11).
+            val remSecA = automatikRemainingMs / 1000
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .clickable(onClick = onSkipAutomatik)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "%d:%02d".format(remSecA / 60, remSecA % 60),
+                    color = Volt, fontSize = 28.sp, fontWeight = FontWeight.Black,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier.padding(end = 12.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(automatikLabel.ifBlank { "Pause bis zum nächsten Song" },
+                        color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Tippen zum Überspringen", color = Gray, fontSize = 11.sp)
+                }
+            }
+        } else {
         // Links: Countdown | Mitte: Aktueller + Nächster Song | Rechts: EndAction (GigMode)
         Row(
             modifier = Modifier.fillMaxWidth()
@@ -2174,6 +2233,7 @@ private fun GlobalPlayer(
                         tint = endTint, modifier = Modifier.size(24.dp))
                 }
             }
+        }
         }
         // Transport: PLAY/PAUSE (2x) | STOP | LOOP
         Row(

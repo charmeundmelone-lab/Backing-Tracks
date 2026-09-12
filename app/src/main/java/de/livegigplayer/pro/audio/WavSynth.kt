@@ -35,6 +35,38 @@ object WavSynth {
         file.writeBytes(buildWav(pcm))
     }
 
+    // Show-Automatik: Warnton vor Ende der stillen Fallback-Pause (kein externes
+    // Audio-Asset nötig — additive Glocken-Synthese wie bei writeClickRight, nur mit
+    // aufsteigendem Arpeggio + Abkling-Hüllkurve statt eines einzelnen Ticks). Hart
+    // rechts (Cue-Kanal), linker Kanal bleibt komplett still.
+    fun writeWarningChime(file: File, totalSeconds: Float = 5f) {
+        val totalSamples = (SR * totalSeconds).toInt()
+        val pcm = ShortArray(totalSamples * 2)
+        val notes = floatArrayOf(523.25f, 659.25f, 783.99f, 1046.50f) // C5-E5-G5-C6
+        val noteSpacing = totalSeconds / notes.size
+        notes.forEachIndexed { idx, freq ->
+            val startSample = (idx * noteSpacing * SR).toInt()
+            // Überlappender Nachklang (2.2x Notenabstand) sorgt für den Glocken-/Chime-
+            // Charakter, statt dass jede Note abrupt endet.
+            val noteSamples = (SR * noteSpacing * 2.2f).toInt().coerceAtMost(totalSamples - startSample)
+            for (t in 0 until noteSamples) {
+                val sampleIdx = startSample + t
+                if (sampleIdx >= totalSamples) break
+                val time = t / SR.toFloat()
+                val envelope = Math.exp(-time * 2.2)
+                val fundamental = Math.sin(2.0 * Math.PI * freq * t / SR)
+                val overtone = 0.35 * Math.sin(2.0 * Math.PI * freq * 2.01 * t / SR)
+                val value = (Short.MAX_VALUE * 0.5 * envelope * (fundamental + overtone)).toInt()
+                // Additiv überlagern statt überschreiben — Nachklang mehrerer Noten
+                // klingt gleichzeitig aus.
+                val existing = pcm[sampleIdx * 2 + 1].toInt()
+                pcm[sampleIdx * 2 + 1] = (existing + value)
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            }
+        }
+        file.writeBytes(buildWav(pcm))
+    }
+
     fun writeStereoMix(file: File, numSamples: Int) {
         val pcm = ShortArray(numSamples * 2)
         val freqs = floatArrayOf(196f, 246.94f, 293.66f, 392f)  // G-Dur-Akkord

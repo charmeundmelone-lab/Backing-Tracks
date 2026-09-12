@@ -11,6 +11,7 @@ import de.livegigplayer.pro.audio.AudioEngine
 import de.livegigplayer.pro.audio.FolderImporter
 import de.livegigplayer.pro.audio.SongScanner
 import de.livegigplayer.pro.audio.VoiceNoteRecorder
+import de.livegigplayer.pro.audio.WavSynth
 import de.livegigplayer.pro.data.Song
 import de.livegigplayer.pro.data.TrackMode
 import java.io.File
@@ -607,9 +608,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 playedSomething = true
             if (!playedSomething && upcoming.manualPauseSeconds > 0) {
                 _automatikLabel.value = "Pause bis zum nächsten Song"
-                var remaining = upcoming.manualPauseSeconds * 1000L
+                val totalMs = upcoming.manualPauseSeconds * 1000L
+                // Warnton-Vorlauf = letztes Drittel der Pause, gedeckelt bei 5 Minuten —
+                // eine Formel für alle Pausenlängen (GrillMe 2026-09-12): bei 60 Min.
+                // Pause kommt der Ton 5 Min. vorher, bei 90s Pause 30s vorher.
+                val warnLeadMs = (totalMs / 3).coerceAtMost(5 * 60_000L)
+                var toneFired = false
+                var remaining = totalMs
                 while (remaining > 0) {
                     _automatikRemainingMs.value = remaining
+                    if (!toneFired && remaining <= warnLeadMs) {
+                        toneFired = true
+                        playWarningChime()
+                    }
                     delay(50L)
                     remaining -= 50L
                 }
@@ -640,6 +651,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             delay(50L)
         }
         return true
+    }
+
+    // Fest eingebauter, ~5s langer Warnton (GrillMe 2026-09-12) — läuft NEBENHER
+    // zum weiterlaufenden Countdown (kein "await", die Pause zählt währenddessen
+    // weiter), hart rechts über denselben Notiz-Wiedergabepfad wie die Sprachnotizen.
+    // Datei wird einmalig generiert (additive Glocken-Synthese, siehe WavSynth) und
+    // danach aus dem App-internen Speicher wiederverwendet — kein Audio-Asset nötig.
+    private fun playWarningChime() {
+        val context = getApplication<Application>()
+        val file = File(context.filesDir, "automatik_warnton.wav")
+        if (!file.exists()) WavSynth.writeWarningChime(file)
+        engine.playVoiceNote(file.absolutePath) { }
     }
 
     /** Bricht die laufende Pause/Ansage ab und startet den nächsten Song sofort (Punkt 10). */
@@ -759,7 +782,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateManualPauseSeconds(song: Song, seconds: Int) {
-        val clamped = seconds.coerceIn(0, 60)
+        // Max. 60 Minuten (GrillMe 2026-09-12) — vorher 60 Sekunden, war eine
+        // willkürliche Grenze aus der Migration ohne Bezug zum eigentlichen Plan.
+        val clamped = seconds.coerceIn(0, 3600)
         val u = song.copy(manualPauseSeconds = clamped)
         viewModelScope.launch { dao.updateManualPauseSeconds(song.id, clamped) }
         if (_currentSong.value?.id == song.id) _currentSong.value = u

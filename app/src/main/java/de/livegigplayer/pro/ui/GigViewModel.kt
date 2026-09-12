@@ -115,6 +115,10 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun allCrossRefMembershipOnce(): List<CrossRefMembership> =
         withContext(Dispatchers.IO) { setDao.getAllCrossRefMembershipOnce() }
 
+    // Show-Automatik-Diagnose (PLAN-show-automatik.md, Teil 3 Punkt 2) — siehe AutomatikCheck.kt.
+    suspend fun automatikCheckReport(): String =
+        de.livegigplayer.pro.audio.AutomatikCheck.report(gigDao, setDao)
+
     fun addSongsToSet(setId: Long, songIds: List<Long>, playerVm: PlayerViewModel? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             queueMutex.withLock {

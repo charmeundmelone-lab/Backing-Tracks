@@ -144,28 +144,67 @@ aktiv ist.
    Abschluss-Ansage am letzten Song bereits ab — nichts zusätzlich zu
    bauen.
 
+## Teil 4 — Zeit-Picker "Manuelle Pause" + Warnton (GrillMe 2026-09-12, Nachtrag)
+
+Ausgelöst durch einen Screenshot des Nothing-OS-Timers ("so soll die
+Zeiteingabe aussehen"). Der ursprüngliche ±5s-Stepper für
+`manualPauseSeconds` (Max. 60s) war eine willkürliche Implementierungs-
+Entscheidung aus Schritt 1, keine Plan-Vorgabe.
+
+### Entscheidungen
+1. **UI:** Ziffernblock-Dialog (1-9, 00, 0, ⌫) statt Stepper — **Option 1**
+   aus drei vorgeschlagenen (Alternative "reusable Komponente" und "voller
+   Wheel-Nachbau mit Std/Min/Sek" bewusst verworfen, da nur EIN Einsatzort
+   existiert und ein Stunden-Wheel bei max. 60 Minuten ohnehin leer wäre).
+   Eingabe als 4-stelliger Schiebepuffer (MMSS), keine Sekunden-Validierung
+   nötig — `Übernehmen` rechnet einfach Minuten×60+Sekunden.
+2. **Max. Pause:** 60 Minuten (vorher 60 Sekunden).
+3. **Warnton — Zweck:** Weck-/Ankündigungssignal NUR für die stille
+   Fallback-Pause (`manualPauseSeconds`, keine Notiz vorhanden). Die
+   bereits hörbaren Vorlauf-/Nachlauf-Sprachnotizen brauchen keinen
+   zusätzlichen Ton.
+4. **Vorlauf-Formel:** Pausenlänge ÷ 3, gedeckelt bei max. 5 Minuten — EINE
+   Formel für alle Pausenlängen, kein Sonderfall für kurze/lange Pausen
+   (60-Min-Pause → Ton 5 Min. vorher; 90s-Pause → 30s vorher; 9s-Pause →
+   3s vorher). Load der beiden zuerst diskutierten Einzel-Ideen ("fix 5 Min
+   vorher" / "immer letztes Drittel") in einer Formel.
+5. **Nur ein Ton** — kein zweiter Ton exakt beim Wiederbeginn.
+6. **Ton-Quelle:** fest in der App eingebaut (additive Glocken-Synthese,
+   ~5s, aufsteigendes Arpeggio C5-E5-G5-C6 mit Abkling-Hüllkurve — siehe
+   `WavSynth.writeWarningChime()`), NICHT pro Song aufnehmbar. Einmalig ins
+   App-interne Storage geschrieben, danach wiederverwendet.
+7. **Panning:** hart rechts, nur Cue-Kanal — wie Sprachnotizen und Click,
+   Publikum bekommt nichts mit.
+
+Keine der Entscheidungen ist schwer rückgängig zu machen (kein neuer
+Migrationsschritt — `manualPauseSeconds` existiert als Int bereits, nur
+UI-Grenze und ein neuer Laufzeit-Mechanismus für den Ton).
+
 ## Status — bereit zur Umsetzung
 
 - Kein Gradle-Build nötig gewesen (reine Konzeption, kein Code).
 - **Teil 1 + 2 + 3 final abgestimmt.** Umsetzungsreihenfolge für die
   nächste Session (siehe auch CLAUDE.md, TODO PRIO 1, Punkt 7):
-  1. Room-Migration v19→v20 (`Song.kt`: `introNoteFilePath`/
+  1. ✅ Room-Migration v19→v20 (`Song.kt`: `introNoteFilePath`/
      `introNoteDurationMs`/`outroNoteFilePath`/`outroNoteDurationMs`/
      `manualPauseSeconds`, `MIGRATION_19_20`, `SongDao`-Update-Methoden).
-  2. Mikrofon-Aufnahme im `SongEditorSheet` (aufnehmen → anhören → neu
+  2. ✅ Mikrofon-Aufnahme im `SongEditorSheet` (aufnehmen → anhören → neu
      aufnehmen → speichern, App-internes Storage, kein SAF).
-  3. `AudioEngine`: separater Wiedergabe-Pfad für Notizen, hart rechts
-     gepannt (Ansatz bei Umsetzung entscheiden, siehe Teil 1 "Offene
-     technische Details").
-  4. `PlayerViewModel`: Pause-/Ansage-Ablauf bei Auto-Advance (Nachlauf →
+  3. ✅ `AudioEngine`: separater Wiedergabe-Pfad für Notizen, hart rechts
+     gepannt (`MediaPlayer.setVolume(0f, 1f)`).
+  4. ✅ `PlayerViewModel`: Pause-/Ansage-Ablauf bei Auto-Advance (Nachlauf →
      Vorlauf, Fallback-Sekunden, Live-Abbruch per Tap, Fehler-Fallback mit
      sichtbarem Hinweis), großer Volt-Countdown in `PlayerInfoBar`.
-  5. "Frei spielen"-Button (global, nur in der Pause aktiv, reiner
+  5. ✅ "Frei spielen"-Button (global, nur in der Pause aktiv, reiner
      Laufzeit-Zustand, kein DB-Feld) + Statustext in `PlayerInfoBar`.
-  6. Mikrofon-Icon in `SetSongRow` (Sichtbarkeits-Marker aus Teil 3,
+  6. ✅ Mikrofon-Icon in `SetSongRow` (Sichtbarkeits-Marker aus Teil 3,
      Punkt 4).
   7. Diagnose-Tool "Automatik-Check" (Teil 3, Punkt 2), analog
      `WavFormatCheck`/`SongLinkCheck`.
-  8. Performance-Lock beachten: Pause-Abbrechen-Tap und "Frei
+  8. ✅ Performance-Lock beachten: Pause-Abbrechen-Tap und "Frei
      spielen"-Button bleiben **immer** aktiv, auch bei `isLocked`
-     (Teil 1 Punkt 12 / Teil 2 Punkt 7).
+     (Teil 1 Punkt 12 / Teil 2 Punkt 7) — GlobalPlayer war nie
+     `isLocked`-gegatet.
+  9. ✅ Teil 4: Ziffernblock-Zeit-Picker + Warnton (siehe oben).
+
+**Einziger noch offener Schritt: Punkt 7, Diagnose-Tool "Automatik-Check".**

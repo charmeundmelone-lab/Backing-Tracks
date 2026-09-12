@@ -60,6 +60,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
@@ -124,6 +125,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -243,6 +245,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     var addSongsTarget   by remember { mutableStateOf<SetEntity?>(null) }
     var showFormatCheck  by remember { mutableStateOf(false) }
     var showLinkCheck    by remember { mutableStateOf(false) }
+    var showAutomatikCheck by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -284,7 +287,8 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onImport      = { importLauncher.launch(null) },
                 onDeleteAll   = { vm.deleteAllSongs() },
                 onCheckFormats = { showFormatCheck = true },
-                onCheckLinks   = { showLinkCheck = true }
+                onCheckLinks   = { showLinkCheck = true },
+                onCheckAutomatik = { showAutomatikCheck = true }
             )
 
             // Erinnert an den Flugmodus, solange das Pult per USB hängt — zeigt sich
@@ -383,6 +387,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
         if (showLinkCheck) {
             SongLinkCheckDialog(vm = vm, gigVm = gigVm, onDismiss = { showLinkCheck = false })
         }
+        if (showAutomatikCheck) {
+            AutomatikCheckDialog(gigVm = gigVm, onDismiss = { showAutomatikCheck = false })
+        }
 
         // Mixer overlay
         MixerOverlay(
@@ -439,7 +446,8 @@ private fun TopBar(
     selectedTab: Int, onTabSelect: (Int) -> Unit,
     isLocked: Boolean, onLockToggle: () -> Unit,
     onMixerToggle: () -> Unit, onImport: () -> Unit,
-    onDeleteAll: () -> Unit, onCheckFormats: () -> Unit = {}, onCheckLinks: () -> Unit = {}
+    onDeleteAll: () -> Unit, onCheckFormats: () -> Unit = {}, onCheckLinks: () -> Unit = {},
+    onCheckAutomatik: () -> Unit = {}
 ) {
     var menuExpanded        by remember { mutableStateOf(false) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
@@ -513,6 +521,10 @@ private fun TopBar(
                     DropdownMenuItem(
                         text = { Text("Song-Verknüpfungen prüfen", color = White) },
                         onClick = { menuExpanded = false; onCheckLinks() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Automatik-Check", color = White) },
+                        onClick = { menuExpanded = false; onCheckAutomatik() }
                     )
                     DropdownMenuItem(
                         text = { Text("Alle Songs löschen", color = RedStop) },
@@ -621,6 +633,43 @@ private fun SongLinkCheckDialog(vm: PlayerViewModel, gigVm: GigViewModel, onDism
             if (text == null) {
                 Text("Prüfe Verknüpfungen … $done / ${songs.size} Songs",
                     color = Gray, fontSize = 13.sp)
+            } else {
+                Text(text, color = White, fontSize = 11.sp,
+                    modifier = Modifier.verticalScroll(rememberScrollState()))
+            }
+        },
+        confirmButton = {
+            report?.let { text ->
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(text))
+                    Toast.makeText(context, "Bericht kopiert", Toast.LENGTH_SHORT).show()
+                }) { Text("Kopieren", color = Volt, fontWeight = FontWeight.Bold) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Schließen", color = Gray) }
+        }
+    )
+}
+
+// Show-Automatik-Diagnose: listet Auto-Advance-Übergänge (endAction=AUTOPLAY) ohne
+// jede Ansage/Pause — siehe AutomatikCheck.kt für den Mechanismus.
+@Composable
+private fun AutomatikCheckDialog(gigVm: GigViewModel, onDismiss: () -> Unit) {
+    val context   = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var report by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) { report = gigVm.automatikCheckReport() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = BgCard,
+        title = { Text("Automatik-Check", color = White, fontWeight = FontWeight.Bold) },
+        text = {
+            val text = report
+            if (text == null) {
+                Text("Prüfe Auto-Advance-Übergänge …", color = Gray, fontSize = 13.sp)
             } else {
                 Text(text, color = White, fontSize = 11.sp,
                     modifier = Modifier.verticalScroll(rememberScrollState()))
@@ -1560,6 +1609,7 @@ private fun SongEditorSheet(
     var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
     var tempoTag by remember(song.id) { mutableStateOf(song.tempoTag) }
     var manualPauseSeconds by remember(song.id) { mutableStateOf(song.manualPauseSeconds) }
+    var showPauseSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1770,25 +1820,18 @@ private fun SongEditorSheet(
         )
         Spacer(modifier = Modifier.height(16.dp))
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().clickable { showPauseSheet = true },
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Manuelle Pause (Fallback)", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text("Nur falls keine Notiz vorhanden", color = Gray, fontSize = 11.sp)
             }
-            Text("−", color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(enabled = manualPauseSeconds > 0) {
-                    manualPauseSeconds = (manualPauseSeconds - 5).coerceAtLeast(0)
-                    onManualPauseChange(manualPauseSeconds)
-                }.padding(horizontal = 14.dp, vertical = 4.dp))
-            Text("${manualPauseSeconds}s", color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center, modifier = Modifier.width(40.dp))
-            Text("+", color = if (manualPauseSeconds < 60) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(enabled = manualPauseSeconds < 60) {
-                    manualPauseSeconds = (manualPauseSeconds + 5).coerceAtMost(60)
-                    onManualPauseChange(manualPauseSeconds)
-                }.padding(horizontal = 14.dp, vertical = 4.dp))
+            Text(
+                "%d:%02d".format(manualPauseSeconds / 60, manualPauseSeconds % 60),
+                color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
         }
         }
 
@@ -1814,6 +1857,115 @@ private fun SongEditorSheet(
                     }
                 }
             )
+        }
+
+        if (showPauseSheet) {
+            ManualPauseKeypadDialog(
+                initialSeconds = manualPauseSeconds,
+                onConfirm = { seconds ->
+                    manualPauseSeconds = seconds
+                    onManualPauseChange(seconds)
+                    showPauseSheet = false
+                },
+                onDismiss = { showPauseSheet = false }
+            )
+        }
+    }
+}
+
+// ── Manuelle Pause: Ziffernblock-Eingabe (MM:SS), analog Nothing-OS-Timer ─────
+// GrillMe 2026-09-12: Option 1 (nur Ziffernblock, keine Scroll-Wheels — bei
+// max. 60 Minuten wäre ein Stunden-Wheel ohnehin leer). Eingabe läuft wie bei
+// jedem Countdown-Timer als 4-stelliger Schiebepuffer (MMSS), keine separate
+// Validierung der Sekunden-Stelle nötig — bei "Übernehmen" zählt einfach
+// Minuten*60+Sekunden.
+@Composable
+private fun ManualPauseKeypadDialog(
+    initialSeconds: Int,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var buffer by remember {
+        mutableStateOf("%04d".format((initialSeconds / 60).coerceAtMost(99) * 100 + initialSeconds % 60))
+    }
+    fun pushDigits(digits: String) { buffer = (buffer + digits).takeLast(4) }
+    fun backspace() { buffer = "0" + buffer.dropLast(1) }
+    val minutesPart = buffer.substring(0, 2).toInt()
+    val secondsPart = buffer.substring(2, 4).toInt()
+    val totalSeconds = (minutesPart * 60 + secondsPart).coerceIn(0, 3600)
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier.fillMaxWidth().background(BgCard, shape = MaterialTheme.shapes.large)
+                .padding(20.dp)
+        ) {
+            Text("Manuelle Pause", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp))
+            // Anzeige MM:SS — analog den zwei rechten Feldern im Nothing-Timer
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                listOf("%02d".format(minutesPart) to "Minuten", "%02d".format(secondsPart) to "Sekunden")
+                    .forEachIndexed { idx, (value, label) ->
+                        if (idx > 0) {
+                            Text(":", color = Gray, fontSize = 40.sp, fontWeight = FontWeight.Light,
+                                modifier = Modifier.padding(horizontal = 8.dp))
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(value, color = Volt, fontSize = 40.sp, fontWeight = FontWeight.Light,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            Text(label, color = Gray, fontSize = 12.sp)
+                        }
+                    }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            // Presets statt 1m/5m/10m/15m (Nothing-Vorbild) — passend zu einer
+            // Fallback-Pause zwischen Songs, nicht zu einem Kochwecker.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("30s" to 30, "1m" to 60, "2m" to 120, "5m" to 300).forEach { (label, secs) ->
+                    Button(
+                        onClick = { buffer = "%04d".format((secs / 60) * 100 + secs % 60) },
+                        colors = ButtonDefaults.buttonColors(containerColor = BgTrack),
+                        contentPadding = PaddingValues(vertical = 8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) { Text(label, color = Volt, fontSize = 12.sp) }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = { onConfirm(totalSeconds) },
+                colors = ButtonDefaults.buttonColors(containerColor = Volt),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Übernehmen", color = Color.Black, fontWeight = FontWeight.Bold) }
+            Spacer(modifier = Modifier.height(16.dp))
+            // Ziffernblock — Layout 1-9 / 00,0,⌫ wie im Screenshot
+            val rows = listOf(
+                listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9")
+            )
+            rows.forEach { row ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { digit ->
+                        Text(digit, color = White, fontSize = 24.sp, textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f).clickable { pushDigits(digit) }.padding(vertical = 14.dp))
+                    }
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("00", color = White, fontSize = 24.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).clickable { pushDigits("00") }.padding(vertical = 14.dp))
+                Text("0", color = White, fontSize = 24.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).clickable { pushDigits("0") }.padding(vertical = 14.dp))
+                Box(
+                    modifier = Modifier.weight(1f).clickable { backspace() }.padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Backspace, contentDescription = "Löschen", tint = White, modifier = Modifier.size(22.dp))
+                }
+            }
         }
     }
 }

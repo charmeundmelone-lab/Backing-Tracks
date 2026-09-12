@@ -165,9 +165,10 @@ class AudioEngine(private val context: Context) {
 
     // ── Show-Automatik: Vorlauf-/Nachlauf-Sprachnotizen ─────────────────────────
     // Eigener Pfad über MediaPlayer statt ExoPlayer/tracks: läuft unabhängig von
-    // der Song-Wiedergabe (kein Loop/Preload nötig) und setStereoVolume() ist der
-    // einfachste Weg, eine Notiz hart rechts zu panen — genau wie das bestehende
-    // Click+Cue-Signal in Modus B, ExoPlayer bietet dafür keine eingebaute API.
+    // der Song-Wiedergabe (kein Loop/Preload nötig) und der (deprecated, aber nicht
+    // entfernte) Zwei-Kanal setVolume(links, rechts) ist der einfachste Weg, eine
+    // Notiz hart rechts zu panen — genau wie das bestehende Click+Cue-Signal in
+    // Modus B, ExoPlayer bietet dafür keine eingebaute API.
     // Feste, laute Lautstärke, kein Regler (PLAN-show-automatik.md, Teil 1 Punkt 13).
     private var noteMediaPlayer: MediaPlayer? = null
 
@@ -184,7 +185,7 @@ class AudioEngine(private val context: Context) {
         val player = MediaPlayer()
         try {
             player.setDataSource(filePath)
-            player.setStereoVolume(0f, 1f)
+            @Suppress("DEPRECATION") player.setVolume(0f, 1f)
             player.setOnCompletionListener { stopVoiceNote(); onCompleted() }
             player.setOnErrorListener { _, _, _ -> stopVoiceNote(); onCompleted(); true }
             player.prepare()

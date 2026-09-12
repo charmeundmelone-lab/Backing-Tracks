@@ -42,5 +42,14 @@ data class Song(
     // Manuelles Tempo-Tag fürs Archiv-Filtern (v19) — bewusst NICHT aus BPM abgeleitet,
     // da viele BPM-Werte im Bestand unzuverlässig/leer sind. 0=ungetaggt, 1=Langsam,
     // 2=Mittel, 3=Schnell.
-    val tempoTag: Int = 0
+    val tempoTag: Int = 0,
+    // Show-Automatik (v20): Vorlauf-/Nachlauf-Sprachnotiz, App-internes Storage
+    // (kein SAF-Pfad wie audioFilePath). Leerer Pfad = keine Notiz vorhanden.
+    val introNoteFilePath: String = "",
+    val introNoteDurationMs: Long = 0L,
+    val outroNoteFilePath: String = "",
+    val outroNoteDurationMs: Long = 0L,
+    // Fallback-Pause in Sekunden bei Auto-Advance, greift NUR wenn an dieser Stelle
+    // weder Vorlauf- noch Nachlauf-Notiz existiert (siehe PLAN-show-automatik.md).
+    val manualPauseSeconds: Int = 0
 )

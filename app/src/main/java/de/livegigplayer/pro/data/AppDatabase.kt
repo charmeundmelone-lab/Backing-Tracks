@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SetEntity::class,
         SetSongCrossRef::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -217,6 +217,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // ── Show-Automatik: Vorlauf-/Nachlauf-Sprachnotizen + manuelle Pause ────
+        private val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE songs ADD COLUMN introNoteFilePath TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE songs ADD COLUMN introNoteDurationMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE songs ADD COLUMN outroNoteFilePath TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE songs ADD COLUMN outroNoteDurationMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE songs ADD COLUMN manualPauseSeconds INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -240,7 +251,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_15_16,
                     MIGRATION_16_17,
                     MIGRATION_17_18,
-                    MIGRATION_18_19
+                    MIGRATION_18_19,
+                    MIGRATION_19_20
                 )
                 // fallbackToDestructiveMigration() entfernt — Phase 1 abgeschlossen
                 .build()

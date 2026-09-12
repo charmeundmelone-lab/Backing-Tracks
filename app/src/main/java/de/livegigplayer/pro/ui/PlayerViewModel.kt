@@ -219,7 +219,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 val dur = engine.durationMs
                 if (_prevPositionMs > 1000 && pos < _prevPositionMs - 1000
                     && engine.isPlaying
-                    && _loopState.value != LoopState.LOOPING) {
+                    && _loopState.value != LoopState.LOOPING
+                    // Show-Automatik "Frei spielen": komplette Automatik pausiert,
+                    // auch wenn der frei gespielte Song selbst (REPEAT_MODE_ONE)
+                    // zufällig gerade loopt — sonst würde activeEndAction=AUTOPLAY
+                    // aus der eingefrorenen Pause fälschlich erneut greifen.
+                    && !_isFreeSpielen.value) {
                     val next = nextSong.value
                     when {
                         next != null -> {
@@ -234,7 +239,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                                     engine.pause(); _isPlaying.value = false
                                     val finished = _currentSong.value
                                     if (finished != null) startAutomatikPause(finished, next)
-                                    else { skipNext(); engine.play(); _isPlaying.value = true }
+                                    else { skipNext(); forcePlay() }
                                 }
                             }
                         }
@@ -582,7 +587,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearAutomatikError() { _automatikError.value = null }
 
+    fun forcePlay() { engine.play(); _isPlaying.value = true }
+
+    // Song A (gerade beendet) + Song B (als Nächstes dran) der laufenden Pause —
+    // gesetzt bei jedem startAutomatikPause()-Aufruf, damit "Frei spielen" (Teil 2)
+    // jederzeit weiß, wohin es beim Beenden zurückspringen muss.
+    private var pendingFinishedSong: Song? = null
+    private var pendingUpcomingSong: Song? = null
+
     private fun startAutomatikPause(finishedSong: Song, upcoming: Song) {
+        pendingFinishedSong = finishedSong
+        pendingUpcomingSong = upcoming
         automatikJob?.cancel()
         automatikJob = viewModelScope.launch {
             var playedSomething = false
@@ -599,8 +614,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     remaining -= 50L
                 }
             }
+            pendingFinishedSong = null
+            pendingUpcomingSong = null
             _automatikRemainingMs.value = null
-            skipNext(); engine.play(); _isPlaying.value = true
+            skipNext(); forcePlay()
         }
     }
 
@@ -630,9 +647,46 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (_automatikRemainingMs.value == null) return
         automatikJob?.cancel()
         engine.stopVoiceNote()
+        pendingFinishedSong = null
+        pendingUpcomingSong = null
         _automatikRemainingMs.value = null
-        skipNext(); engine.play(); _isPlaying.value = true
+        skipNext(); forcePlay()
     }
+
+    // ── Show-Automatik: "Frei spielen" (Teil 2) ─────────────────────────────────
+    // Reiner Laufzeit-Zustand, kein DB-Feld (Punkt 7). GigViewModel hängt sich über
+    // onFreeSpielenResume ein, weil nur dort setDao (Completed-Flag, endAction) und
+    // GetApplication()-Context für selectSong verfügbar sind — gleiches Muster wie
+    // onSongCompleted oben.
+    private val _isFreeSpielen = MutableStateFlow(false)
+    val isFreeSpielen: StateFlow<Boolean> = _isFreeSpielen.asStateFlow()
+
+    var onFreeSpielenResume: ((finishedSong: Song, resumeSong: Song) -> Unit)? = null
+
+    /** Nur während einer laufenden Pause/Ansage aktivierbar (Punkt 3). */
+    fun enterFreeSpielen() {
+        if (_isFreeSpielen.value || _automatikRemainingMs.value == null) return
+        automatikJob?.cancel()
+        engine.stopVoiceNote()
+        _automatikRemainingMs.value = null
+        _automatikLabel.value = ""
+        _isFreeSpielen.value = true
+    }
+
+    /** Springt sofort zum eigentlich nächsten automatisierten Song (Punkt 5) —
+     *  keine Rest-Pause/Ansage wird nachgeholt. */
+    fun exitFreeSpielen() {
+        if (!_isFreeSpielen.value) return
+        _isFreeSpielen.value = false
+        val finished = pendingFinishedSong
+        val resume   = pendingUpcomingSong
+        pendingFinishedSong = null
+        pendingUpcomingSong = null
+        if (resume != null) _queue.value = _queue.value.filter { it.id != resume.id }
+        if (finished != null && resume != null) onFreeSpielenResume?.invoke(finished, resume)
+    }
+
+    fun toggleFreeSpielen() { if (_isFreeSpielen.value) exitFreeSpielen() else enterFreeSpielen() }
 
     fun toggleMixer()  { _showMixer.value = !_showMixer.value }
     fun closeMixer()   { _showMixer.value = false }

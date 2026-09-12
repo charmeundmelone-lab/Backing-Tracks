@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Warning
@@ -232,6 +233,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val automatikRemainingMs by vm.automatikRemainingMs.collectAsState()
     val automatikLabel        by vm.automatikLabel.collectAsState()
     val automatikError        by vm.automatikError.collectAsState()
+    val isFreeSpielen         by vm.isFreeSpielen.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Sets
     var isLocked         by remember { mutableStateOf(false) }
@@ -339,6 +341,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 automatikRemainingMs = automatikRemainingMs,
                 automatikLabel       = automatikLabel,
                 automatikError       = automatikError,
+                isFreeSpielen        = isFreeSpielen,
                 onSeekTo         = { ms -> vm.seekTo(ms) },
                 onPlayPause      = { vm.togglePlayPause() },
                 onStop           = { vm.stopPlayback() },
@@ -347,6 +350,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onOpenLyrics     = { vm.openLyrics() },
                 onSkipAutomatik  = { vm.skipAutomatikPause() },
                 onDismissAutomatikError = { vm.clearAutomatikError() },
+                onToggleFreeSpielen = { vm.toggleFreeSpielen() },
                 onCycleEndAction = {
                     val sid = activeSetId
                     val song = currentSong
@@ -2063,12 +2067,16 @@ private fun GlobalPlayer(
     automatikRemainingMs: Long? = null,
     automatikLabel: String = "",
     automatikError: String? = null,
+    // Show-Automatik Teil 2: friert die Automatik ein, Statustext ersetzt den
+    // Countdown, solange aktiv (Punkt 6).
+    isFreeSpielen: Boolean = false,
     onSeekTo: (Long) -> Unit = {},
     onPlayPause: () -> Unit, onStop: () -> Unit,
     onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit,
     onOpenLyrics: () -> Unit = {},
     onSkipAutomatik: () -> Unit = {},
     onDismissAutomatikError: () -> Unit = {},
+    onToggleFreeSpielen: () -> Unit = {},
     onCycleEndAction: () -> Unit = {}
 ) {
     var isSeeking by remember { mutableStateOf(false) }
@@ -2139,27 +2147,52 @@ private fun GlobalPlayer(
                     tint = Gray, modifier = Modifier.size(16.dp))
             }
         }
-        if (automatikRemainingMs != null) {
-            // Show-Automatik: Pause/Ansage läuft — großer Countdown statt Titelzeile,
-            // ganze Zeile tippbar zum Überspringen (Punkt 10/11).
-            val remSecA = automatikRemainingMs / 1000
+        if (isFreeSpielen) {
+            // Show-Automatik Teil 2: Freeze aktiv — Statustext ersetzt den Countdown,
+            // ganze Zeile tippbar zum Beenden (springt sofort zum nächsten
+            // automatisierten Song, Punkt 5/6).
             Row(
                 modifier = Modifier.fillMaxWidth()
-                    .clickable(onClick = onSkipAutomatik)
+                    .clickable(onClick = onToggleFreeSpielen)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "%d:%02d".format(remSecA / 60, remSecA % 60),
-                    color = Volt, fontSize = 28.sp, fontWeight = FontWeight.Black,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    modifier = Modifier.padding(end = 12.dp)
-                )
+                Icon(Icons.Filled.MusicNote, contentDescription = null,
+                    tint = Volt, modifier = Modifier.size(24.dp).padding(end = 8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(automatikLabel.ifBlank { "Pause bis zum nächsten Song" },
-                        color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Tippen zum Überspringen", color = Gray, fontSize = 11.sp)
+                    Text("Frei spielen", color = Volt, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Show pausiert — tippen zum Fortsetzen", color = Gray, fontSize = 11.sp)
+                }
+            }
+        } else if (automatikRemainingMs != null) {
+            // Show-Automatik: Pause/Ansage läuft — großer Countdown statt Titelzeile.
+            // Zeile links (Countdown+Label) tippbar zum Überspringen (Punkt 10/11),
+            // eigener Button rechts für "Frei spielen" (Punkt 2: separater Button).
+            val remSecA = automatikRemainingMs / 1000
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f).clickable(onClick = onSkipAutomatik),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "%d:%02d".format(remSecA / 60, remSecA % 60),
+                        color = Volt, fontSize = 28.sp, fontWeight = FontWeight.Black,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(automatikLabel.ifBlank { "Pause bis zum nächsten Song" },
+                            color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Tippen zum Überspringen", color = Gray, fontSize = 11.sp)
+                    }
+                }
+                TextButton(onClick = onToggleFreeSpielen) {
+                    Text("Frei spielen", color = Volt, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         } else {

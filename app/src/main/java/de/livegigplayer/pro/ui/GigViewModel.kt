@@ -193,6 +193,21 @@ class GigViewModel(app: Application) : AndroidViewModel(app) {
                 playerVm.activeEndAction.value = setDao.getEndAction(activeSet, newId) ?: 0
             }
         }
+        // Show-Automatik "Frei spielen" (Teil 2): PlayerViewModel kennt A (fertig)
+        // und B (eigentlich nächster automatisierter Song), hat aber weder setDao
+        // noch getApplication() für den Gig-Kontext — deshalb hier statt dort.
+        playerVm.onFreeSpielenResume = { finishedSong, resumeSong ->
+            viewModelScope.launch(Dispatchers.IO) {
+                val activeSet = _activeSetId.value
+                if (activeSet != null) setDao.markSongCompleted(activeSet, finishedSong.id, true)
+                val endAction = if (activeSet != null) setDao.getEndAction(activeSet, resumeSong.id) ?: 0 else 0
+                withContext(Dispatchers.Main) {
+                    playerVm.selectSong(resumeSong, getApplication(), isGigSet = true)
+                    playerVm.activeEndAction.value = endAction
+                    playerVm.forcePlay()
+                }
+            }
+        }
     }
 
     // ── Auto-Arm: lädt ersten ungespielten Song in Player (ohne Auto-Play) ──────

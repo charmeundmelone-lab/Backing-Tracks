@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
@@ -1170,6 +1171,12 @@ private fun SetSongRow(
                 songMetaLine(key, capo, songInSet.song.duration),
                 fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+        }
+        // Show-Automatik: Mikrofon-Icon sobald Vorlauf- ODER Nachlauf-Notiz existiert
+        // (Teil 3 Punkt 4) — keine getrennte Kennzeichnung der beiden Slots.
+        if (songInSet.song.introNoteFilePath.isNotBlank() || songInSet.song.outroNoteFilePath.isNotBlank()) {
+            Icon(Icons.Filled.Mic, contentDescription = "Sprachnotiz vorhanden",
+                tint = GigGray, modifier = Modifier.size(16.dp).padding(end = 4.dp))
         }
         if (isEditing) {
             TextButton(onClick = onCycleEndAction, modifier = Modifier.defaultMinSize(minWidth = 40.dp)) {

@@ -32,9 +32,16 @@ Sekundenwert.
    gepannt abgespielt, genau wie das bestehende Click+Cue-Signal (Modus B).
    USB-Multitrack-Integration (eigene Rolle) ist explizit NICHT Teil dieser
    Iteration, sondern ein späteres, eigenes Thema.
-7. **Aufnahme:** Direkt in der App, Mikrofon-Button im `SongEditorSheet`
-   (aufnehmen → anhören → ggf. neu aufnehmen → speichern). Kein
-   Datei-Import (SAF) für Notizen.
+7. **Aufnahme (Details nachgegrillt, 2026-09-12):** Direkt in der App,
+   Mikrofon-Button im `SongEditorSheet`. Kein Datei-Import (SAF) für
+   Notizen — die Datei liegt versteckt im App-internen Speicher (nicht im
+   normalen Dateisystem sichtbar, wie ein Spielstand: geht bei
+   Deinstallation der App mit verloren). **Bedienung:** einmal auf das
+   Mikrofon-Icon tippen = Start, nochmal tippen = Stopp (kein
+   Gedrückthalten wie bei einer WhatsApp-Sprachnachricht — bei längeren
+   Ansagen unbequem). **Nach dem Stopp:** die App spielt die Aufnahme
+   sofort vor, danach entscheidet der User: übernehmen oder neu
+   aufnehmen (alte Aufnahme wird dabei verworfen).
 8. **Manuelle Pause ohne Notiz:** Eigenes Sekundenfeld **pro Song**
    (Default 0), kein globaler App-weiter Wert.
 9. **Kombination Notiz + manuelle Sekunden:** Manuelle Sekunden gelten
@@ -48,6 +55,10 @@ Sekundenwert.
 12. **Performance-Lock:** Der Abbrechen-Tap (Punkt 10) bleibt **immer**
     verfügbar, auch wenn `isLocked` aktiv ist — wie Play/Pause, keine
     Kern-Wiedergabefunktion darf durch den Fehltipp-Schutz blockiert werden.
+13. **Lautstärke beim Abspielen (nachgegrillt, 2026-09-12):** Feste,
+    fest einprogrammierte Lautstärke — kein eigener Regler, keine Kopplung
+    an den bestehenden Cue-Regler (`volCue`). Einfachster Weg: immer gut
+    hörbar, ohne dass der User etwas einstellen muss.
 
 ### Datenmodell (Room v19→v20, Vorschlag)
 `data/Song.kt`, neue Felder:
@@ -61,9 +72,10 @@ val manualPauseSeconds: Int = 0      // Fallback, nur wenn keine der beiden Noti
 Migration `MIGRATION_19_20` (ADD-only, wie alle bisherigen Migrationen).
 
 ### Offene technische Details (kein User-Entscheid nötig, bei Umsetzung klären)
-- Speicherort der Aufnahmen: App-internes Storage (kein SAF, da in-App per
-  Mikrofon aufgenommen), Dateiname z.B. `<songId>_intro.m4a` /
-  `<songId>_outro.m4a`.
+- Speicherort der Aufnahmen: App-internes Storage (kein SAF, siehe Punkt 7,
+  vom User explizit bestätigt), Dateiname z.B. `<songId>_intro.m4a` /
+  `<songId>_outro.m4a`. Aufnahme-Format: `MediaRecorder` (AAC/`.m4a`) —
+  Android-Standard für Sprachaufnahmen, kein NDK nötig.
 - Panning auf "hart rechts" für eine mono aufgenommene Datei: eigener
   Wiedergabe-Pfad (nicht Teil von `AudioEngine.tracks`), Kanal-Lautstärke
   oder ExoPlayer-`setVolume` pro Kanal — Ansatz erst bei der Umsetzung fest

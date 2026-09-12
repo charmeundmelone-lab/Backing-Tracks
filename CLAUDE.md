@@ -285,21 +285,14 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-09-12  
-**Status:** Reine Konzeptions-Session, kein Code geschrieben. GrillMe-Interview zu
-"Show-Automatik" **vollständig abgeschlossen** (Teil 1+2+3): (1) Pause zwischen Songs
-bei Auto-Advance, gekoppelt an optionale Vorlauf-/Nachlauf-Sprachnotizen pro Song (nur
-rechts/Cue-Kanal hörbar), (2) "Frei spielen"-Freeze-Modus für spontane, tempofreie
-akustische Songs zwischendurch, (3) fünf Detailfragen geklärt: Fehler-Fallback bei
-kaputter Notiz (sichtbarer Hinweis + Show läuft weiter), Diagnose-Tool
-"Automatik-Check" wird gebaut, Hands-free Show-Start bewusst zurückgestellt
-(Fußschalter-Thema bleibt separat), ein Mikrofon-Icon in der Setlist für
-Vorlauf/Nachlauf, kein Sonderfall fürs Show-Ende (Nachlauf-Notiz deckt das ab). Alle
-Entscheidungen ausformuliert und final in `PLAN-show-automatik.md`, inkl. konkreter
-Umsetzungsreihenfolge (Abschnitt "Status — bereit zur Umsetzung"). **Ab jetzt darf
-Code entstehen**, erster Schritt: Room-Migration v19→v20.
+**Status:** Show-Automatik **komplett umgesetzt und live vom User bestätigt**
+("funktioniert perfekt, so wie es soll"). Alle Schritte aus `PLAN-show-automatik.md`
+(Teil 1-4) fertig, siehe Sprint-Eintrag "Show-Automatik: vollständige Umsetzung DONE"
+weiter unten für Details. Direkt danach neues User-Feedback zum Lyrics-Teleprompter
+(noch NICHT umgesetzt, nur Machbarkeit geprüft und bestätigt) — siehe TODOs.
 **Branch:** `main`  
-**Letzter Commit:** `a4d7bb0` — "Plan: Show-Automatik (Pausen, Sprachnotizen, Frei spielen) aus GrillMe-Interview"  
-**CI Build:** #365/#366 (Doku-Only-Commits, kein App-Code geändert — Build läuft nur zur Konsistenz mit)  
+**Letzter Commit:** `c065deb` — "Show-Automatik: Zeit-Picker, Warnton + Automatik-Check (Plan komplett)"  
+**CI Build:** #375 (grün)  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -341,6 +334,63 @@ Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Z
 (SHA256 `EEF3D6…A74A`) ist identisch mit `app/debug.keystore` im Repo, unverändert seit 24.07.
 Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
 alte APKs nach dem Installieren löschen.  
+
+### Show-Automatik: vollständige Umsetzung DONE (2026-09-12, Commits `5f5df26`–`c065deb`, live bestätigt)
+
+Umsetzung von `PLAN-show-automatik.md` (Teil 1-4) in einem Rutsch, jeder Schritt
+einzeln committed/gepusht/CI-geprüft, APK nach jedem Schritt zum Live-Test geschickt.
+
+- **Migration v19→v20** (`5f5df26`): `Song.introNoteFilePath/introNoteDurationMs/
+  outroNoteFilePath/outroNoteDurationMs/manualPauseSeconds`, `MIGRATION_19_20`,
+  `SongDao.updateIntroNote/updateOutroNote/updateManualPauseSeconds`.
+- **Mikrofon-Aufnahme** (`63df778`): `audio/VoiceNoteRecorder.kt` (neu) — MediaRecorder,
+  AAC/`.m4a`, App-internes `filesDir` (kein SAF). `SongEditorSheet` bekommt eine
+  "Show-Automatik"-Sektion mit `VoiceNoteRow` (Tap-Toggle Start/Stopp, automatisches
+  Vorhören nach dem Stopp, Übernehmen/Neu aufnehmen). **Aufnahmequalität-Gotcha**
+  (`24afa1a`): ohne explizite `setAudioEncodingBitRate`/`setAudioSamplingRate`/
+  `setAudioChannels` fällt MediaRecorder je Gerät auf ein Telefonie-Preset zurück
+  ("klingt wie Telefon") — jetzt fest 128 kbps/44,1 kHz/mono.
+- **AudioEngine-Notiz-Pfad** (`24afa1a`, Fix `966841e`): `playVoiceNote()`/
+  `stopVoiceNote()` über einen separaten `MediaPlayer` (nicht die ExoPlayer-`tracks`),
+  hart rechts gepannt. **Gotcha:** `MediaPlayer.setStereoVolume()` existiert nicht
+  (Verwechslung mit der alten AudioTrack-API) — richtig ist der deprecated, aber
+  weiterhin vorhandene Zwei-Kanal `setVolume(links, rechts)`. CI hat den Fehler beim
+  ersten Push sofort gefangen.
+- **Pause-/Ansage-Ablauf** (`ee14730`): der AUTOPLAY-Zweig im 200ms-Poll ruft jetzt
+  `startAutomatikPause()` statt sofort zu skippen — Nachlauf-Notiz(A) → Vorlauf-
+  Notiz(B) nacheinander, sonst Fallback auf `manualPauseSeconds` (NUR wenn wirklich
+  keine der beiden Notizen existiert). Fehlende/defekte Notiz-Datei → wie "keine
+  Notiz" behandelt, zusätzlich sichtbarer, dismissbarer Fehler-Hinweis
+  (`automatikError`) in der `PlayerInfoBar`. Live-Abbruch: `togglePlayPause()`/
+  `stopPlayback()`/`skipNext()` überspringen eine laufende Pause/Ansage sofort statt
+  ihrer normalen Aktion — verhindert, dass PLAY den wegen `REPEAT_MODE_ONE` bereits
+  wieder losgelaufenen, eigentlich fertigen Song parallel zur Notiz hörbar macht.
+  Großer Volt-Countdown ersetzt in `GlobalPlayer` während der Pause die Titelzeile.
+- **"Frei spielen"** (`356c9f4`): `enterFreeSpielen()`/`exitFreeSpielen()` — reiner
+  Laufzeit-Zustand, nur während einer laufenden Pause aktivierbar. Der 200ms-Poll
+  überspringt die komplette Auto-Advance-Erkennung, solange aktiv (sonst hätte ein
+  zufälliges `REPEAT_MODE_ONE`-Loopen des frei gespielten Songs die eingefrorene
+  AUTOPLAY-Automatik erneut ausgelöst). Neuer Callback `onFreeSpielenResume`
+  (gleiches Muster wie `onSongCompleted`) — `GigViewModel` markiert den
+  unterbrochenen Song als completed und holt den korrekten `endAction`-Wert für den
+  Resume-Song aus `setDao`, da `PlayerViewModel` weder DB-Zugriff noch Gig-Kontext hat.
+  Mikrofon-Icon in `SetSongRow`, sichtbar sobald Vorlauf- oder Nachlauf-Notiz existiert.
+- **GrillMe-Nachtrag Zeit-Picker + Warnton** (`c065deb`, ausgelöst durch einen
+  Nothing-OS-Timer-Screenshot): Ziffernblock-Dialog (`ManualPauseKeypadDialog`,
+  4-stelliger Schiebepuffer MMSS) ersetzt den ursprünglichen ±5s-Stepper für
+  `manualPauseSeconds`; Max. von 60s (willkürliche Grenze aus der Migration) auf
+  60 Minuten angehoben. Neuer Warnton für die STILLE Fallback-Pause (nicht für
+  Sprachnotizen): `WavSynth.writeWarningChime()` — additive Glocken-Synthese
+  (C5-E5-G5-C6-Arpeggio, ~5s, kein externes Audio-Asset), Vorlauf = Pausenlänge÷3
+  gedeckelt bei 5 Minuten (eine Formel für alle Pausenlängen, kein Sonderfall).
+- **Automatik-Check** (`c065deb`, letzter Schritt aus dem Plan): `audio/
+  AutomatikCheck.kt` — listet pro Set alle Auto-Advance-Übergänge ohne Notiz und
+  ohne Pause, analog `WavFormatCheck`/`SongLinkCheck`, neuer Menüpunkt im
+  Archiv-"⋮". `GigViewModel.automatikCheckReport()` als dünner Wrapper (`gigDao`/
+  `setDao` sind privat).
+- Kein Gradle-Build in der Sandbox möglich (wie immer, Google-Maven 403) — jeder
+  Schritt einzeln gepusht und CI-Status aktiv geprüft statt gesammelt am Ende.
+  **Live getestet und vom User bestätigt**, nicht mehr offen.
 
 ### Diagnose: Song-Verknüpfungen prüfen (2026-08-25, Commit `31e608c`)
 
@@ -2161,23 +2211,23 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
    User einen Testexport aus Studio One geschickt hat. Danach kann er zum ersten Mal
    einen echten Multitrack-Song importieren — noch über Klinke gemischt, aber mit
    Einzelreglern im Mixer.
-7. 🔴 **Show-Automatik: UMSETZUNG BEGINNEN (GrillMe-Interview Teil 1+2+3
-   vollständig abgeschlossen, 2026-09-12).** Alle Entscheidungen final in
-   `PLAN-show-automatik.md` — Pause/Vorlauf-Nachlauf-Sprachnotizen (Teil 1),
-   "Frei spielen"-Freeze-Modus (Teil 2), Fehler-Fallback/Automatik-Check/
-   Show-Start/Setlist-Icon/Show-Ende (Teil 3). **Kein weiteres Grillen nötig,
-   direkt Code schreiben.** Konkrete Reihenfolge (siehe Plan, Abschnitt
-   "Status — bereit zur Umsetzung"):
-   1. Room-Migration v19→v20 (`Song.kt` neue Felder, `MIGRATION_19_20`).
-   2. Mikrofon-Aufnahme im `SongEditorSheet` (App-internes Storage).
-   3. `AudioEngine`: separater Notiz-Wiedergabe-Pfad, hart rechts gepannt.
-   4. `PlayerViewModel`: Pause-/Ansage-Ablauf bei Auto-Advance, Countdown
-      in `PlayerInfoBar`, Fehler-Fallback mit sichtbarem Hinweis.
-   5. "Frei spielen"-Button (global, Laufzeit-Zustand, kein DB-Feld).
-   6. Mikrofon-Icon in `SetSongRow`.
-   7. Diagnose-Tool "Automatik-Check" (analog `WavFormatCheck`/`SongLinkCheck`).
-   8. Performance-Lock beachten: Pause-Abbrechen-Tap + "Frei spielen"-Button
-      bleiben immer aktiv, auch bei `isLocked`.
+7. ✅ **Show-Automatik: VOLLSTÄNDIG UMGESETZT (2026-09-12).** Alle 9 Schritte aus
+   `PLAN-show-automatik.md` fertig, live vom User bestätigt ("funktioniert perfekt,
+   so wie es soll"). Details siehe Sprint-Eintrag "Show-Automatik: vollständige
+   Umsetzung DONE" weiter oben. Nicht mehr offen.
+8. 🔴 **Lyrics-Teleprompter: zwei Feedback-Punkte (2026-09-12, noch NICHT
+   umgesetzt, nur Machbarkeit geprüft und bestätigt):**
+   1. **Overlay schließt sich nicht automatisch bei Songende** — User muss immer
+      erst manuell "X" tippen, bevor er zum nächsten Song weitermachen kann. Fix:
+      Hook in den bestehenden 200ms-Poll in `PlayerViewModel` (derselbe, der auch
+      Auto-Stop/Auto-Advance erkennt) — an der Songende-Stelle zusätzlich
+      `vm.closeLyrics()` aufrufen. Klein, risikoarm.
+   2. **Player soll unten im Lyrics-Fenster mit angezeigt werden**, exakt wie
+      sonst auch (Seekbar, Play/Pause/Stop, Loop, seit dieser Session auch der
+      Automatik-Countdown). Aufwendiger: der bestehende `GlobalPlayer` aus
+      `MainScreen.kt` müsste in `LyricsOverlay.kt` eingebettet werden, dafür
+      fehlen dort aktuell Zustände/Callbacks (nextSong, Loop-State,
+      Automatik-Status), die bisher nur in `MainScreen` vorliegen.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

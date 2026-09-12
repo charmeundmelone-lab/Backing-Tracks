@@ -251,19 +251,27 @@ class AudioEngine(private val context: Context) {
 
     private fun makeTrackPair(name: String, path: String): TrackPair {
         val uri = Uri.parse(path)
-        val pA  = makeExoPlayer().also { it.setMediaItem(MediaItem.fromUri(uri)) }
-        val pB  = makeExoPlayer().also { it.setMediaItem(MediaItem.fromUri(uri)) }
+        val pA  = makeExoPlayer(name).also { it.setMediaItem(MediaItem.fromUri(uri)) }
+        val pB  = makeExoPlayer(name).also { it.setMediaItem(MediaItem.fromUri(uri)) }
         return TrackPair(name, path, pA, pB)
     }
 
     private fun makeTrack(name: String, path: String): Track {
-        val p = makeExoPlayer()
+        val p = makeExoPlayer(name)
         p.repeatMode = Player.REPEAT_MODE_ONE
         p.setMediaItem(MediaItem.fromUri(Uri.parse(path)))
         return Track(name, p, path)
     }
 
-    private fun makeExoPlayer(): ExoPlayer =
+    // GrillMe 2026-09-12 (Bug: Songs stumm nach Sprachnotiz-Aufnahme): AudioEngine
+    // hatte bisher keinen Fehler-Listener (Gotcha 25) — ein Ladefehler blieb
+    // komplett unsichtbar, kein Log, kein Toast. onError meldet jeden Player-Fehler
+    // mit Spurname nach außen (PlayerViewModel zeigt ihn als dismissbaren Hinweis,
+    // gleiches Muster wie automatikError), damit der nächste Fall nicht wieder
+    // blind geraten werden muss.
+    var onError: ((trackName: String, message: String) -> Unit)? = null
+
+    private fun makeExoPlayer(trackName: String): ExoPlayer =
         ExoPlayer.Builder(context)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -273,5 +281,12 @@ class AudioEngine(private val context: Context) {
             ).build().also {
                 it.repeatMode = Player.REPEAT_MODE_ONE
                 it.setSeekParameters(SeekParameters.EXACT)
+                it.addListener(object : Player.Listener {
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        val msg = "$trackName: ${error.errorCodeName} – ${error.message}"
+                        Log.e(TAG, "ExoPlayer-Fehler: $msg", error)
+                        onError?.invoke(trackName, msg)
+                    }
+                })
             }
 }

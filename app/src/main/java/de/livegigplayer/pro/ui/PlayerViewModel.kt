@@ -37,6 +37,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val dao    = (app as LiveGigPlayerApp).database.songDao()
     private val engine = AudioEngine(app)
 
+    // GrillMe 2026-09-12 (Bug: Songs stumm nach Sprachnotiz-Aufnahme): sichtbarer,
+    // dismissbarer Fehler-Hinweis für ExoPlayer-Ladefehler — gleiches Muster wie
+    // automatikError. Ohne Fehler-Listener (Gotcha 25) blieb ein Ladefehler bisher
+    // komplett unsichtbar.
+    private val _audioError = MutableStateFlow<String?>(null)
+    val audioError: StateFlow<String?> = _audioError.asStateFlow()
+    fun clearAudioError() { _audioError.value = null }
+
     val songs: StateFlow<List<Song>> = dao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -213,6 +221,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var _prevPositionMs = 0L
 
     init {
+        engine.onError = { trackName, message ->
+            Log.e("PlayerViewModel", "AudioEngine-Fehler: $message")
+            _audioError.value = message
+        }
         // 200ms position/auto-stop poll
         viewModelScope.launch {
             while (true) {

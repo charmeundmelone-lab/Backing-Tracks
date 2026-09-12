@@ -236,6 +236,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     val automatikLabel        by vm.automatikLabel.collectAsState()
     val automatikError        by vm.automatikError.collectAsState()
     val isFreeSpielen         by vm.isFreeSpielen.collectAsState()
+    val audioError            by vm.audioError.collectAsState()
 
     var selectedTab      by remember { mutableStateOf(0) }  // 0=Archiv 1=Sets
     var isLocked         by remember { mutableStateOf(false) }
@@ -346,6 +347,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 automatikLabel       = automatikLabel,
                 automatikError       = automatikError,
                 isFreeSpielen        = isFreeSpielen,
+                audioError           = audioError,
                 onSeekTo         = { ms -> vm.seekTo(ms) },
                 onPlayPause      = { vm.togglePlayPause() },
                 onStop           = { vm.stopPlayback() },
@@ -355,6 +357,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 onSkipAutomatik  = { vm.skipAutomatikPause() },
                 onDismissAutomatikError = { vm.clearAutomatikError() },
                 onToggleFreeSpielen = { vm.toggleFreeSpielen() },
+                onDismissAudioError = { vm.clearAudioError() },
                 onCycleEndAction = {
                     val sid = activeSetId
                     val song = currentSong
@@ -2222,6 +2225,10 @@ private fun GlobalPlayer(
     // Show-Automatik Teil 2: friert die Automatik ein, Statustext ersetzt den
     // Countdown, solange aktiv (Punkt 6).
     isFreeSpielen: Boolean = false,
+    // GrillMe 2026-09-12 (Bug: Songs stumm nach Sprachnotiz-Aufnahme): ExoPlayer-
+    // Ladefehler waren bisher komplett unsichtbar (Gotcha 25) — dieser Hinweis
+    // zeigt jetzt an, WAS beim Laden schiefgegangen ist.
+    audioError: String? = null,
     onSeekTo: (Long) -> Unit = {},
     onPlayPause: () -> Unit, onStop: () -> Unit,
     onToggleLoop: () -> Unit, onSetLoopButton: () -> Unit,
@@ -2229,6 +2236,7 @@ private fun GlobalPlayer(
     onSkipAutomatik: () -> Unit = {},
     onDismissAutomatikError: () -> Unit = {},
     onToggleFreeSpielen: () -> Unit = {},
+    onDismissAudioError: () -> Unit = {},
     onCycleEndAction: () -> Unit = {}
 ) {
     var isSeeking by remember { mutableStateOf(false) }
@@ -2294,6 +2302,25 @@ private fun GlobalPlayer(
                     tint = Color(0xFFFFB300), modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(automatikError, color = Color(0xFFFFB300), fontSize = 11.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Icon(Icons.Filled.Close, contentDescription = "Hinweis schließen",
+                    tint = Gray, modifier = Modifier.size(16.dp))
+            }
+        }
+        // GrillMe 2026-09-12: sichtbarer Fehler-Hinweis für ExoPlayer-Ladefehler
+        // (AudioEngine.onError, siehe Gotcha 25) — gleiches Muster wie automatikError.
+        if (audioError != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .background(Color(0xFF3A0000))
+                    .clickable(onClick = onDismissAudioError)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Warning, contentDescription = null,
+                    tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(audioError, color = Color(0xFFFF5252), fontSize = 11.sp,
                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Icon(Icons.Filled.Close, contentDescription = "Hinweis schließen",
                     tint = Gray, modifier = Modifier.size(16.dp))

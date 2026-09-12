@@ -598,6 +598,29 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (_currentSong.value?.id == song.id) _currentSong.value = u
     }
 
+    // ── Show-Automatik: Vorlauf-/Nachlauf-Sprachnotizen + manuelle Pause ────────
+    // Targeted Column-Updates (wie updateLyricsSyncPoints) statt vollem dao.update():
+    // die Aufnahme im Editor persistiert sofort beim Bestätigen, unabhängig vom
+    // "Speichern"-Häkchen, das nur die Text-/Zahlenfelder sammelt.
+    fun updateIntroNote(song: Song, path: String, durationMs: Long) {
+        val u = song.copy(introNoteFilePath = path, introNoteDurationMs = durationMs)
+        viewModelScope.launch { dao.updateIntroNote(song.id, path, durationMs) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = u
+    }
+
+    fun updateOutroNote(song: Song, path: String, durationMs: Long) {
+        val u = song.copy(outroNoteFilePath = path, outroNoteDurationMs = durationMs)
+        viewModelScope.launch { dao.updateOutroNote(song.id, path, durationMs) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = u
+    }
+
+    fun updateManualPauseSeconds(song: Song, seconds: Int) {
+        val clamped = seconds.coerceIn(0, 60)
+        val u = song.copy(manualPauseSeconds = clamped)
+        viewModelScope.launch { dao.updateManualPauseSeconds(song.id, clamped) }
+        if (_currentSong.value?.id == song.id) _currentSong.value = u
+    }
+
     fun updateMixerVolume(trackName: String, volumeDb: Float) {
         val song = _currentSong.value ?: return; engine.setVolumeDb(trackName, volumeDb)
         val u = when (trackName) {

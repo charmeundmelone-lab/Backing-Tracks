@@ -1,7 +1,11 @@
 package de.livegigplayer.pro.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -60,6 +64,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
@@ -139,6 +144,7 @@ import de.livegigplayer.pro.audio.UsbDescriptorScanner
 import de.livegigplayer.pro.audio.UsbDetachTester
 import de.livegigplayer.pro.audio.UsbIsoToneTester
 import de.livegigplayer.pro.audio.UsbToneTester
+import de.livegigplayer.pro.audio.VoiceNoteRecorder
 import de.livegigplayer.pro.audio.WavFormatCheck
 import de.livegigplayer.pro.data.SetEntity
 import de.livegigplayer.pro.data.Song
@@ -149,6 +155,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import java.io.File
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 private val BgDeep      = Color(0xFF0A0A0A)
@@ -1289,6 +1296,9 @@ private fun ArchivTab(
                 },
                 onAutoStopChange = { enabled -> vm.updateAutoStop(editingSong, enabled) },
                 onCapoChange     = { position -> vm.setCapo(editingSong, position) },
+                onIntroNoteChange = { path, dur -> vm.updateIntroNote(editingSong, path, dur) },
+                onOutroNoteChange = { path, dur -> vm.updateOutroNote(editingSong, path, dur) },
+                onManualPauseChange = { seconds -> vm.updateManualPauseSeconds(editingSong, seconds) },
                 onNavigate       = { newSong -> editSheet = newSong },
                 onDismiss        = { scope.launch { sheetState.hide(); editSheet = null } }
             )
@@ -1519,6 +1529,12 @@ private fun SongEditorSheet(
     onSave: (String, String, String, String, Int, Boolean, String, Int) -> Unit,
     onAutoStopChange: (Boolean) -> Unit,
     onCapoChange: (Int) -> Unit,
+    // Show-Automatik: Vorlauf-/Nachlauf-Notiz (Pfad, Dauer) + manuelle Fallback-Pause —
+    // persistieren sofort beim Bestätigen, unabhängig vom "Speichern"-Häkchen (siehe
+    // PLAN-show-automatik.md, Punkt 7/8).
+    onIntroNoteChange: (String, Long) -> Unit,
+    onOutroNoteChange: (String, Long) -> Unit,
+    onManualPauseChange: (Int) -> Unit,
     onNavigate: (Song) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1530,6 +1546,7 @@ private fun SongEditorSheet(
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
     var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
     var tempoTag by remember(song.id) { mutableStateOf(song.tempoTag) }
+    var manualPauseSeconds by remember(song.id) { mutableStateOf(song.manualPauseSeconds) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1720,6 +1737,46 @@ private fun SongEditorSheet(
                 )
             )
         }
+        Spacer(modifier = Modifier.height(20.dp))
+        // Show-Automatik: Vorlauf-/Nachlauf-Sprachnotiz + manuelle Fallback-Pause.
+        // Wirkt nur bei Auto-Advance (endAction=AUTOPLAY), siehe PLAN-show-automatik.md.
+        Text("Show-Automatik", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp))
+        VoiceNoteRow(
+            label = "Vorlauf-Notiz (vor diesem Song)",
+            context = context, songId = song.id, slot = VoiceNoteRecorder.Slot.INTRO,
+            filePath = song.introNoteFilePath, durationMs = song.introNoteDurationMs,
+            onConfirm = onIntroNoteChange
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        VoiceNoteRow(
+            label = "Nachlauf-Notiz (nach diesem Song)",
+            context = context, songId = song.id, slot = VoiceNoteRecorder.Slot.OUTRO,
+            filePath = song.outroNoteFilePath, durationMs = song.outroNoteDurationMs,
+            onConfirm = onOutroNoteChange
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Manuelle Pause (Fallback)", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Nur falls keine Notiz vorhanden", color = Gray, fontSize = 11.sp)
+            }
+            Text("−", color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(enabled = manualPauseSeconds > 0) {
+                    manualPauseSeconds = (manualPauseSeconds - 5).coerceAtLeast(0)
+                    onManualPauseChange(manualPauseSeconds)
+                }.padding(horizontal = 14.dp, vertical = 4.dp))
+            Text("${manualPauseSeconds}s", color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, modifier = Modifier.width(40.dp))
+            Text("+", color = if (manualPauseSeconds < 60) Volt else Gray, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(enabled = manualPauseSeconds < 60) {
+                    manualPauseSeconds = (manualPauseSeconds + 5).coerceAtMost(60)
+                    onManualPauseChange(manualPauseSeconds)
+                }.padding(horizontal = 14.dp, vertical = 4.dp))
+        }
         }
 
         if (pendingPdfText != null) {
@@ -1762,6 +1819,174 @@ private fun SheetField(label: String, value: String, onChange: (String) -> Unit)
     )
 }
 
+// ── Show-Automatik: Vorlauf-/Nachlauf-Sprachnotiz (Aufnahme/Vorhören/Übernehmen) ──
+private enum class NoteRecState { IDLE, RECORDING, REVIEW }
+
+@Composable
+private fun VoiceNoteRow(
+    label: String,
+    context: Context,
+    songId: Long,
+    slot: VoiceNoteRecorder.Slot,
+    filePath: String,
+    durationMs: Long,
+    onConfirm: (String, Long) -> Unit
+) {
+    var recState         by remember(songId, slot) { mutableStateOf(NoteRecState.IDLE) }
+    var recorder          by remember(songId, slot) { mutableStateOf<MediaRecorder?>(null) }
+    var tempFile          by remember(songId, slot) { mutableStateOf<File?>(null) }
+    var reviewDurationMs  by remember(songId, slot) { mutableStateOf(0L) }
+    var previewPlayer     by remember(songId, slot) { mutableStateOf<MediaPlayer?>(null) }
+    var pendingPermission by remember(songId, slot) { mutableStateOf(false) }
+
+    fun stopPreview() {
+        previewPlayer?.let { p -> runCatching { p.stop() }; runCatching { p.release() } }
+        previewPlayer = null
+    }
+
+    fun playPreview(file: File) {
+        stopPreview()
+        val player = MediaPlayer()
+        try {
+            player.setDataSource(file.absolutePath)
+            player.setOnCompletionListener { stopPreview() }
+            player.prepare()
+            player.start()
+            previewPlayer = player
+        } catch (e: Exception) {
+            Toast.makeText(context, "Wiedergabe fehlgeschlagen", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Eigener Temp-Pfad IM SELBEN Verzeichnis wie die finale Notiz (App-internes
+    // filesDir) — renameTo() beim Übernehmen ist damit ein reiner Verzeichnis-Eintrag,
+    // kein Cross-Filesystem-Copy (der über cacheDir nicht garantiert wäre).
+    fun beginRecording() {
+        val tmp = File(context.filesDir, "${songId}_${slot.suffix}_tmp.m4a")
+        val rec = VoiceNoteRecorder.start(context, tmp)
+        if (rec == null) {
+            Toast.makeText(context, "Aufnahme konnte nicht gestartet werden", Toast.LENGTH_SHORT).show()
+            return
+        }
+        recorder = rec
+        tempFile = tmp
+        recState = NoteRecState.RECORDING
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted && pendingPermission) beginRecording()
+        else if (!granted) Toast.makeText(context, "Mikrofon-Zugriff nötig für Sprachnotizen", Toast.LENGTH_SHORT).show()
+        pendingPermission = false
+    }
+
+    fun onMicTap() {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            pendingPermission = true
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            beginRecording()
+        }
+    }
+
+    fun onStopTap() {
+        val rec = recorder ?: return
+        val tmp = tempFile ?: return
+        val dur = VoiceNoteRecorder.stop(rec, tmp)
+        recorder = null
+        if (dur <= 0L) {
+            Toast.makeText(context, "Aufnahme fehlgeschlagen", Toast.LENGTH_SHORT).show()
+            VoiceNoteRecorder.delete(tmp)
+            tempFile = null
+            recState = NoteRecState.IDLE
+        } else {
+            reviewDurationMs = dur
+            recState = NoteRecState.REVIEW
+            playPreview(tmp)
+        }
+    }
+
+    fun confirmReview() {
+        val tmp = tempFile ?: return
+        val finalFile = VoiceNoteRecorder.fileFor(context, songId, slot)
+        VoiceNoteRecorder.delete(finalFile)
+        tmp.renameTo(finalFile)
+        stopPreview()
+        onConfirm(finalFile.absolutePath, reviewDurationMs)
+        tempFile = null
+        recState = NoteRecState.IDLE
+    }
+
+    fun discardReview() {
+        stopPreview()
+        tempFile?.let { VoiceNoteRecorder.delete(it) }
+        tempFile = null
+        recState = NoteRecState.IDLE
+    }
+
+    // Verwaiste Aufnahme/Wiedergabe aufräumen, falls der Editor mitten in der
+    // Aufnahme geschlossen oder der Song per Pfeil-Navigation gewechselt wird.
+    DisposableEffect(songId, slot) {
+        onDispose {
+            recorder?.let { r -> runCatching { r.stop() }; runCatching { r.release() } }
+            tempFile?.let { VoiceNoteRecorder.delete(it) }
+            previewPlayer?.let { p -> runCatching { p.stop() }; runCatching { p.release() } }
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                when (recState) {
+                    NoteRecState.RECORDING -> "● Aufnahme läuft — nochmal tippen zum Stoppen"
+                    NoteRecState.REVIEW -> "Vorhören: ${reviewDurationMs / 1000}s — übernehmen oder neu aufnehmen"
+                    NoteRecState.IDLE -> if (filePath.isNotBlank()) "${durationMs / 1000}s aufgenommen" else "Keine Notiz"
+                },
+                color = if (recState == NoteRecState.RECORDING) RedStop else Gray,
+                fontSize = 11.sp
+            )
+        }
+        when (recState) {
+            NoteRecState.IDLE -> {
+                if (filePath.isNotBlank()) {
+                    IconButton(onClick = { playPreview(File(filePath)) }) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "Anhören", tint = Volt)
+                    }
+                    IconButton(onClick = {
+                        VoiceNoteRecorder.delete(File(filePath))
+                        onConfirm("", 0L)
+                    }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Notiz löschen", tint = Gray)
+                    }
+                }
+                IconButton(onClick = { onMicTap() }) {
+                    Icon(Icons.Filled.FiberManualRecord, contentDescription = "Aufnehmen", tint = RedStop)
+                }
+            }
+            NoteRecState.RECORDING -> {
+                IconButton(onClick = { onStopTap() }) {
+                    Icon(Icons.Filled.Stop, contentDescription = "Stopp", tint = RedStop)
+                }
+            }
+            NoteRecState.REVIEW -> {
+                IconButton(onClick = { tempFile?.let { playPreview(it) } }) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Anhören", tint = Volt)
+                }
+                TextButton(onClick = { discardReview(); onMicTap() }) {
+                    Text("Neu", color = Gray, fontSize = 12.sp)
+                }
+                TextButton(onClick = { confirmReview() }) {
+                    Text("Übernehmen", color = Volt, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun SetSongList(

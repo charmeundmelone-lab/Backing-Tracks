@@ -284,16 +284,18 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-08-25  
-**Status:** Diagnose-Tool "Song-Verknüpfungen prüfen" gebaut und am Gerät ausgewertet
-(Verdacht auf Reimport/Cascade-Bug widerlegt — 0 defekte Verknüpfungen, 0 Duplikate).
-Tatsächliche Ursache für den gemeldeten Bug ("Sunny Afternoon spielt nicht mehr, Songs
-scheinbar aus Sets verschwunden") war eine einzelne beschädigte WAV-Datei, kein App-Bug —
-vom User selbst durch Neukopieren vom Laptop behoben. Details siehe Sprint-Eintrag
-"Diagnose: Song-Verknüpfungen prüfen" direkt unter diesem Block.
+**Datum:** 2026-09-12  
+**Status:** Reine Konzeptions-Session, kein Code geschrieben. GrillMe-Interview zu
+"Show-Automatik" durchgeführt: (1) Pause zwischen Songs bei Auto-Advance, gekoppelt an
+optionale Vorlauf-/Nachlauf-Sprachnotizen pro Song (nur rechts/Cue-Kanal hörbar), (2)
+"Frei spielen"-Freeze-Modus für spontane, tempofreie akustische Songs zwischendurch.
+Alle Entscheidungen stehen ausformuliert in `PLAN-show-automatik.md` (Teil 1 + Teil 2,
+final abgestimmt). Teil 3 des Plans listet Themen, die der User explizit für die
+**nächste Session zum Weiter-Grillen** vorgesehen hat (siehe "Offene TODOs" unten) —
+noch NICHT abgefragt, absichtlich offen gelassen.
 **Branch:** `main`  
-**Letzter Commit:** `31e608c` — "Song-Verknüpfungen prüfen: Diagnose für Songs, die aus Sets verschwinden"  
-**CI Build:** Grün, verifiziert (Build #363, `LiveGigPlayer-release.apk` auf `apk-dist`)  
+**Letzter Commit:** `a4d7bb0` — "Plan: Show-Automatik (Pausen, Sprachnotizen, Frei spielen) aus GrillMe-Interview"  
+**CI Build:** #365 (Doku-Only-Commit, kein App-Code geändert — Build läuft nur zur Konsistenz mit)  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -2155,6 +2157,16 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
    User einen Testexport aus Studio One geschickt hat. Danach kann er zum ersten Mal
    einen echten Multitrack-Song importieren — noch über Klinke gemischt, aber mit
    Einzelreglern im Mixer.
+7. 🔴 **Show-Automatik: GrillMe-Interview WEITERFÜHREN (2026-09-12 begonnen, User
+   möchte explizit in der nächsten Session weitergrillen).** Teil 1 (Pause zwischen
+   Songs + Vorlauf-/Nachlauf-Sprachnotizen) und Teil 2 ("Frei spielen"-Freeze-Modus
+   für tempofreie Songs) sind fertig abgestimmt, siehe `PLAN-show-automatik.md`.
+   **Noch NICHT gegrillt (Teil 3 des Plans), zuerst dran, bevor Code entsteht:**
+   (a) Fehler-Fallback bei fehlender/kaputter Notiz-Datei, (b) Diagnose-Tool
+   "Automatik-Check" vor dem Gig (analog `WavFormatCheck`/`SongLinkCheck`),
+   (c) Hands-free Show-Start / Bezug zum Bluetooth-Fußschalter-TODO, (d) Sichtbarkeits-
+   Icon in der Setlist für Songs mit Notiz, (e) Show-Ende-Verhalten (letzter Song im
+   letzten Set). Erst danach Umsetzung von Teil 1+2 beginnen.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

@@ -1,6 +1,7 @@
 package de.livegigplayer.pro.audio
 
 import android.content.Context
+import android.media.MediaPlayer
 import android.net.Uri
 import android.util.Log
 import androidx.media3.common.AudioAttributes
@@ -162,9 +163,48 @@ class AudioEngine(private val context: Context) {
 
     fun tickLoop(): Boolean = false
 
+    // ── Show-Automatik: Vorlauf-/Nachlauf-Sprachnotizen ─────────────────────────
+    // Eigener Pfad über MediaPlayer statt ExoPlayer/tracks: läuft unabhängig von
+    // der Song-Wiedergabe (kein Loop/Preload nötig) und setStereoVolume() ist der
+    // einfachste Weg, eine Notiz hart rechts zu panen — genau wie das bestehende
+    // Click+Cue-Signal in Modus B, ExoPlayer bietet dafür keine eingebaute API.
+    // Feste, laute Lautstärke, kein Regler (PLAN-show-automatik.md, Teil 1 Punkt 13).
+    private var noteMediaPlayer: MediaPlayer? = null
+
+    val voiceNotePositionMs: Long get() =
+        noteMediaPlayer?.let { runCatching { it.currentPosition.toLong() }.getOrDefault(0L) } ?: 0L
+
+    val voiceNoteDurationMs: Long get() =
+        noteMediaPlayer?.let { runCatching { it.duration.toLong() }.getOrDefault(0L) } ?: 0L
+
+    /** Spielt [filePath] hart rechts gepannt ab. Ruft [onCompleted] bei Ende oder Fehler. */
+    fun playVoiceNote(filePath: String, onCompleted: () -> Unit) {
+        stopVoiceNote()
+        if (filePath.isBlank()) { onCompleted(); return }
+        val player = MediaPlayer()
+        try {
+            player.setDataSource(filePath)
+            player.setStereoVolume(0f, 1f)
+            player.setOnCompletionListener { stopVoiceNote(); onCompleted() }
+            player.setOnErrorListener { _, _, _ -> stopVoiceNote(); onCompleted(); true }
+            player.prepare()
+            player.start()
+            noteMediaPlayer = player
+        } catch (e: Exception) {
+            Log.e(TAG, "Sprachnotiz-Wiedergabe fehlgeschlagen: $filePath", e)
+            runCatching { player.release() }
+            onCompleted()
+        }
+    }
+
+    fun stopVoiceNote() {
+        noteMediaPlayer?.let { p -> runCatching { p.stop() }; runCatching { p.release() } }
+        noteMediaPlayer = null
+    }
+
     // ── Cleanup ───────────────────────────────────────────────────────────────
 
-    fun release() { releaseCurrent(); releaseNext() }
+    fun release() { releaseCurrent(); releaseNext(); stopVoiceNote() }
 
     private fun releaseCurrent() {
         tracks.forEach { it.playerA.release(); it.playerB.release() }

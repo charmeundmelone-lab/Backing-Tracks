@@ -36,6 +36,12 @@ object VoiceNoteRecorder {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                // Ohne diese drei Zeilen fällt MediaRecorder je Gerät auf sehr niedrige
+                // Default-Werte zurück ("klingt wie Telefon") — explizit Musik-/Sprach-
+                // qualität statt Telefonie-Preset erzwingen.
+                setAudioEncodingBitRate(128_000)
+                setAudioSamplingRate(44_100)
+                setAudioChannels(1)
                 setOutputFile(outputFile.absolutePath)
                 prepare()
                 start()

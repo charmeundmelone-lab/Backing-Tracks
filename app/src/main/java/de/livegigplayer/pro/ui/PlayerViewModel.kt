@@ -226,6 +226,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     // zufällig gerade loopt — sonst würde activeEndAction=AUTOPLAY
                     // aus der eingefrorenen Pause fälschlich erneut greifen.
                     && !_isFreeSpielen.value) {
+                    // GrillMe 2026-09-12: Teleprompter soll nicht mehr manuell weggetippt
+                    // werden müssen — schließt hier einheitlich für CUE/STOP/AUTOPLAY und
+                    // Auto-Stop (auch außerhalb von Gig-Sets), noch vor einer eventuellen
+                    // Automatik-Pause. closeLyrics() ist ein No-Op falls schon geschlossen.
+                    closeLyrics()
                     val next = nextSong.value
                     when {
                         next != null -> {

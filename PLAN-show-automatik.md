@@ -2,9 +2,9 @@
 
 Ergebnis eines GrillMe-Interviews (2026-09-12), Ziel des Users: eine
 möglichst **hands-free** Show (im Rahmen — "ein-, zwei-, dreimal antippen
-während der ganzen Show ist okay"). **Zwischenstand, NICHT final** — Teil 3
-listet offene Themen, die in einer künftigen Session noch gegrillt werden.
-Bisher **kein Code geschrieben**, reine Konzeption.
+während der ganzen Show ist okay"). **FINAL ABGESTIMMT** (Teil 1+2+3 komplett
+durchgegrillt) — Umsetzung darf in der nächsten Session beginnen. Bisher
+**kein Code geschrieben**, reine Konzeption.
 
 ## Teil 1 — Pause zwischen Songs + Sprachnotizen (Vorlauf/Nachlauf)
 
@@ -104,36 +104,56 @@ aktiv ist.
    Laufzeit-Zustand in `PlayerViewModel` — dadurch auch gut geeignet für
    den später geplanten Bluetooth-Fußschalter (einfacher Ein/Aus-Toggle).
 
-## Teil 3 — Offene Themen für die nächste GrillMe-Session
+## Teil 3 — Ergebnis des zweiten GrillMe-Interviews (2026-09-12, abgeschlossen)
 
-Vom User in Auftrag gegeben ("in der nächsten Session grillen wir die
-Punkte, die du angesprochen hast"). Noch NICHT durchgegrillt:
+1. **Fehler-Fallback:** Fehlende/kaputte Vorlauf-/Nachlauf-Datei → wie
+   "keine Notiz vorhanden" behandeln (Fallback auf manuelle Sekunden bzw.
+   0), Show läuft **sofort weiter, kein Hänger**. Zusätzlich ein
+   **sichtbarer Hinweis in der `PlayerInfoBar`**, damit der Fehler
+   nachträglich auffällt und die Notiz neu aufgenommen werden kann.
+   Relevant wegen des bekannten `AudioEngine`-Gotchas (kein
+   Fehler-Listener) — der Hinweis kompensiert das für diesen Anwendungsfall,
+   ohne `AudioEngine` selbst anzufassen.
+2. **Diagnose-Tool "Automatik-Check":** **Wird gebaut.** Eigener Menüpunkt
+   (gleiches Muster wie `WavFormatCheck`/`SongLinkCheck`), listet pro Set
+   auf, welche Auto-Advance-Übergänge (`endAction = AUTOPLAY`) 0 Sekunden
+   Pause **und** keine Notiz haben — Lücken-Erkennung vor dem Gig.
+3. **Hands-free Show-Start:** **Bewusst offen gelassen.** Song 1 eines
+   Sets braucht weiterhin einen manuellen Tap — im Rahmen des Users
+   ("ein-, zwei-, dreimal antippen ist okay"). Der Bluetooth-Fußschalter
+   bleibt ein eigenständiges, separat zurückgestelltes TODO (siehe
+   CLAUDE.md), keine Kopplung in dieser Iteration.
+4. **Sichtbarkeit in der Setlist:** **Ein** Mikrofon-Icon in `SetSongRow`
+   (analog zum bestehenden ★-Spontan-Marker), sichtbar sobald Vorlauf
+   ODER Nachlauf vorhanden ist — keine getrennte Kennzeichnung der beiden
+   Slots.
+5. **Show-Ende-Verhalten:** **Kein Sonderfall/keine neue Logik.** Die
+   bestehende Nachlauf-Notiz-Mechanik aus Teil 1 deckt eine gewünschte
+   Abschluss-Ansage am letzten Song bereits ab — nichts zusätzlich zu
+   bauen.
 
-1. **Fehler-Fallback:** Was passiert, wenn eine Vorlauf-/Nachlauf-Datei
-   fehlt oder kaputt ist? Vorschlag zur Diskussion: automatisch wie "keine
-   Notiz vorhanden" behandeln (Fallback auf manuelle Sekunden bzw. 0),
-   NICHT hängen bleiben. Besonders relevant, weil `AudioEngine` aktuell
-   keinen Fehler-Listener hat (bekannter Gotcha, bisher bewusst nicht
-   gefixt) — bei einer vollautomatischen Show ohne Eingriffsmöglichkeit
-   wird ein stiller Fehler riskanter als bisher.
-2. **Diagnose-Tool "Automatik-Check" vor dem Gig:** Analog zu
-   `WavFormatCheck`/`SongLinkCheck` — pro Set auflisten, welche
-   Auto-Advance-Übergänge 0 Sekunden/keine Notiz haben, um Lücken vor der
-   Bühne zu erkennen.
-3. **Hands-free Show-Start:** Song 1 eines Sets braucht weiterhin einen
-   manuellen Tap. Bezug zum bestehenden, zurückgestellten TODO
-   "Bluetooth-Fußschalter" (Page-Turner-Pedal) — beides zusammen ergibt
-   erst eine wirklich handfreie Show.
-4. **Sichtbarkeit in der Setlist:** Kleines Icon in `SetSongRow`, das
-   zeigt, ob ein Song eine Vorlauf-/Nachlauf-Notiz hat (analog zum
-   bestehenden ★-Spontan-Marker).
-5. **Show-Ende-Verhalten:** Letzter Song im letzten Set, `autoAdvanceSets`
-   aktiv — was passiert danach? Aktuell vermutlich "nichts". Eventuell
-   Abschluss-Anzeige/-Ansage, kann aber auch bewusst außerhalb des Scopes
-   bleiben.
-
-## Status
+## Status — bereit zur Umsetzung
 
 - Kein Gradle-Build nötig gewesen (reine Konzeption, kein Code).
-- Nächster Schritt: Teil 3 in einer eigenen GrillMe-Session klären, erst
-  danach Umsetzung von Teil 1 + Teil 2 beginnen.
+- **Teil 1 + 2 + 3 final abgestimmt.** Umsetzungsreihenfolge für die
+  nächste Session (siehe auch CLAUDE.md, TODO PRIO 1, Punkt 7):
+  1. Room-Migration v19→v20 (`Song.kt`: `introNoteFilePath`/
+     `introNoteDurationMs`/`outroNoteFilePath`/`outroNoteDurationMs`/
+     `manualPauseSeconds`, `MIGRATION_19_20`, `SongDao`-Update-Methoden).
+  2. Mikrofon-Aufnahme im `SongEditorSheet` (aufnehmen → anhören → neu
+     aufnehmen → speichern, App-internes Storage, kein SAF).
+  3. `AudioEngine`: separater Wiedergabe-Pfad für Notizen, hart rechts
+     gepannt (Ansatz bei Umsetzung entscheiden, siehe Teil 1 "Offene
+     technische Details").
+  4. `PlayerViewModel`: Pause-/Ansage-Ablauf bei Auto-Advance (Nachlauf →
+     Vorlauf, Fallback-Sekunden, Live-Abbruch per Tap, Fehler-Fallback mit
+     sichtbarem Hinweis), großer Volt-Countdown in `PlayerInfoBar`.
+  5. "Frei spielen"-Button (global, nur in der Pause aktiv, reiner
+     Laufzeit-Zustand, kein DB-Feld) + Statustext in `PlayerInfoBar`.
+  6. Mikrofon-Icon in `SetSongRow` (Sichtbarkeits-Marker aus Teil 3,
+     Punkt 4).
+  7. Diagnose-Tool "Automatik-Check" (Teil 3, Punkt 2), analog
+     `WavFormatCheck`/`SongLinkCheck`.
+  8. Performance-Lock beachten: Pause-Abbrechen-Tap und "Frei
+     spielen"-Button bleiben **immer** aktiv, auch bei `isLocked`
+     (Teil 1 Punkt 12 / Teil 2 Punkt 7).

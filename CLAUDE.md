@@ -286,16 +286,20 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 **Datum:** 2026-09-12  
 **Status:** Reine Konzeptions-Session, kein Code geschrieben. GrillMe-Interview zu
-"Show-Automatik" durchgeführt: (1) Pause zwischen Songs bei Auto-Advance, gekoppelt an
-optionale Vorlauf-/Nachlauf-Sprachnotizen pro Song (nur rechts/Cue-Kanal hörbar), (2)
-"Frei spielen"-Freeze-Modus für spontane, tempofreie akustische Songs zwischendurch.
-Alle Entscheidungen stehen ausformuliert in `PLAN-show-automatik.md` (Teil 1 + Teil 2,
-final abgestimmt). Teil 3 des Plans listet Themen, die der User explizit für die
-**nächste Session zum Weiter-Grillen** vorgesehen hat (siehe "Offene TODOs" unten) —
-noch NICHT abgefragt, absichtlich offen gelassen.
+"Show-Automatik" **vollständig abgeschlossen** (Teil 1+2+3): (1) Pause zwischen Songs
+bei Auto-Advance, gekoppelt an optionale Vorlauf-/Nachlauf-Sprachnotizen pro Song (nur
+rechts/Cue-Kanal hörbar), (2) "Frei spielen"-Freeze-Modus für spontane, tempofreie
+akustische Songs zwischendurch, (3) fünf Detailfragen geklärt: Fehler-Fallback bei
+kaputter Notiz (sichtbarer Hinweis + Show läuft weiter), Diagnose-Tool
+"Automatik-Check" wird gebaut, Hands-free Show-Start bewusst zurückgestellt
+(Fußschalter-Thema bleibt separat), ein Mikrofon-Icon in der Setlist für
+Vorlauf/Nachlauf, kein Sonderfall fürs Show-Ende (Nachlauf-Notiz deckt das ab). Alle
+Entscheidungen ausformuliert und final in `PLAN-show-automatik.md`, inkl. konkreter
+Umsetzungsreihenfolge (Abschnitt "Status — bereit zur Umsetzung"). **Ab jetzt darf
+Code entstehen**, erster Schritt: Room-Migration v19→v20.
 **Branch:** `main`  
 **Letzter Commit:** `a4d7bb0` — "Plan: Show-Automatik (Pausen, Sprachnotizen, Frei spielen) aus GrillMe-Interview"  
-**CI Build:** #365 (Doku-Only-Commit, kein App-Code geändert — Build läuft nur zur Konsistenz mit)  
+**CI Build:** #365/#366 (Doku-Only-Commits, kein App-Code geändert — Build läuft nur zur Konsistenz mit)  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -2157,16 +2161,23 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
    User einen Testexport aus Studio One geschickt hat. Danach kann er zum ersten Mal
    einen echten Multitrack-Song importieren — noch über Klinke gemischt, aber mit
    Einzelreglern im Mixer.
-7. 🔴 **Show-Automatik: GrillMe-Interview WEITERFÜHREN (2026-09-12 begonnen, User
-   möchte explizit in der nächsten Session weitergrillen).** Teil 1 (Pause zwischen
-   Songs + Vorlauf-/Nachlauf-Sprachnotizen) und Teil 2 ("Frei spielen"-Freeze-Modus
-   für tempofreie Songs) sind fertig abgestimmt, siehe `PLAN-show-automatik.md`.
-   **Noch NICHT gegrillt (Teil 3 des Plans), zuerst dran, bevor Code entsteht:**
-   (a) Fehler-Fallback bei fehlender/kaputter Notiz-Datei, (b) Diagnose-Tool
-   "Automatik-Check" vor dem Gig (analog `WavFormatCheck`/`SongLinkCheck`),
-   (c) Hands-free Show-Start / Bezug zum Bluetooth-Fußschalter-TODO, (d) Sichtbarkeits-
-   Icon in der Setlist für Songs mit Notiz, (e) Show-Ende-Verhalten (letzter Song im
-   letzten Set). Erst danach Umsetzung von Teil 1+2 beginnen.
+7. 🔴 **Show-Automatik: UMSETZUNG BEGINNEN (GrillMe-Interview Teil 1+2+3
+   vollständig abgeschlossen, 2026-09-12).** Alle Entscheidungen final in
+   `PLAN-show-automatik.md` — Pause/Vorlauf-Nachlauf-Sprachnotizen (Teil 1),
+   "Frei spielen"-Freeze-Modus (Teil 2), Fehler-Fallback/Automatik-Check/
+   Show-Start/Setlist-Icon/Show-Ende (Teil 3). **Kein weiteres Grillen nötig,
+   direkt Code schreiben.** Konkrete Reihenfolge (siehe Plan, Abschnitt
+   "Status — bereit zur Umsetzung"):
+   1. Room-Migration v19→v20 (`Song.kt` neue Felder, `MIGRATION_19_20`).
+   2. Mikrofon-Aufnahme im `SongEditorSheet` (App-internes Storage).
+   3. `AudioEngine`: separater Notiz-Wiedergabe-Pfad, hart rechts gepannt.
+   4. `PlayerViewModel`: Pause-/Ansage-Ablauf bei Auto-Advance, Countdown
+      in `PlayerInfoBar`, Fehler-Fallback mit sichtbarem Hinweis.
+   5. "Frei spielen"-Button (global, Laufzeit-Zustand, kein DB-Feld).
+   6. Mikrofon-Icon in `SetSongRow`.
+   7. Diagnose-Tool "Automatik-Check" (analog `WavFormatCheck`/`SongLinkCheck`).
+   8. Performance-Lock beachten: Pause-Abbrechen-Tap + "Frei spielen"-Button
+      bleiben immer aktiv, auch bei `isLocked`.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

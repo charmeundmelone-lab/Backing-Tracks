@@ -67,7 +67,7 @@ class AudioEngine(private val context: Context) {
         if (songId != nextSongId || nextTracks.isEmpty()) return false
         releaseCurrent()
         nextTracks.forEach { t ->
-            val pB = makeExoPlayer().also {
+            val pB = makeExoPlayer(t.name).also {
                 it.setMediaItem(MediaItem.fromUri(Uri.parse(t.uri)))
                 it.prepare()
             }

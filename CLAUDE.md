@@ -284,15 +284,19 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-09-12  
-**Status:** Show-Automatik **komplett umgesetzt und live vom User bestätigt**
-("funktioniert perfekt, so wie es soll"). Alle Schritte aus `PLAN-show-automatik.md`
-(Teil 1-4) fertig, siehe Sprint-Eintrag "Show-Automatik: vollständige Umsetzung DONE"
-weiter unten für Details. Direkt danach neues User-Feedback zum Lyrics-Teleprompter
-(noch NICHT umgesetzt, nur Machbarkeit geprüft und bestätigt) — siehe TODOs.
+**Datum:** 2026-09-13  
+**Status:** Bug "Songs stumm nach Sprachnotiz-Aufnahme" behoben, siehe Sprint-Eintrag
+"AudioEngine-Fehler-Listener + SAF-Berechtigung verloren" weiter unten. AudioEngine
+hat jetzt einen echten Fehler-Listener (schließt die alte Lücke aus der
+"Song-Verknüpfungen"-Diagnose: Ladefehler waren bisher komplett unsichtbar). Davor:
+Show-Automatik **komplett umgesetzt und live vom User bestätigt** ("funktioniert
+perfekt, so wie es soll"). Alle Schritte aus `PLAN-show-automatik.md` (Teil 1-4)
+fertig, siehe Sprint-Eintrag "Show-Automatik: vollständige Umsetzung DONE" weiter
+unten für Details. Lyrics-Teleprompter-Feedback (Auto-Schließen bei Songende) DONE,
+zweiter Punkt (Player im Lyrics-Fenster) weiterhin offen — siehe TODOs.
 **Branch:** `main`  
-**Letzter Commit:** `c065deb` — "Show-Automatik: Zeit-Picker, Warnton + Automatik-Check (Plan komplett)"  
-**CI Build:** #375 (grün)  
+**Letzter Commit:** `dd24ffa` — "Diagnose: verschachtelte Ursache im Fehler-Hinweis mit anzeigen"  
+**CI Build:** #380 (grün)  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -334,6 +338,76 @@ Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Z
 (SHA256 `EEF3D6…A74A`) ist identisch mit `app/debug.keystore` im Repo, unverändert seit 24.07.
 Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
 alte APKs nach dem Installieren löschen.  
+
+### Lyrics-Teleprompter: Auto-Schließen bei Songende DONE (2026-09-12, Commit `abd30cf`)
+
+Erster der zwei offenen Lyrics-Feedback-Punkte aus der Show-Automatik-Session
+umgesetzt, per GrillMe-Interview geplant. Fünf Entscheidungen geklärt: (1) gilt
+einheitlich für alle drei End-Aktionen (CUE/STOP/AUTOPLAY), (2) schließt sofort bei
+Songende, noch vor einer eventuellen Automatik-Pause (nicht erst wenn der nächste
+Song startet), (3) gilt unabhängig davon, ob das Overlay automatisch oder manuell
+wiedergeöffnet wurde, (4) laufende Kalibrierung wird weiterhin über den bestehenden
+`DisposableEffect(song.id)`-Mechanismus (Sprint 5.49) gesichert, (5) gilt auch
+außerhalb von Gig-Sets (freies Abspielen aus dem Archiv, Auto-Stop-Zweig).
+
+**Umsetzung:** ein einziger `closeLyrics()`-Aufruf direkt am bestehenden
+Song-Ende-Erkennungspunkt im 200ms-Poll (Rückwärtssprung-Erkennung, Gotcha 2),
+noch vor der CUE/STOP/AUTOPLAY-Verzweigung — deckt damit automatisch alle fünf
+Punkte ab, ohne Sonderfall-Code. 5 Zeilen Diff. CI grün (#377).
+
+Zweiter Feedback-Punkt (normaler Player unten im Lyrics-Fenster mitanzeigen)
+weiterhin offen, siehe TODOs — aufwendiger, da `LyricsOverlay.kt` dafür zusätzliche
+Zustände/Callbacks (nextSong, Loop-State, Automatik-Status) bräuchte, die aktuell
+nur in `MainScreen.kt` vorliegen.
+
+### AudioEngine-Fehler-Listener + SAF-Berechtigung verloren (2026-09-12/13, Commits `9d16edc`–`dd24ffa`, live bestätigt)
+
+User-Report per GrillMe: nach dem Aufnehmen einer Vorlauf-/Nachlauf-Sprachnotiz im
+Song-Editor (Vorschau dort funktionierte einwandfrei) spielte plötzlich **kein
+einziger Song mehr** Ton ab — Zeitanzeige blieb bei 0 stehen, Fortschritt bewegte
+sich nie. Bug überstand App-Neustart UND kompletten Geräte-Neustart (schließt jeden
+reinen Laufzeit-/Audio-Fokus-Zustand aus). "Song-Verknüpfungen prüfen" zeigte 0
+defekte Links — täuschte zunächst, weil dieser Check nur eine Datei-Auflistung
+prüft, nicht das tatsächliche ÖFFNEN zum Abspielen (zwei unterschiedliche
+SAF-Berechtigungsebenen). Android-Berechtigung "Musik und Audio" testweise erneut
+erlaubt — keine Besserung, also kein alleiniger Auslöser.
+
+**Ursache unsichtbar, weil:** `AudioEngine` hatte bislang **keinen Fehler-Listener**
+auf den ExoPlayer-Instanzen (bereits in der "Song-Verknüpfungen"-Session als Lücke
+notiert) — ein Ladefehler blieb komplett unsichtbar, kein Log, kein Toast. Ohne
+adb-Zugriff beim User war jede weitere Theorie reines Raten.
+
+**Fix (bleibt dauerhaft im Code, kein Wegwerf-Diagnosecode):**
+- `AudioEngine.onError: ((trackName, message) -> Unit)?` — `Player.Listener` mit
+  `onPlayerError` auf jedem ExoPlayer (alle drei `makeExoPlayer()`-Aufrufstellen,
+  inkl. der zunächst übersehenen dritten in `activatePreloaded()` — CI hat den
+  fehlenden Parameter sofort gefangen, Build #378 rot → #379 Fix → grün).
+  Löst die `cause`-Kette bis zur Wurzel-Exception auf (das reine
+  `PlaybackException.errorCodeName` war zu generisch — "IO_UNSPECIFIED" ohne
+  Kontext, siehe Fix in Commit `dd24ffa`).
+- `PlayerViewModel.audioError`/`clearAudioError()` — gleiches Muster wie
+  `automatikError`.
+- `MainScreen.kt`: dismissbarer roter Hinweis in der PlayerInfoBar, analog zum
+  bestehenden `automatikError`-Banner.
+
+**Echter Fehlertext (erst dadurch sichtbar geworden):**
+`main: ERROR_CODE_IO_UNSPECIFIED – SecurityException: Permission Denial: opening
+provider com.android.externalstorage… requires that you obtain access using
+ACTION_OPEN_DOCUMENT or related APIs` — die App hatte die SAF-Berechtigung auf den
+Song-Ordner verloren. `FolderImporter.import()` ruft `takePersistableUriPermission`
+bereits korrekt auf (kein Bug in unserem Code) — die Berechtigung ging auf
+Android-/Geräte-Ebene verloren, zeitlich mit der ersten Mikrofon-Berechtigungs-
+abfrage korreliert, aber die genaue OS-Ursache bleibt ungeklärt.
+
+**Fix für den User:** Ordner erneut über "Import" auswählen (derselbe Ordner) —
+holt sich die Berechtigung frisch, `FolderImporter.upsert()` matcht bestehende
+Songs über den unveränderten `audioFilePath` und überschreibt keine Sets/Mixer-
+Einstellungen/Notizen. **Live getestet und bestätigt: Ton wieder da.**
+
+**Bleibt als dauerhafter Gewinn:** der Fehler-Listener deckt jetzt JEDEN
+ExoPlayer-Ladefehler sichtbar auf (nicht nur diesen einen Fall) — sollte künftige
+"warum ist es plötzlich stumm"-Reports sofort selbsterklärend machen, ohne
+GrillMe-Ratespiel wie in dieser Session.
 
 ### Show-Automatik: vollständige Umsetzung DONE (2026-09-12, Commits `5f5df26`–`c065deb`, live bestätigt)
 
@@ -2215,19 +2289,14 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
    `PLAN-show-automatik.md` fertig, live vom User bestätigt ("funktioniert perfekt,
    so wie es soll"). Details siehe Sprint-Eintrag "Show-Automatik: vollständige
    Umsetzung DONE" weiter oben. Nicht mehr offen.
-8. 🔴 **Lyrics-Teleprompter: zwei Feedback-Punkte (2026-09-12, noch NICHT
-   umgesetzt, nur Machbarkeit geprüft und bestätigt):**
-   1. **Overlay schließt sich nicht automatisch bei Songende** — User muss immer
-      erst manuell "X" tippen, bevor er zum nächsten Song weitermachen kann. Fix:
-      Hook in den bestehenden 200ms-Poll in `PlayerViewModel` (derselbe, der auch
-      Auto-Stop/Auto-Advance erkennt) — an der Songende-Stelle zusätzlich
-      `vm.closeLyrics()` aufrufen. Klein, risikoarm.
-   2. **Player soll unten im Lyrics-Fenster mit angezeigt werden**, exakt wie
-      sonst auch (Seekbar, Play/Pause/Stop, Loop, seit dieser Session auch der
-      Automatik-Countdown). Aufwendiger: der bestehende `GlobalPlayer` aus
-      `MainScreen.kt` müsste in `LyricsOverlay.kt` eingebettet werden, dafür
-      fehlen dort aktuell Zustände/Callbacks (nextSong, Loop-State,
-      Automatik-Status), die bisher nur in `MainScreen` vorliegen.
+8. 🔴 **Lyrics-Teleprompter: Player unten im Fenster mitanzeigen (noch offen).**
+   Zweiter der zwei Feedback-Punkte aus der Show-Automatik-Session — der erste
+   (Auto-Schließen bei Songende) ist erledigt, siehe Punkt 9. Exakt wie der normale
+   Player (Seekbar, Play/Pause/Stop, Loop, Automatik-Countdown) soll unten im
+   Lyrics-Fenster mit angezeigt werden. Aufwendiger: der bestehende `GlobalPlayer`
+   aus `MainScreen.kt` müsste in `LyricsOverlay.kt` eingebettet werden, dafür
+   fehlen dort aktuell Zustände/Callbacks (nextSong, Loop-State,
+   Automatik-Status), die bisher nur in `MainScreen` vorliegen.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)
@@ -2235,6 +2304,15 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   - Nur UI (−/+ Buttons im Header) nötig
 
 #### ✅ ERLEDIGT (diese Session)
+- ✅ **Lyrics-Teleprompter: Auto-Schließen bei Songende (ERLEDIGT, 2026-09-12,
+  Commit `abd30cf`):** Siehe Sprint-Eintrag oben. Nicht mehr offen — der zweite
+  Feedback-Punkt (Player im Lyrics-Fenster mitanzeigen) bleibt als eigener
+  TODO-Punkt 8 offen.
+- ✅ **AudioEngine-Fehler-Listener + SAF-Berechtigung verloren (ERLEDIGT,
+  2026-09-12/13, Commits `9d16edc`–`dd24ffa`):** Bug "Songs stumm nach
+  Sprachnotiz-Aufnahme" behoben (Reimport hat die verlorene SAF-Berechtigung
+  neu gesetzt). AudioEngine hat jetzt einen dauerhaften Fehler-Listener, siehe
+  Sprint-Eintrag oben. Live getestet und bestätigt. Nicht mehr offen.
 - ✅ **Tempo-Filter im Archiv (ERLEDIGT, 2026-07-28, Commit `b35d790`):** Langsam/
   Mittel/Schnell-Chips in der Suchleiste + Song-Editor, Room v18→19. Vom User live
   getestet: "funktioniert". Details siehe Sprint-Eintrag oben unter "Letzter Stand".

@@ -283,7 +283,12 @@ class AudioEngine(private val context: Context) {
                 it.setSeekParameters(SeekParameters.EXACT)
                 it.addListener(object : Player.Listener {
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        val msg = "$trackName: ${error.errorCodeName} – ${error.message}"
+                        // errorCodeName allein ist oft nur "IO_UNSPECIFIED" — die
+                        // eigentliche Ursache (z.B. SecurityException bei verlorener
+                        // SAF-Berechtigung, FileNotFoundException bei fehlender Datei)
+                        // steckt in der verschachtelten cause-Exception.
+                        val root = generateSequence<Throwable>(error) { it.cause }.last()
+                        val msg = "$trackName: ${error.errorCodeName} – ${root.javaClass.simpleName}: ${root.message}"
                         Log.e(TAG, "ExoPlayer-Fehler: $msg", error)
                         onError?.invoke(trackName, msg)
                     }

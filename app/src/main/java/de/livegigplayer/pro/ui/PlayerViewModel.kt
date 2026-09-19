@@ -623,9 +623,15 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 playedSomething = true
             if (playAutomatikSegment(upcoming.introNoteFilePath, "Vorlauf-Notiz von „${upcoming.title}“"))
                 playedSomething = true
-            if (!playedSomething && upcoming.manualPauseSeconds > 0) {
+            // Fallback-Pause ist am endenden Song eingestellt (Nachlauf-Notiz-Sektion
+            // im Editor, siehe Reihenfolge dort) — vorher wurde hier nur
+            // upcoming.manualPauseSeconds geprüft, wodurch eine am endenden Song
+            // gesetzte Pause komplett ignoriert wurde. upcoming bleibt Fallback,
+            // falls am endenden Song nichts gesetzt ist.
+            val pauseSeconds = finishedSong.manualPauseSeconds.takeIf { it > 0 } ?: upcoming.manualPauseSeconds
+            if (!playedSomething && pauseSeconds > 0) {
                 _automatikLabel.value = "Pause bis zum nächsten Song"
-                val totalMs = upcoming.manualPauseSeconds * 1000L
+                val totalMs = pauseSeconds * 1000L
                 // Warnton-Vorlauf = letztes Drittel der Pause, gedeckelt bei 5 Minuten —
                 // eine Formel für alle Pausenlängen (GrillMe 2026-09-12): bei 60 Min.
                 // Pause kommt der Ton 5 Min. vorher, bei 90s Pause 30s vorher.

@@ -285,8 +285,15 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 ## Letzter Stand
 
 **Datum:** 2026-09-20  
-**Status:** Bug "Manuelle Pause (Fallback) wirkte nicht" behoben und live bestätigt,
-siehe Sprint-Eintrag "Manuelle Pause: Fallback am endenden statt am nächsten Song
+**Status:** GrillMe-Interview abgeschlossen (kein Code angefasst): Ansage/Pause
+soll auch schnell DIREKT IM SET einstellbar sein (nicht nur über den Song-Editor
+im Archiv), explizit verbunden mit TODO-Punkt 8 (Player im Lyrics-Fenster) —
+beide sollen in einem Rutsch entstehen. Kompletter Plan inkl. eines dabei
+gefundenen Logikfehlers (Player-Icon-Weg hätte laufende Musik abgewürgt, siehe
+`PLAN-ansage-im-set.md`) steht in **`PLAN-ansage-im-set.md`**. **Ab jetzt darf
+Code entstehen**, siehe TODO-Punkt 8 weiter unten. Davor in dieser Session:
+Bug "Manuelle Pause (Fallback) wirkte nicht" behoben und live bestätigt, siehe
+Sprint-Eintrag "Manuelle Pause: Fallback am endenden statt am nächsten Song
 geprüft" weiter unten. Davor: Bug "Songs stumm nach Sprachnotiz-Aufnahme" behoben
 (Sprint-Eintrag "AudioEngine-Fehler-Listener + SAF-Berechtigung verloren"),
 AudioEngine hat jetzt einen echten Fehler-Listener (schließt die alte Lücke aus der
@@ -294,11 +301,12 @@ AudioEngine hat jetzt einen echten Fehler-Listener (schließt die alte Lücke au
 Show-Automatik **komplett umgesetzt und live vom User bestätigt** ("funktioniert
 perfekt, so wie es soll"). Alle Schritte aus `PLAN-show-automatik.md` (Teil 1-4)
 fertig, siehe Sprint-Eintrag "Show-Automatik: vollständige Umsetzung DONE" weiter
-unten für Details. Lyrics-Teleprompter-Feedback (Auto-Schließen bei Songende) DONE,
-zweiter Punkt (Player im Lyrics-Fenster) weiterhin offen — siehe TODOs.
+unten für Details. Lyrics-Teleprompter-Feedback (Auto-Schließen bei Songende) DONE.
 **Branch:** `main`  
 **Letzter Commit:** `4159c87` — "Fix: Manuelle Pause wurde ignoriert, wenn am endenden Song gesetzt"  
-**CI Build:** #382 (grün)  
+**CI Build:** #382 (grün) — diese Session hat nur Doku/Plan geändert, kein App-Code,
+nächster echter Build entsteht erst mit dem ersten Umsetzungs-Commit aus
+`PLAN-ansage-im-set.md`.  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -2306,14 +2314,28 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
    `PLAN-show-automatik.md` fertig, live vom User bestätigt ("funktioniert perfekt,
    so wie es soll"). Details siehe Sprint-Eintrag "Show-Automatik: vollständige
    Umsetzung DONE" weiter oben. Nicht mehr offen.
-8. 🔴 **Lyrics-Teleprompter: Player unten im Fenster mitanzeigen (noch offen).**
-   Zweiter der zwei Feedback-Punkte aus der Show-Automatik-Session — der erste
-   (Auto-Schließen bei Songende) ist erledigt, siehe Punkt 9. Exakt wie der normale
-   Player (Seekbar, Play/Pause/Stop, Loop, Automatik-Countdown) soll unten im
-   Lyrics-Fenster mit angezeigt werden. Aufwendiger: der bestehende `GlobalPlayer`
-   aus `MainScreen.kt` müsste in `LyricsOverlay.kt` eingebettet werden, dafür
-   fehlen dort aktuell Zustände/Callbacks (nextSong, Loop-State,
-   Automatik-Status), die bisher nur in `MainScreen` vorliegen.
+8. 🔴 **Lyrics-Teleprompter: Player unten im Fenster mitanzeigen + Ansage/Pause
+   schnell im Set (GrillMe-Interview 2026-09-20 ABGESCHLOSSEN, jetzt PRIO 1 —
+   Code darf entstehen).** Zweiter der zwei Feedback-Punkte aus der
+   Show-Automatik-Session — der erste (Auto-Schließen bei Songende) ist
+   erledigt, siehe Punkt 9. Vom User bewusst mit einem neuen Wunsch verbunden:
+   Ansage/Pause soll auch DIREKT IM SET einstellbar sein (nicht nur über den
+   Song-Editor im Archiv), beides **in einem Rutsch** umsetzen. Vollständiger
+   Plan inkl. eines im Review gefundenen Logikfehlers (ein Player-Icon-Weg
+   hätte laufende Musik abgewürgt) steht in **`PLAN-ansage-im-set.md`**.
+   Kurzform der Entscheidungen: (a) normaler Player (Seekbar, Play/Pause/Stop,
+   Loop, Automatik-Countdown) wird in `LyricsOverlay.kt` eingebettet — der
+   bestehende `GlobalPlayer` aus `MainScreen.kt` bräuchte dafür Zustände/
+   Callbacks (nextSong, Loop-State, Automatik-Status), die bisher nur in
+   `MainScreen` vorliegen; (b) neues Icon in der Set-Songzeile (bestehendes
+   Mic-`Icon` → `IconButton`, jetzt immer sichtbar) öffnet ein schlankes
+   Mini-Sheet (nur `VoiceNoteRow` + Pause-Keypad) OHNE jeden Engine-Kontakt —
+   das ist der primäre, sichere Weg, auch während ein anderer Song läuft;
+   (c) zusätzliches, bequemes Icon im Player (nur `isGigSetMode`) öffnet
+   dasselbe Sheet für `currentSong` — dieses Icon zieht mit TODO 8 automatisch
+   in den eingebetteten Lyrics-Player mit rein. In kleinen Commits umsetzen,
+   nach jedem Schritt CI/Gerät prüfen. Zentraler Regressionstest: Song A läuft,
+   Row-Icon von Song B antippen → A darf nicht stoppen.
 
 #### 🟠 PRIO 2 — Falls nötig
 - **Vorlauf-Regler (`lyricsLeadMs`):** Falls konstanter Zeit-Offset bleibt (~0,3–0,5s)

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicNone
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
@@ -952,7 +953,10 @@ private fun SetCard(
                             gigVm.cycleEndAction(set.setId, songInSet.song.id, songInSet.endAction)
                             if (songInSet.song.id == currentSong?.id)
                                 playerVm.activeEndAction.value = (songInSet.endAction + 1) % 3
-                        }
+                        },
+                        onIntroNoteChange   = { path, dur -> playerVm.updateIntroNote(songInSet.song, path, dur) },
+                        onOutroNoteChange   = { path, dur -> playerVm.updateOutroNote(songInSet.song, path, dur) },
+                        onManualPauseChange = { seconds -> playerVm.updateManualPauseSeconds(songInSet.song, seconds) }
                     )
                 }
             }
@@ -1048,12 +1052,20 @@ private fun SetSongRow(
     onQueueNext: () -> Unit,
     onQueueEnd: () -> Unit,
     onRemove: () -> Unit,
-    onCycleEndAction: () -> Unit = {}
+    onCycleEndAction: () -> Unit = {},
+    // Ansage/Pause-Schnellzugriff direkt im Set (PLAN-ansage-im-set.md) — das
+    // Mini-Sheet wird HIER lokal gehalten und öffnet sich ohne jeden Kontakt zur
+    // AudioEngine (kein onPlay/selectSong), sicher auch während ein anderer Song
+    // läuft (siehe Plan, Logikfehler-Review).
+    onIntroNoteChange: (String, Long) -> Unit = { _, _ -> },
+    onOutroNoteChange: (String, Long) -> Unit = { _, _ -> },
+    onManualPauseChange: (Int) -> Unit = {}
 ) {
     var dragX by remember { mutableStateOf(0f) }
     var showAlreadyPlayedDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var showAutomatikSheet by remember { mutableStateOf(false) }
 
     // rememberUpdatedState: hält die Callbacks/Flags aktuell, auch wenn der
     // pointerInput-Block (Key = isEditing/isLocked) nicht neu startet. Ohne das würden
@@ -1172,11 +1184,37 @@ private fun SetSongRow(
                 fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
         }
-        // Show-Automatik: Mikrofon-Icon sobald Vorlauf- ODER Nachlauf-Notiz existiert
-        // (Teil 3 Punkt 4) — keine getrennte Kennzeichnung der beiden Slots.
-        if (songInSet.song.introNoteFilePath.isNotBlank() || songInSet.song.outroNoteFilePath.isNotBlank()) {
-            Icon(Icons.Filled.Mic, contentDescription = "Sprachnotiz vorhanden",
-                tint = GigGray, modifier = Modifier.size(16.dp).padding(end = 4.dp))
+        // Ansage/Pause-Schnellzugriff (PLAN-ansage-im-set.md, Entscheidung 2/3):
+        // Icon ist jetzt IMMER sichtbar (nicht mehr nur bei vorhandener Notiz) und
+        // öffnet direkt das Mini-Sheet — primärer, sicherer Zugang ohne AudioEngine-
+        // Kontakt. Leer = dezentes Outline-Icon, befüllt = kräftig wie bisher.
+        val hasAutomatikNote = songInSet.song.introNoteFilePath.isNotBlank() ||
+            songInSet.song.outroNoteFilePath.isNotBlank()
+        IconButton(
+            onClick = { showAutomatikSheet = true },
+            enabled = !isLocked,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                if (hasAutomatikNote) Icons.Filled.Mic else Icons.Filled.MicNone,
+                contentDescription = "Ansage/Pause",
+                tint = when {
+                    isLocked         -> GigGray.copy(alpha = 0.4f)
+                    hasAutomatikNote -> GigGray
+                    else             -> GigGray.copy(alpha = 0.5f)
+                },
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        if (showAutomatikSheet) {
+            AutomatikMiniSheet(
+                song = songInSet.song,
+                onIntroNoteChange = onIntroNoteChange,
+                onOutroNoteChange = onOutroNoteChange,
+                onManualPauseChange = onManualPauseChange,
+                onDismiss = { showAutomatikSheet = false }
+            )
         }
         if (isEditing) {
             TextButton(onClick = onCycleEndAction, modifier = Modifier.defaultMinSize(minWidth = 40.dp)) {

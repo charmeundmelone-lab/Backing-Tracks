@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Usb
@@ -247,6 +248,9 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
     var showFormatCheck  by remember { mutableStateOf(false) }
     var showLinkCheck    by remember { mutableStateOf(false) }
     var showAutomatikCheck by remember { mutableStateOf(false) }
+    // Ansage/Pause-Schnellzugriff übers Player-Icon (PLAN-ansage-im-set.md,
+    // Entscheidung 4) — wirkt immer auf den gerade aktuellen Song.
+    var showPlayerAutomatikSheet by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -338,6 +342,7 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                 isExitPending    = isExitPending,
                 isInSetMode      = currentPlaylistId != null,
                 isGigSetMode     = isGigSetMode,
+                isLocked         = isLocked,
                 positionMs       = positionMs,
                 durationMs       = durationMs,
                 loopStartMs      = loopStartMs,
@@ -366,8 +371,20 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
                         vm.activeEndAction.value = next   // sofort im UI sichtbar
                         gigVm.cycleEndAction(sid, song.id, activeEndAction)
                     }
-                }
+                },
+                onOpenAutomatik = { showPlayerAutomatikSheet = true }
             )
+
+            if (showPlayerAutomatikSheet && currentSong != null) {
+                val targetSong = currentSong!!
+                AutomatikMiniSheet(
+                    song = targetSong,
+                    onIntroNoteChange = { path, dur -> vm.updateIntroNote(targetSong, path, dur) },
+                    onOutroNoteChange = { path, dur -> vm.updateOutroNote(targetSong, path, dur) },
+                    onManualPauseChange = { seconds -> vm.updateManualPauseSeconds(targetSong, seconds) },
+                    onDismiss = { showPlayerAutomatikSheet = false }
+                )
+            }
             // A/B Loop Panel — nur im Archiv-Modus (nicht im Gig-Set-Modus)
             if (!isGigSetMode) LoopPanel(
                 loopState      = loopState,
@@ -1611,8 +1628,6 @@ private fun SongEditorSheet(
     var autoStop by remember(song.id) { mutableStateOf(song.autoStop) }
     var lyrics   by remember(song.id) { mutableStateOf(song.lyrics) }
     var tempoTag by remember(song.id) { mutableStateOf(song.tempoTag) }
-    var manualPauseSeconds by remember(song.id) { mutableStateOf(song.manualPauseSeconds) }
-    var showPauseSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1806,36 +1821,16 @@ private fun SongEditorSheet(
         Spacer(modifier = Modifier.height(20.dp))
         // Show-Automatik: Vorlauf-/Nachlauf-Sprachnotiz + manuelle Fallback-Pause.
         // Wirkt nur bei Auto-Advance (endAction=AUTOPLAY), siehe PLAN-show-automatik.md.
+        // Felder selbst leben in AutomatikFields() — geteilt mit AutomatikMiniSheet
+        // (Ansage/Pause-Schnellzugriff direkt im Set, PLAN-ansage-im-set.md).
         Text("Show-Automatik", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(bottom = 8.dp))
-        VoiceNoteRow(
-            label = "Vorlauf-Notiz (vor diesem Song)",
-            context = context, songId = song.id, slot = VoiceNoteRecorder.Slot.INTRO,
-            filePath = song.introNoteFilePath, durationMs = song.introNoteDurationMs,
-            onConfirm = onIntroNoteChange
+        AutomatikFields(
+            song = song,
+            onIntroNoteChange = onIntroNoteChange,
+            onOutroNoteChange = onOutroNoteChange,
+            onManualPauseChange = onManualPauseChange
         )
-        Spacer(modifier = Modifier.height(10.dp))
-        VoiceNoteRow(
-            label = "Nachlauf-Notiz (nach diesem Song)",
-            context = context, songId = song.id, slot = VoiceNoteRecorder.Slot.OUTRO,
-            filePath = song.outroNoteFilePath, durationMs = song.outroNoteDurationMs,
-            onConfirm = onOutroNoteChange
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { showPauseSheet = true },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Manuelle Pause (Fallback)", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text("Nur falls keine Notiz vorhanden", color = Gray, fontSize = 11.sp)
-            }
-            Text(
-                "%d:%02d".format(manualPauseSeconds / 60, manualPauseSeconds % 60),
-                color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-            )
-        }
         }
 
         if (pendingPdfText != null) {
@@ -1862,15 +1857,106 @@ private fun SongEditorSheet(
             )
         }
 
-        if (showPauseSheet) {
-            ManualPauseKeypadDialog(
-                initialSeconds = manualPauseSeconds,
-                onConfirm = { seconds ->
-                    manualPauseSeconds = seconds
-                    onManualPauseChange(seconds)
-                    showPauseSheet = false
-                },
-                onDismiss = { showPauseSheet = false }
+    }
+}
+
+// ── Show-Automatik: Vorlauf-/Nachlauf-Notiz + manuelle Fallback-Pause (geteilte Felder) ──
+// Genutzt vom Song-Editor UND vom Mini-Sheet direkt im Set (PLAN-ansage-im-set.md) —
+// eine einzige Implementierung, kein doppelter Aufnahme-/Pause-Code.
+@Composable
+private fun AutomatikFields(
+    song: Song,
+    onIntroNoteChange: (String, Long) -> Unit,
+    onOutroNoteChange: (String, Long) -> Unit,
+    onManualPauseChange: (Int) -> Unit
+) {
+    val context = LocalContext.current
+    var manualPauseSeconds by remember(song.id) { mutableStateOf(song.manualPauseSeconds) }
+    var showPauseSheet by remember { mutableStateOf(false) }
+
+    VoiceNoteRow(
+        label = "Vorlauf-Notiz (vor diesem Song)",
+        context = context, songId = song.id, slot = VoiceNoteRecorder.Slot.INTRO,
+        filePath = song.introNoteFilePath, durationMs = song.introNoteDurationMs,
+        onConfirm = onIntroNoteChange
+    )
+    Spacer(modifier = Modifier.height(10.dp))
+    VoiceNoteRow(
+        label = "Nachlauf-Notiz (nach diesem Song)",
+        context = context, songId = song.id, slot = VoiceNoteRecorder.Slot.OUTRO,
+        filePath = song.outroNoteFilePath, durationMs = song.outroNoteDurationMs,
+        onConfirm = onOutroNoteChange
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { showPauseSheet = true },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Manuelle Pause (Fallback)", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("Nur falls keine Notiz vorhanden", color = Gray, fontSize = 11.sp)
+        }
+        Text(
+            "%d:%02d".format(manualPauseSeconds / 60, manualPauseSeconds % 60),
+            color = if (manualPauseSeconds > 0) Volt else Gray, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+        )
+    }
+
+    if (showPauseSheet) {
+        ManualPauseKeypadDialog(
+            initialSeconds = manualPauseSeconds,
+            onConfirm = { seconds ->
+                manualPauseSeconds = seconds
+                onManualPauseChange(seconds)
+                showPauseSheet = false
+            },
+            onDismiss = { showPauseSheet = false }
+        )
+    }
+}
+
+// ── Ansage/Pause-Schnellzugriff im Set (PLAN-ansage-im-set.md) ──────────────────
+// Schlankes Mini-Sheet: nur die Show-Automatik-Bausteine, kein Titel/Lyrics/Mixer.
+// Zwei Aufrufer: SetSongRow-Icon (primär, ohne jeden AudioEngine-Kontakt — sicher
+// auch während ein anderer Song läuft) und ein Player-Icon im Gig-Set-Modus
+// (sekundär, wirkt auf currentSong) — siehe Plan Entscheidung 2/4. Deshalb public
+// statt private: Aufruf auch aus GigManagementScreen.kt.
+@Composable
+fun AutomatikMiniSheet(
+    song: Song,
+    onIntroNoteChange: (String, Long) -> Unit,
+    onOutroNoteChange: (String, Long) -> Unit,
+    onManualPauseChange: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier.fillMaxWidth().background(BgCard, shape = MaterialTheme.shapes.large)
+                .padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Show-Automatik", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    // Schutz vor Verwechslung (Plan Punkt 5) — reicht als Absicherung,
+                    // kein zusätzlicher Bestätigungsschritt nötig.
+                    Text(
+                        if (song.artist.isNotBlank()) "Für: ${song.title} – ${song.artist}" else "Für: ${song.title}",
+                        color = Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Schließen", tint = Gray)
+                }
+            }
+            AutomatikFields(
+                song = song,
+                onIntroNoteChange = onIntroNoteChange,
+                onOutroNoteChange = onOutroNoteChange,
+                onManualPauseChange = onManualPauseChange
             )
         }
     }
@@ -2214,6 +2300,10 @@ private fun GlobalPlayer(
     isPlaying: Boolean, loopState: LoopState,
     isArmed: Boolean, isLoopActiveLive: Boolean, isExitPending: Boolean,
     isInSetMode: Boolean, isGigSetMode: Boolean,
+    // Nur fürs Ansage/Pause-Icon relevant (Plan Punkt 6) — die übrigen Transport-
+    // Buttons hier waren nie an isLocked gebunden (Gotcha 10 gilt für den Gig-Set-
+    // Tab, nicht den Player selbst), dieses Icon öffnet aber einen Editier-Zugang.
+    isLocked: Boolean = false,
     positionMs: Long, durationMs: Long,
     loopStartMs: Long?, loopEndMs: Long?,
     activeEndAction: Int = 0,
@@ -2237,7 +2327,10 @@ private fun GlobalPlayer(
     onDismissAutomatikError: () -> Unit = {},
     onToggleFreeSpielen: () -> Unit = {},
     onDismissAudioError: () -> Unit = {},
-    onCycleEndAction: () -> Unit = {}
+    onCycleEndAction: () -> Unit = {},
+    // Ansage/Pause-Schnellzugriff (PLAN-ansage-im-set.md, Entscheidung 4) —
+    // sekundärer, bequemer Zugang für currentSong, nur im Gig-Set-Modus.
+    onOpenAutomatik: () -> Unit = {}
 ) {
     var isSeeking by remember { mutableStateOf(false) }
     var seekFraction by remember { mutableStateOf(0f) }
@@ -2426,6 +2519,20 @@ private fun GlobalPlayer(
                 ) {
                     Icon(Icons.Filled.Article, contentDescription = "Lyrics anzeigen",
                         tint = Volt, modifier = Modifier.size(22.dp))
+                }
+            }
+            // Ansage/Pause-Icon — nur im Gig-Set-Modus, wirkt auf currentSong
+            // (PLAN-ansage-im-set.md, Entscheidung 4: kein selectSong()-Aufruf nötig,
+            // deshalb sicher auch während der Song läuft).
+            if (isGigSetMode && song != null) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable(enabled = !isLocked, onClick = onOpenAutomatik),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Ansage/Pause",
+                        tint = if (isLocked) Gray.copy(alpha = 0.4f) else Gray, modifier = Modifier.size(20.dp))
                 }
             }
             // EndAction-Button — nur im Gig-Set-Modus, 48dp Touch-Target

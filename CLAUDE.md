@@ -284,10 +284,12 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-09-13  
-**Status:** Bug "Songs stumm nach Sprachnotiz-Aufnahme" behoben, siehe Sprint-Eintrag
-"AudioEngine-Fehler-Listener + SAF-Berechtigung verloren" weiter unten. AudioEngine
-hat jetzt einen echten Fehler-Listener (schließt die alte Lücke aus der
+**Datum:** 2026-09-20  
+**Status:** Bug "Manuelle Pause (Fallback) wirkte nicht" behoben und live bestätigt,
+siehe Sprint-Eintrag "Manuelle Pause: Fallback am endenden statt am nächsten Song
+geprüft" weiter unten. Davor: Bug "Songs stumm nach Sprachnotiz-Aufnahme" behoben
+(Sprint-Eintrag "AudioEngine-Fehler-Listener + SAF-Berechtigung verloren"),
+AudioEngine hat jetzt einen echten Fehler-Listener (schließt die alte Lücke aus der
 "Song-Verknüpfungen"-Diagnose: Ladefehler waren bisher komplett unsichtbar). Davor:
 Show-Automatik **komplett umgesetzt und live vom User bestätigt** ("funktioniert
 perfekt, so wie es soll"). Alle Schritte aus `PLAN-show-automatik.md` (Teil 1-4)
@@ -295,8 +297,8 @@ fertig, siehe Sprint-Eintrag "Show-Automatik: vollständige Umsetzung DONE" weit
 unten für Details. Lyrics-Teleprompter-Feedback (Auto-Schließen bei Songende) DONE,
 zweiter Punkt (Player im Lyrics-Fenster) weiterhin offen — siehe TODOs.
 **Branch:** `main`  
-**Letzter Commit:** `dd24ffa` — "Diagnose: verschachtelte Ursache im Fehler-Hinweis mit anzeigen"  
-**CI Build:** #380 (grün)  
+**Letzter Commit:** `4159c87` — "Fix: Manuelle Pause wurde ignoriert, wenn am endenden Song gesetzt"  
+**CI Build:** #382 (grün)  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -359,6 +361,21 @@ Zweiter Feedback-Punkt (normaler Player unten im Lyrics-Fenster mitanzeigen)
 weiterhin offen, siehe TODOs — aufwendiger, da `LyricsOverlay.kt` dafür zusätzliche
 Zustände/Callbacks (nextSong, Loop-State, Automatik-Status) bräuchte, die aktuell
 nur in `MainScreen.kt` vorliegen.
+
+### Manuelle Pause: Fallback am endenden statt am nächsten Song geprüft (2026-09-19, Commit `4159c87`, live bestätigt)
+
+User-Report: die im Song-Editor per Ziffernblock gesetzte "Manuelle Pause (Fallback)"
+wirkte nicht, obwohl korrekt eingestellt. Nachgefragt, an welchem Song (endend vs.
+nächster) er die Pause gesetzt hatte — Antwort: am **endenden** Song.
+
+**Root Cause:** `startAutomatikPause(finishedSong, upcoming)` prüfte nur
+`upcoming.manualPauseSeconds` — der Ziffernblock steht im Editor direkt unter der
+Nachlauf-Notiz-Sektion (Nachlauf = `finishedSong`), der User hat die Pause also
+naheliegend beim endenden Song gesetzt, genau der Wert, der nie geprüft wurde.
+
+**Fix:** `finishedSong.manualPauseSeconds` hat jetzt Vorrang, `upcoming.
+manualPauseSeconds` bleibt Fallback falls am endenden Song nichts gesetzt ist.
+Ein Zweizeiler. **Live getestet und vom User bestätigt: "es funktioniert".**
 
 ### AudioEngine-Fehler-Listener + SAF-Berechtigung verloren (2026-09-12/13, Commits `9d16edc`–`dd24ffa`, live bestätigt)
 
@@ -2304,6 +2321,9 @@ Einbindung: `GigManagementScreen` im Tab B von MainScreen (neben Archiv).
   - Nur UI (−/+ Buttons im Header) nötig
 
 #### ✅ ERLEDIGT (diese Session)
+- ✅ **Manuelle Pause (Fallback) wirkte nicht (ERLEDIGT, 2026-09-19, Commit
+  `4159c87`):** Siehe Sprint-Eintrag oben. Am endenden Song gesetzte Pause hat
+  jetzt Vorrang. Live getestet und bestätigt. Nicht mehr offen.
 - ✅ **Lyrics-Teleprompter: Auto-Schließen bei Songende (ERLEDIGT, 2026-09-12,
   Commit `abd30cf`):** Siehe Sprint-Eintrag oben. Nicht mehr offen — der zweite
   Feedback-Punkt (Player im Lyrics-Fenster mitanzeigen) bleibt als eigener

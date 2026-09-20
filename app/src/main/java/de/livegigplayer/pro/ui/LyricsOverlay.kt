@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -242,7 +243,37 @@ fun LyricsOverlay(
     onSetLyricsSyncPoints: (Long, String) -> Unit = { _, _ -> },
     debugLog: List<String> = emptyList(),
     onLogDebug: (String) -> Unit = {},
-    onLogWarn: (String) -> Unit = {}
+    onLogWarn: (String) -> Unit = {},
+    // TODO 8 (PLAN-ansage-im-set.md): normaler Player unten im Lyrics-Fenster
+    // eingebettet — exakt dieselben Inputs wie GlobalPlayer (MainScreen.kt), 1:1
+    // durchgereicht, keine zweite Implementierung.
+    nextSong: Song? = null,
+    loopState: LoopState = LoopState.INACTIVE,
+    isArmed: Boolean = false,
+    isLoopActiveLive: Boolean = false,
+    isExitPending: Boolean = false,
+    isInSetMode: Boolean = false,
+    isGigSetMode: Boolean = false,
+    isLocked: Boolean = false,
+    loopStartMs: Long? = null,
+    loopEndMs: Long? = null,
+    activeEndAction: Int = 0,
+    automatikRemainingMs: Long? = null,
+    automatikLabel: String = "",
+    automatikError: String? = null,
+    isFreeSpielen: Boolean = false,
+    audioError: String? = null,
+    onSeekTo: (Long) -> Unit = {},
+    onPlayPause: () -> Unit = {},
+    onStop: () -> Unit = {},
+    onToggleLoop: () -> Unit = {},
+    onSetLoopButton: () -> Unit = {},
+    onSkipAutomatik: () -> Unit = {},
+    onDismissAutomatikError: () -> Unit = {},
+    onToggleFreeSpielen: () -> Unit = {},
+    onDismissAudioError: () -> Unit = {},
+    onCycleEndAction: () -> Unit = {},
+    onOpenAutomatik: () -> Unit = {}
 ) {
     val activity = LocalContext.current.findActivity()
     DisposableEffect(visible) {
@@ -284,7 +315,34 @@ fun LyricsOverlay(
                 onSetLyricsSyncPoints = onSetLyricsSyncPoints,
                 debugLog              = debugLog,
                 onLogDebug            = onLogDebug,
-                onLogWarn             = onLogWarn
+                onLogWarn             = onLogWarn,
+                nextSong              = nextSong,
+                loopState             = loopState,
+                isArmed               = isArmed,
+                isLoopActiveLive      = isLoopActiveLive,
+                isExitPending         = isExitPending,
+                isInSetMode           = isInSetMode,
+                isGigSetMode          = isGigSetMode,
+                isLocked              = isLocked,
+                loopStartMs           = loopStartMs,
+                loopEndMs             = loopEndMs,
+                activeEndAction       = activeEndAction,
+                automatikRemainingMs  = automatikRemainingMs,
+                automatikLabel        = automatikLabel,
+                automatikError        = automatikError,
+                isFreeSpielen         = isFreeSpielen,
+                audioError            = audioError,
+                onSeekTo              = onSeekTo,
+                onPlayPause           = onPlayPause,
+                onStop                = onStop,
+                onToggleLoop          = onToggleLoop,
+                onSetLoopButton       = onSetLoopButton,
+                onSkipAutomatik       = onSkipAutomatik,
+                onDismissAutomatikError = onDismissAutomatikError,
+                onToggleFreeSpielen   = onToggleFreeSpielen,
+                onDismissAudioError   = onDismissAudioError,
+                onCycleEndAction      = onCycleEndAction,
+                onOpenAutomatik       = onOpenAutomatik
             )
         }
     }
@@ -301,7 +359,34 @@ private fun LyricsContent(
     onSetLyricsSyncPoints: (Long, String) -> Unit,
     debugLog: List<String>,
     onLogDebug: (String) -> Unit,
-    onLogWarn: (String) -> Unit
+    onLogWarn: (String) -> Unit,
+    nextSong: Song?,
+    loopState: LoopState,
+    isArmed: Boolean,
+    isLoopActiveLive: Boolean,
+    isExitPending: Boolean,
+    isInSetMode: Boolean,
+    isGigSetMode: Boolean,
+    isLocked: Boolean,
+    loopStartMs: Long?,
+    loopEndMs: Long?,
+    activeEndAction: Int,
+    automatikRemainingMs: Long?,
+    automatikLabel: String,
+    automatikError: String?,
+    isFreeSpielen: Boolean,
+    audioError: String?,
+    onSeekTo: (Long) -> Unit,
+    onPlayPause: () -> Unit,
+    onStop: () -> Unit,
+    onToggleLoop: () -> Unit,
+    onSetLoopButton: () -> Unit,
+    onSkipAutomatik: () -> Unit,
+    onDismissAutomatikError: () -> Unit,
+    onToggleFreeSpielen: () -> Unit,
+    onDismissAudioError: () -> Unit,
+    onCycleEndAction: () -> Unit,
+    onOpenAutomatik: () -> Unit
 ) {
     val context = LocalContext.current
     val lines   = remember(song.id, song.lyrics) { song.lyrics.lines() }
@@ -591,7 +676,10 @@ private fun LyricsContent(
             // EXPLIZIT mit `maxHeight = Constraints.Infinity` — Höhe und Platzierung
             // (inkl. Scroll-Offset) werden hier direkt selbst kontrolliert, kein Verlass
             // mehr auf automatische Constraint-Weitergabe.
-            Box(modifier = Modifier.fillMaxSize()) {
+            // weight(1f) statt fillMaxSize(): reserviert unten Platz für den
+            // eingebetteten Player (TODO 8) — Viewport nimmt den Rest der Höhe,
+            // der Player darunter seine eigene, feste Höhe.
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 Layout(
                     modifier = Modifier
                         .fillMaxSize()
@@ -709,6 +797,46 @@ private fun LyricsContent(
                         )
                 )
             }
+
+            // TODO 8 (PLAN-ansage-im-set.md): normaler Player unten im Fenster —
+            // Wiederverwendung der bestehenden GlobalPlayer-Composable (MainScreen.kt),
+            // 1:1 dieselben Inputs/Callbacks wie der Player unter dem Archiv/Set-Tab.
+            // Kein Lyrics-Button hier (showLyricsButton = false) — man sieht den
+            // Songtext ja bereits.
+            GlobalPlayer(
+                song                 = song,
+                nextSong             = nextSong,
+                isPlaying            = isPlaying,
+                loopState            = loopState,
+                isArmed              = isArmed,
+                isLoopActiveLive     = isLoopActiveLive,
+                isExitPending        = isExitPending,
+                isInSetMode          = isInSetMode,
+                isGigSetMode         = isGigSetMode,
+                isLocked             = isLocked,
+                positionMs           = positionMs,
+                durationMs           = durationMs,
+                loopStartMs          = loopStartMs,
+                loopEndMs            = loopEndMs,
+                activeEndAction      = activeEndAction,
+                automatikRemainingMs = automatikRemainingMs,
+                automatikLabel       = automatikLabel,
+                automatikError       = automatikError,
+                isFreeSpielen        = isFreeSpielen,
+                audioError           = audioError,
+                onSeekTo             = onSeekTo,
+                onPlayPause          = onPlayPause,
+                onStop               = onStop,
+                onToggleLoop         = onToggleLoop,
+                onSetLoopButton      = onSetLoopButton,
+                onSkipAutomatik      = onSkipAutomatik,
+                onDismissAutomatikError = onDismissAutomatikError,
+                onToggleFreeSpielen  = onToggleFreeSpielen,
+                onDismissAudioError  = onDismissAudioError,
+                onCycleEndAction     = onCycleEndAction,
+                onOpenAutomatik      = onOpenAutomatik,
+                showLyricsButton     = false
+            )
         }
     }
 }

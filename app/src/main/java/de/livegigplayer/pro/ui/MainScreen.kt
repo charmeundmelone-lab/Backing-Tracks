@@ -424,7 +424,10 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             onClose        = { vm.closeMixer() }
         )
 
-        // Lyrics-Teleprompter — Hochkant, Auto-Scroll an echter Wiedergabeposition
+        // Lyrics-Teleprompter — Hochkant, Auto-Scroll an echter Wiedergabeposition.
+        // Player-Parameter (TODO 8, PLAN-ansage-im-set.md) sind 1:1 dieselben wie
+        // beim GlobalPlayer unten — derselbe eingebettete Baustein, keine zweite
+        // Implementierung.
         LyricsOverlay(
             visible          = showLyrics,
             song             = currentSong,
@@ -435,7 +438,42 @@ fun MainScreen(vm: PlayerViewModel = viewModel(), gigVm: GigViewModel = viewMode
             onSetLyricsSyncPoints = { _, points -> currentSong?.let { vm.updateLyricsSyncPoints(it, points) } },
             debugLog         = vm.lyricsDebugLog,
             onLogDebug       = { vm.logLyricsDebug(it) },
-            onLogWarn        = { vm.logLyricsWarn(it) }
+            onLogWarn        = { vm.logLyricsWarn(it) },
+            nextSong         = nextSong,
+            loopState        = loopState,
+            isArmed          = isArmed,
+            isLoopActiveLive = isLoopActiveLive,
+            isExitPending    = isExitPending,
+            isInSetMode      = currentPlaylistId != null,
+            isGigSetMode     = isGigSetMode,
+            isLocked         = isLocked,
+            loopStartMs      = loopStartMs,
+            loopEndMs        = loopEndMs,
+            activeEndAction  = activeEndAction,
+            automatikRemainingMs = automatikRemainingMs,
+            automatikLabel       = automatikLabel,
+            automatikError       = automatikError,
+            isFreeSpielen        = isFreeSpielen,
+            audioError           = audioError,
+            onSeekTo         = { ms -> vm.seekTo(ms) },
+            onPlayPause      = { vm.togglePlayPause() },
+            onStop           = { vm.stopPlayback() },
+            onToggleLoop     = { vm.onLoopButtonPressed(positionMs) },
+            onSetLoopButton  = { vm.onSetLoopButtonPressed() },
+            onSkipAutomatik  = { vm.skipAutomatikPause() },
+            onDismissAutomatikError = { vm.clearAutomatikError() },
+            onToggleFreeSpielen = { vm.toggleFreeSpielen() },
+            onDismissAudioError = { vm.clearAudioError() },
+            onCycleEndAction = {
+                val sid = activeSetId
+                val song = currentSong
+                if (sid != null && song != null) {
+                    val next = (activeEndAction + 1) % 3
+                    vm.activeEndAction.value = next
+                    gigVm.cycleEndAction(sid, song.id, activeEndAction)
+                }
+            },
+            onOpenAutomatik = { showPlayerAutomatikSheet = true }
         )
 
         // Scan overlay
@@ -2294,8 +2332,12 @@ private fun StageSongRow(index: Int, song: Song, selected: Boolean, onClick: () 
 // ── Global Player ──────────────────────────────────────────────────────────────
 private val LoopOrange = Color(0xFFFF8C00)
 
+// public statt private: TODO 8 (PLAN-ansage-im-set.md) bettet denselben Player
+// unten im Lyrics-Teleprompter ein (LyricsOverlay.kt, anderes File, gleiches
+// Package) — Wiederverwendung des kompletten, bereits getesteten Bausteins statt
+// einer zweiten, parallelen Implementierung.
 @Composable
-private fun GlobalPlayer(
+fun GlobalPlayer(
     song: Song?, nextSong: Song?,
     isPlaying: Boolean, loopState: LoopState,
     isArmed: Boolean, isLoopActiveLive: Boolean, isExitPending: Boolean,
@@ -2330,7 +2372,11 @@ private fun GlobalPlayer(
     onCycleEndAction: () -> Unit = {},
     // Ansage/Pause-Schnellzugriff (PLAN-ansage-im-set.md, Entscheidung 4) —
     // sekundärer, bequemer Zugang für currentSong, nur im Gig-Set-Modus.
-    onOpenAutomatik: () -> Unit = {}
+    onOpenAutomatik: () -> Unit = {},
+    // Eingebettet im Lyrics-Teleprompter (TODO 8) wäre ein Lyrics-Button sinnlos —
+    // man sieht die Lyrics ja bereits. Default true ändert nichts am bisherigen
+    // Player unten in MainScreen.
+    showLyricsButton: Boolean = true
 ) {
     var isSeeking by remember { mutableStateOf(false) }
     var seekFraction by remember { mutableStateOf(0f) }
@@ -2510,7 +2556,7 @@ private fun GlobalPlayer(
                 }
             }
             // Lyrics-Button — sichtbar sobald der Song Lyrics hinterlegt hat
-            if (song != null && song.lyrics.isNotBlank()) {
+            if (showLyricsButton && song != null && song.lyrics.isNotBlank()) {
                 Box(
                     modifier = Modifier
                         .size(48.dp)

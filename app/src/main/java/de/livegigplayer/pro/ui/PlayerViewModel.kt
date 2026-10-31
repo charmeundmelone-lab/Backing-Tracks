@@ -648,11 +648,30 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     remaining -= 50L
                 }
             }
-            pendingFinishedSong = null
-            pendingUpcomingSong = null
-            _automatikRemainingMs.value = null
-            skipNext(); forcePlay()
+            advanceAfterAutomatik()
         }
+    }
+
+    // Nach Pause/Ansage genau den beim Songende gemerkten Song starten. Vorher lief
+    // hier skipNext(), das den Nachfolger NEU suchte und ohne Meldung zurückkehrte,
+    // wenn die Queue inzwischen leer war — das folgende forcePlay() startete dann
+    // den fertigen Song (REPEAT_MODE_ONE, schon wieder am Anfang) einfach nochmal.
+    private fun advanceAfterAutomatik() {
+        val upcoming = pendingUpcomingSong
+        pendingFinishedSong = null
+        pendingUpcomingSong = null
+        _automatikRemainingMs.value = null
+        if (upcoming == null || upcoming.id == _currentSong.value?.id) {
+            _automatikError.value = "Kein nächster Song gefunden — Wiedergabe gestoppt"
+            return
+        }
+        // Frische DB-Version statt Queue-Momentaufnahme: im Set geänderte
+        // Pause/Notizen sollen beim nächsten Übergang schon gelten.
+        val song = songs.value.find { it.id == upcoming.id } ?: upcoming
+        _currentSong.value?.id?.let { onSongCompleted?.invoke(it) }
+        _queue.value = _queue.value.filter { it.id != song.id }
+        selectSong(song, getApplication(), _currentPlaylistId.value, isGigSet = _isGigSetMode.value)
+        forcePlay()
     }
 
     // Spielt eine Notiz hart rechts gepannt ab, aktualisiert währenddessen den
@@ -693,10 +712,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (_automatikRemainingMs.value == null) return
         automatikJob?.cancel()
         engine.stopVoiceNote()
-        pendingFinishedSong = null
-        pendingUpcomingSong = null
-        _automatikRemainingMs.value = null
-        skipNext(); forcePlay()
+        advanceAfterAutomatik()
     }
 
     // ── Show-Automatik: "Frei spielen" (Teil 2) ─────────────────────────────────

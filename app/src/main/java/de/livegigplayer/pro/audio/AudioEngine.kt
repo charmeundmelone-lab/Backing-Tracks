@@ -178,14 +178,15 @@ class AudioEngine(private val context: Context) {
     val voiceNoteDurationMs: Long get() =
         noteMediaPlayer?.let { runCatching { it.duration.toLong() }.getOrDefault(0L) } ?: 0L
 
-    /** Spielt [filePath] hart rechts gepannt ab. Ruft [onCompleted] bei Ende oder Fehler. */
-    fun playVoiceNote(filePath: String, onCompleted: () -> Unit) {
+    /** Spielt [filePath] hart rechts gepannt ab. Ruft [onCompleted] bei Ende oder Fehler.
+     *  [volume] 0..1 — Sprachnotizen voll, Warnton leiser (siehe PlayerViewModel). */
+    fun playVoiceNote(filePath: String, volume: Float = 1f, onCompleted: () -> Unit) {
         stopVoiceNote()
         if (filePath.isBlank()) { onCompleted(); return }
         val player = MediaPlayer()
         try {
             player.setDataSource(filePath)
-            @Suppress("DEPRECATION") player.setVolume(0f, 1f)
+            @Suppress("DEPRECATION") player.setVolume(0f, volume.coerceIn(0f, 1f))
             player.setOnCompletionListener { stopVoiceNote(); onCompleted() }
             player.setOnErrorListener { _, _, _ -> stopVoiceNote(); onCompleted(); true }
             player.prepare()

@@ -704,7 +704,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val context = getApplication<Application>()
         val file = File(context.filesDir, "automatik_warnton.wav")
         if (!file.exists()) WavSynth.writeWarningChime(file)
-        engine.playVoiceNote(file.absolutePath) { }
+        // Halbe Lautstärke (User-Feedback: Gong in der Pause viel zu laut).
+        engine.playVoiceNote(file.absolutePath, volume = 0.5f) { }
     }
 
     /** Bricht die laufende Pause/Ansage ab und startet den nächsten Song sofort (Punkt 10). */

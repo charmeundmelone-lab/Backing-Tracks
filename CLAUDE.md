@@ -284,8 +284,11 @@ git show origin/apk-dist:LiveGigPlayer-release.apk > /tmp/LiveGigPlayer.apk
 
 ## Letzter Stand
 
-**Datum:** 2026-09-20  
-**Status:** `PLAN-ansage-im-set.md` (beide Schritte) umgesetzt, CI grün, **noch
+**Datum:** 2026-11-09 (Doku-Nachtrag; letzter Code-Stand 2026-10-31)  
+**Status:** Am 2026-10-31 zwei Show-Automatik-Fixes gebaut, CI grün (#389, #390),
+siehe Sprint-Eintrag "Automatik-Pause: richtiger Folgesong + leiserer Warnton"
+weiter unten. Ob diese beiden live getestet wurden, ist nicht dokumentiert. Davor
+(2026-09-20): `PLAN-ansage-im-set.md` (beide Schritte) umgesetzt, CI grün, **noch
 nicht live am Gerät getestet**. Ansage/Pause-Schnellzugriff im Set UND Player im
 Lyrics-Fenster (TODO 8) sind fertig, siehe Sprint-Eintrag "Ansage/Pause im Set +
 Player im Lyrics-Fenster (TODO 8): DONE (ungetestet)" weiter unten. Davor in
@@ -300,8 +303,16 @@ vom User bestätigt** ("funktioniert perfekt, so wie es soll"). Alle Schritte au
 `PLAN-show-automatik.md` (Teil 1-4) fertig, siehe Sprint-Eintrag "Show-Automatik:
 vollständige Umsetzung DONE" weiter unten für Details.  
 **Branch:** `main`  
-**Letzter Commit:** `365766d` — "Fix: CI-Build-Fehler durch falschen weight-Import"  
-**CI Build:** #387 (grün).  
+**Letzter Code-Commit:** `8df1ba4` — "Warnton in der Automatik-Pause auf halbe Lautstärke"  
+**CI Build:** #390 (grün).  
+**Branches auf GitHub (Stand 2026-11-09):** Entwickelt wird nur auf `main`. Daneben existieren:
+`apk-dist` (vom CI geschriebener Verteil-Branch mit der Release-APK, nicht anfassen),
+`marke-stabil-vor-multitrack` (Sicherungsmarke, siehe unten) und drei alte, nicht gemergte
+`claude/…`-Branches: `claude/plan-set-umschalten-schritt-1-lhq95r` (Juli, Set-Umschalten, 3 Commits
+vor `main`, Feature ist längst auf anderem Weg in `main`), `claude/read-current-md-file-7fy90m`
+(Juli, USB-Diagnose, 3 Commits vor `main`, Diagnose-Code liegt laut Korrektur 2026-08-02 auf `main`)
+und `claude/todo-implementation-56rjxc` (komplett in `main` enthalten). Die drei `claude/`-Branches
+sind Altlasten; löschen nur nach ausdrücklicher Freigabe durch den User.  
 **Sicherungsmarke:** Branch `marke-stabil-vor-multitrack` zeigt auf `9815137` — der gig-erprobte
 Stand vor dem Multitrack-Umbau. Daraus lässt sich jederzeit exakt diese APK neu bauen. (Tag-Push
 scheitert am Git-Proxy dieser Umgebung, deshalb ein Marker-Branch. Es wird weiterhin NUR auf `main`
@@ -343,6 +354,23 @@ Speicher im Download-Ordner, NICHT am Build. Signatur wurde gegengeprüft: APK-Z
 (SHA256 `EEF3D6…A74A`) ist identisch mit `app/debug.keystore` im Repo, unverändert seit 24.07.
 Faustregel für den User: Android braucht beim Update grob das 2–3-fache der APK-Größe (~60 MB) frei,
 alte APKs nach dem Installieren löschen.  
+
+### Automatik-Pause: richtiger Folgesong + leiserer Warnton (2026-10-31, Commits `e501868`, `8df1ba4`, CI #389/#390 grün, Live-Test nicht dokumentiert)
+
+- **Bug:** Nach Pause/Ansage der Show-Automatik lief der gerade fertige Song nochmal statt
+  des nächsten. Ursache: Der Übergang rief `skipNext(); forcePlay()`. `skipNext()` suchte den
+  Nachfolger neu und kehrte stumm zurück, wenn die Queue inzwischen leer war. `forcePlay()`
+  startete dann den fertigen Song erneut (`REPEAT_MODE_ONE`, stand schon wieder am Anfang).
+- **Fix (`PlayerViewModel.kt`):** Neue `advanceAfterAutomatik()`, genutzt vom normalen
+  Pausen-Ende und vom vorzeitigen Überspringen. Startet genau den beim Songende gemerkten
+  `pendingUpcomingSong`, in der frischen DB-Version (im Set geänderte Pause/Notizen gelten
+  sofort). Fehlt der Song oder ist er derselbe wie der aktuelle → Stopp mit Hinweis
+  "Kein nächster Song gefunden — Wiedergabe gestoppt" statt blindem Play.
+- **Warnton leiser (`AudioEngine.kt`, `PlayerViewModel.kt`):** `playVoiceNote()` hat einen
+  optionalen `volume`-Parameter (Default `1f`, Sprachnotizen unverändert). Der Warnton der
+  stillen Fallback-Pause spielt mit `0.5f`.
+- **Nächste Session:** Live testen. Set mit manueller Pause zwischen Song A und B → nach der
+  Pause muss B starten, nicht A. Dazu: Pause per Überspringen abbrechen → ebenfalls B.
 
 ### Ansage/Pause im Set + Player im Lyrics-Fenster (TODO 8): DONE (ungetestet) (2026-09-20, Commits `36b3a11`, `51be7a7`, `365766d`)
 
